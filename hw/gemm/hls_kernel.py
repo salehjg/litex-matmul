@@ -18,8 +18,9 @@ from litex.gen import *
 from litex.soc.interconnect.axi import AXIInterface
 from litex.soc.interconnect.csr import CSR, CSRStorage, CSRStatus, CSRField
 
-from litedram.frontend.axi import LiteDRAMAXI2NativeR, LiteDRAMAXI2NativeW
+from litedram.frontend.axi import LiteDRAMAXI2NativeR
 
+from axi_native import AxiWriteToNative
 from axi_perf import AxiPerfMonitor
 
 ARGS    = ["a", "b", "c", "size_n", "size_k", "size_m"]
@@ -102,11 +103,12 @@ class HlsGemmKernel(LiteXModule):
             self.axi[bundle] = axi
             # Only the direction the kernel uses: with both paths, the unused one is constant after the IP netlist is
             # linked, and Vivado leaves its distributed-RAM FIFO with driverless read-address pins (Route 35-13).
+            # Writes use AxiWriteToNative (axi_native.py): LiteDRAMAXI2NativeW's response FIFO hits the same issue.
             if mat in WRITES:
-                conv = LiteDRAMAXI2NativeW(axi, port, axi_w_buffer_depth, base_address=0)
+                conv = AxiWriteToNative(axi, port, fifo_depth=axi_w_buffer_depth)
             else:
                 conv = LiteDRAMAXI2NativeR(axi, port, axi_r_buffer_depth, base_address=0)
-            self.comb += conv.cmd_grant.eq(1)
+                self.comb += conv.cmd_grant.eq(1)
             setattr(self, f"axi2native_{mat}", ClockDomainsRenamer(cd)(conv))
             mon = AxiPerfMonitor(axi, run=busy, clear=start)
             setattr(self, f"perf_{mat}", ClockDomainsRenamer(cd)(mon))

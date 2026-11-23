@@ -519,6 +519,11 @@ in the plan). So the DSE can afford many builds.
       of the `LiteDRAMAXI2Native` on the read-only bundles (A, B). The unused direction is constant once the IP netlist is
       linked and Vivado leaves the LUTRAM read-address pins without a driver. **Fix:** only the used direction per
       bundle (`LiteDRAMAXI2NativeR` for A/B, `LiteDRAMAXI2NativeW` for C, `cmd_grant` = 1). Fast check OK; build 3 next.
+      **Build 3 (16:39–16:49):** A/B fixed, still `Route 35-13` on C's write-response FIFO (`LiteDRAMAXI2NativeW`):
+      its payload is constant (AWID 0, resp OKAY), Vivado drops the LUTRAM read side but keeps the cell. **Fix:**
+      `hw/gemm/axi_native.py` `AxiWriteToNative` (per-beat native commands, data+strobe FIFO, B responses from a
+      counter); simulation `hw/gemm/tests/test_axi_native.py` PASS (5 bursts 1–256 beats with gaps, 340 words, 5 B).
+      Build 4 next.
 - [ ] Full build of `default.json`: timing met, `reports/vivado.json` written
 
 ### Phase 5: end to end 🟡
