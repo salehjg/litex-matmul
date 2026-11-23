@@ -14,7 +14,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | ✅ 2026-11-23 14:09: round trips clean on both channels, 0.82/0.84 GB/s (optimisation pending) |
 | 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | 🟡 HLS csynth + IP export OK (est. 4.24 ns at 200 MHz); csim via Vitis and `HlsStep` integration pending |
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ✅ 2026-11-23 17:04: builds, meets timing at 200 MHz |
-| 5 | `gemm_runner` end to end, verified results and counters | 🟡 first GEMM verified (256³, 22.85 GFLOP/s); size sweep next |
+| 5 | `gemm_runner` end to end, verified results and counters | ✅ 2026-11-23 17:06: sizes 256³–2048³ + non-multiples verified, 23.4 GFLOP/s (91.5 % of peak), counters = analytic traffic |
 | 6 | `gemm_build.py` complete (stages, caching, manifest) | ⬜ |
 | 7 | `gemm_dse.py` + example campaigns | ⬜ |
 | 8 | README usage + final notes | ⬜ |
@@ -491,7 +491,7 @@ in the plan). So the DSE can afford many builds.
 - [x] hlslib with Vitis HLS 2026.1 synthesis: hlslib headers stay unmodified, but the kernel uses `hls::stream`
       instead of `hlslib::Stream` in synthesis (arrays of hlslib streams fail, HLS 214-177); DataPack etc. still hlslib
 
-### Phase 4: SoC integration 🟡
+### Phase 4: SoC integration ✅
 - [x] `hw/gemm/hls_kernel.py` (2026-11-23 14:15): `HlsGemmKernel`, Instance of `gemm_kernel_ip` generated from the
       csynth.xml port list (147 ports); `ap_ctrl_hs` (start held until `ap_ready`), active-low reset from the accel reset
       + `soft_reset` CSR; CSRs `gemm_{start,soft_reset,status(done,idle,busy),build_id,cycles,a,b,c,size_n,size_k,
@@ -527,7 +527,7 @@ in the plan). So the DSE can afford many builds.
       (21.6 %), FF 87041 (14.6 %), BRAM 238.5 tiles (25.0 %). Output `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/`.
 - [ ] Full build of `default.json`: timing met, `reports/vivado.json` written
 
-### Phase 5: end to end 🟡
+### Phase 5: end to end ✅
 - [x] `gemm_runner` written and compiling (2026-11-23 14:14, untested on hardware): `sw/gemm_host/src/gemm_kernel.{hpp,cpp}`
       (`GemmKernel`: args, start with CDC-safe status wait, cycles, measured accel Hz, all `gemm_perf_*` counters via an
       X-list from the build's csr.h; compiled in only if the build has the kernel), `tools/gemm_runner.cpp` (seeded
@@ -539,8 +539,26 @@ in the plan). So the DSE can afford many builds.
       `scripts/gemm_run.py build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5 --program --sizes 256x256x256 --verify full`:
       the whole bring-up (program, rescan, driver, DDR calibration after the driver, host tools) ran by itself, 29 s.
       Only the usual JTAG-reload AER lines; no UnxCmplt at the probe this time.
-- [ ] Correct results for several sizes, both memory maps
-- [ ] Counter bytes match analytic traffic
+- [x] **Size sweep (17:05), all verified** (full verification up to ~1 M entries, sampled 4098 for 2048³), 2 reps each,
+      repeatable to a few dozen cycles; `results/f32_pe8x8_t128x128-4e52e7f5/runs.jsonl`:
+
+      | N×K×M | kernel ms | GFLOP/s | % of 25.6 peak | note |
+      |---|---|---|---|---|
+      | 256³ | 1.469 | 22.85 | 89 | |
+      | 512³ | 11.56 | 23.22 | 91 | |
+      | 1024³ | 91.95 | 23.35 | 91 | |
+      | 2048³ | 733.5 | 23.42 | 91.5 | |
+      | 1000×1008×1040 | 101.8 | 20.59 | 80 | partial tiles |
+      | 300×512×128 | 2.17 | 18.12 | 71 | partial tiles |
+      | 257×256×272 | 3.30 | 10.85 | 42 | 257 rows = 3 row tiles of 128 |
+
+      Max relative error 1.3–2.9e-07 (tolerance 4·K·eps·Σ|ab|). End-to-end for 2048³: 796 ms (kernel 733 ms + DMA at
+      0.81/0.86 GB/s). Only memory map a=ch0,b=ch1,c=ch1 tested so far (the map is a build-time knob).
+- [x] **Counters match analytic traffic** (1024³): A read 32 MiB = N·K·4·(M/128) ✓, B read 32 MiB = K·M·4·(N/128) ✓,
+      C written 4 MiB ✓. Observations: A is read in **single-beat bursts** (524288 AR, the transposing `ReadA` reads 64 B
+      strided pieces), latency min/avg/max 33/85/164 cycles, the kernel waits on A 27.5 % of cycles; B in 8-beat
+      bursts, avg latency 34 cycles; C: 120 k write-stall cycles. At PE 8×8 the kernel is compute-bound (91 % of peak);
+      the A read path becomes relevant for larger PE arrays (`transposed_a` or a wider transpose width are DSE knobs).
 
 ### Phase 6: build driver ⬜
 - [x] Pieces for the run flow (2026-11-23 16:28): `tcl/vivado/program.tcl` (JTAG load, checks DONE),
@@ -594,6 +612,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | GemmSoC, DDR calibrated after driver load | **DMA ↔ DDR round trip** | **OK** CH0+CH1, 64 MB: H2C 0.82 GB/s, C2H 0.84 GB/s (2 MB chunks) |
 | 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | Vivado timing / size | WNS +0.049 ns; 64.6k LUT, 87k FF, 238.5 BRAM tiles, 383 DSP |
 | 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | **GEMM 256³** | **verified, 1.469 ms, 22.85 GFLOP/s (89 % of peak)** |
+| 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | **GEMM 2048³** | **verified (sampled), 733.5 ms, 23.42 GFLOP/s (91.5 %)** |
 
 ## Open issues / decisions pending
 
