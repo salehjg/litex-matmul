@@ -106,11 +106,12 @@ Measured (kernel time, float32, 200 MHz, all results verified against a host ref
 | `default.json`: PE 8×8, tile 128 | 25.6 GFLOP/s | 23.4 (2048³, 91.5 %) | 64.6k / 383 / 238.5 |
 | PE 8×8, tile 256 | 25.6 | 24.6 (2048³, 95.9 %) | 64.7k / 383 / 239 |
 | PE 16×8, tile 256 | 51.2 | 47.2 (2048³, 92.2 %) | 94.6k / 703 / 303 |
-| `pe32x8_ta_t512.json`: PE 32×8, transposed A, tile 512×512 | 102.4 | **95.1** (4096³, 92.8 %) | 153.9k / 1320 / 430.5 |
+| `pe32x8_ta_t512.json`: PE 32×8, transposed A, tile 512×512 | 102.4 | 95.5 (8192³, 93.2 %) | 153.9k / 1320 / 430.5 |
+| `pe32x8_ta_t1024x512.json`: PE 32×8, transposed A, tile 1024×512 | 102.4 | **98.6** (8192³, 96.3 %) | 154.3k / 1320 / 654.5 |
 
 `transposed_a: true` means the host sends Aᵀ (`gemm_runner --transposed-a`, passed automatically from the build's
 config), so the kernel reads A in bursts instead of single strided words; this and larger tiles are what took PE 32×8
-from 82 to 95 GFLOP/s.
+from 82 to 98.6 GFLOP/s.
 
 ```
 git submodule update --init --recursive                     # submodules/gemm_hls (+ hlslib): reference only

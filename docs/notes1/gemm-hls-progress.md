@@ -707,9 +707,19 @@ in the plan). So the DSE can afford many builds.
       `ap_sync_reg_ProcessingElement_*_ap_ready` resets, 8 logic levels, slack +0.007 ns); PE 16×8: `cPipes` FIFO
       4.94 ns. Beating 200 MHz would need kernel changes (e.g. registering the dataflow control fan-out).
       (In the 512×512 build the overall WNS +0.031 ns is in the PCIe user clock domain, not the kernel.)
-- [ ] **Campaign `tiles_pe32_ta_1024`** (PE 32×8 tA, tiles 512×512 (reused build) and 1024×512, sizes
-      2048³/4096³/8192³): started 20:15. 1024×512 est. ~655 BRAM tiles of 955 (kernel 571 + SoC ~84).
-- [x] Phase 8 (docs), part 1 (20:16): README GEMM section has the measured-results table, the transposed-A knob and
+- [x] **Campaign `tiles_pe32_ta_1024` complete** (PE 32×8 tA, tiles 512×512 (reused build) and 1024×512, sizes
+      2048³/4096³/8192³; 20:15–20:44, `results/tiles_pe32_ta_1024/`). 1024×512 built in 1552 s, WNS +0.050 /
+      WHS +0.012 ns, LUT 154.3k, BRAM 654.5 tiles (69 %, as estimated), DSP 1320. All 12 runs verified.
+
+      | Tile N×M | 2048³ | 4096³ | 8192³ | A / B r_wait | 8192³ kernel / end to end |
+      |---|---|---|---|---|---|
+      | 512×512 | 94.31 (92.1 %) | 95.07 (92.8 %) | 95.45 (93.2 %) | 5.3 / 5.3 % | 11.52 s / 12.52 s |
+      | 1024×512 | 97.37 (95.1 %) | 98.18 (95.9 %) | **98.59 (96.3 %)** | 3.8 / 2.8 % | 11.15 s / 12.15 s |
+
+      **Best: 98.59 GFLOP/s** (1024×512, 8192³). The tile is now limited by BRAM (1024×1024 does not fit), and the
+      kernel is within 4 % of its peak. At 8192³ the DMA (768 MB in, 256 MB out at 0.82–0.84 GB/s) is ~1 s of the
+      12.15 s end to end.
+- [x] Phase 8 (docs), part 1 (20:16): README GEMM section has the measured-results table (best config later `pe32x8_ta_t1024x512.json`), the transposed-A knob and
       the DDR placement; `configs/gemm/pe32x8_ta_t512.json` is the best measured config (same build id as the
       campaign build, so `gemm_build.py` on it reuses `build/gemm/soc/f32_pe32x8_t512x512_200mhz_tA-dc42aa19`).
 - [x] `gemm_runner` capacity check (was open): each matrix (C plus its C2H read slack) must end before the next
@@ -765,6 +775,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | pe_sweep, tile 256, 200 MHz | **best GEMM** | PE 8×8 24.56, PE 16×8 47.19, **PE 32×8 86.54 GFLOP/s** (1024³, 84.5 % of 102.4) |
 | 2026-11-23 | transposed_a, PE 32×8, tile 256 | **best GEMM** | **87.54 GFLOP/s** (2048³, 85.5 % of 102.4), A in 16-beat bursts |
 | 2026-11-23 | tiles_pe32_ta, PE 32×8 tA, tile 512×512 | **best GEMM** | **95.07 GFLOP/s** (4096³, 92.8 % of 102.4); 94.31 at 2048³ |
+| 2026-11-23 | tiles_pe32_ta_1024, PE 32×8 tA, tile 1024×512 | **best GEMM** | **98.59 GFLOP/s** (8192³, 96.3 % of 102.4); 97.37 at 2048³ |
 
 ## Open issues / decisions pending
 
@@ -787,6 +798,9 @@ in the plan). So the DSE can afford many builds.
   control), so the options there are a shorter stop delay in the generated driver copy, or a larger ring.
 
 ## Log
+
+### 2026-11-23 20:44 — tile 1024×512
+- PE 32×8 transposed A with 1024×512 tiles: 98.59 GFLOP/s at 8192³ (96.3 % of peak), 69 % BRAM, timing met.
 
 ### 2026-11-23 20:11 — larger tiles
 - Tile campaign for PE 32×8 transposed A done: 512×512 tiles reach 95.07 GFLOP/s at 4096³ (92.8 % of peak), up
