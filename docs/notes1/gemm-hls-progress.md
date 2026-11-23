@@ -387,7 +387,12 @@ in the plan). So the DSE can afford many builds.
 - [x] `hw/gemm/ddr_dma.py` (`PCIeDDRBridge`): 30 CSRs `ddr_dma_{sel,drained,clear,h2c_beats,h2c_dropped,c2h_beats}` +
       `ddr_dma_ch{0,1}_{writer,reader}_{base,length,enable,done,loop,offset}`. No separate Migen sim test (the
       hardware test with the C++ tool covers it; a sim would need a DRAM model); noted as a deviation from the plan.
-- [ ] Full build of `GemmSoC`
+- [x] Bridge fix before the first hardware test (13:55): drop H2C data *before* the 128→512 converter while the selected
+      writer is not running and hold the converter in reset then (a transfer stopped mid-stream must not leave a
+      partial DDR word for the next one, and stale data must never wait in front of a writer that starts later);
+      the C2H converter is in reset while its reader is disabled. C2H transfers are at least 2 DMA buffers (after a
+      table reset `loop_status` reads (0, 0) both before and after descriptor 0 retires).
+- [ ] Full build of `GemmSoC` (the first one, started 13:47, has the old bridge; rebuild after it)
 - [ ] `sw/gemm_host/ddr_dma_test`: CH0 and CH1 write/read-back clean, GB/s recorded
 - [ ] `ddr_init.py` passes without a CPU
 
