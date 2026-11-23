@@ -633,9 +633,32 @@ in the plan). So the DSE can afford many builds.
 - [x] Campaigns in `configs/dse/`: `hls_pe_tile` (HLS only, PN×tile_n×tile_m = 12 points), `pe_sweep` (PN 8/16/32,
       tile 256, 4 sizes), `clock_sweep` (150/200/250 MHz), `vivado_preset_sweep` (default/explore/aggressive),
       `size_sweep` (one build, 5×3×3 sizes). All dry-run OK.
-- [ ] **Campaign `pe_sweep` running** (started 2026-11-23 17:10, `results/pe_sweep/dse.log`): HLS reused for all three
-      points; `f32_pe8x8_t256x256_200mhz-e87d80b7` built (710 s, WNS +0.03 ns, WHS +0.013 ns, timing met);
-      PE 16×8 building at 17:28; PE 32×8 and the runs on the card follow.
+- [x] **Campaign `pe_sweep` complete** (2026-11-23 17:10–~18:15, unattended; `results/pe_sweep/{dse.log,builds.*,runs.*}`).
+      All three builds met timing, all 24 runs verified (sampled), every bring-up automatic (JTAG, rescan, driver,
+      DDR calibration, host tools), no host problems. Tiles 256×256, 200 MHz, default memory map:
+
+      | PE | Vivado build | WNS / WHS ns | LUT | FF | BRAM tiles | DSP |
+      |---|---|---|---|---|---|---|
+      | 8×8 | 710 s | +0.030 / +0.013 | 64.7k (21.7 %) | 87.1k | 239 | 383 |
+      | 16×8 | 932 s | +0.024 / +0.016 | 94.6k (31.7 %) | 133.3k | 303 | 703 |
+      | 32×8 | 1471 s | +0.035 / +0.013 | 154.2k (51.6 %) | 225.4k | 414.5 (43 %) | 1343 (70 %) |
+
+      (HLS overestimated LUTs: 216k for PE 32×8 vs 154k placed.)
+
+      | PE (peak) | 512³ | 1024³ | 2048³ | 1000×1008×1040 | A r_wait at 2048³ |
+      |---|---|---|---|---|---|
+      | 8×8 (25.6) | 24.28 (94.8 %) | 24.48 (95.6 %) | 24.56 (95.9 %) | 19.42 | 27.8 % |
+      | 16×8 (51.2) | 46.17 (90.2 %) | 46.90 (91.6 %) | 47.19 (92.2 %) | 37.22 | 53.5 % |
+      | 32×8 (102.4) | 84.10 (82.1 %) | **86.54 (84.5 %)** | 82.30 (80.4 %) | 68.67 | **93.4 %** |
+
+      GFLOP/s (% of peak), kernel time only. 2048³ end-to-end incl. DMA: 763 / 427 / 272 ms. Max relative error
+      ≤ 2.6e-07. Larger tiles help PE 8×8 (95.9 % vs 91.5 % at 128×128).
+      **Bottleneck: the A read path.** The transposing `ReadA` reads A in single 64-byte strided beats; the share of
+      cycles the kernel waits for A data grows with the PE count (28 → 54 → 93 % at 2048³), and A's average read
+      latency grows with K (62 → 85 → 130 cycles for K = 512 → 1024 → 2048, more DRAM page misses for the K-strided
+      accesses). B (8-beat bursts) waits 4.5–15 %, C writes stall ≤ 3 %.
+      **Next knob:** `kernel.transposed_a = true` (host sends Aᵀ, the kernel reads it with bursts, no on-chip
+      transpose); needs `gemm_runner` to transpose A when the build has it (to do), then rerun PE 32×8.
 - [ ] Open: `gemm_runner` should reject sizes that do not fit the memory map (see "DDR memory map" above).
 - [x] **Campaign `hls_pe_tile` run (17:08–17:10, 4 HLS jobs in parallel, 2.7 min for 12 points)**,
       `results/hls_pe_tile/builds.{jsonl,csv}`. All OK points estimate 4.20–4.24 ns at the 5 ns target. Resources:
@@ -684,6 +707,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | Vivado timing / size | WNS +0.049 ns; 64.6k LUT, 87k FF, 238.5 BRAM tiles, 383 DSP |
 | 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | **GEMM 256³** | **verified, 1.469 ms, 22.85 GFLOP/s (89 % of peak)** |
 | 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | **GEMM 2048³** | **verified (sampled), 733.5 ms, 23.42 GFLOP/s (91.5 %)** |
+| 2026-11-23 | pe_sweep, tile 256, 200 MHz | **best GEMM** | PE 8×8 24.56, PE 16×8 47.19, **PE 32×8 86.54 GFLOP/s** (1024³, 84.5 % of 102.4) |
 
 ## Open issues / decisions pending
 
@@ -698,6 +722,11 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 ~18:15 — PE sweep done
+- Three kernels (PE 8×8, 16×8, 32×8, tile 256) built, loaded and benchmarked unattended by `gemm_dse.py`; all
+  verified; best 86.5 GFLOP/s with PE 32×8. The A read path (single-beat transposing reads) is the bottleneck at
+  larger PE counts; next: `transposed_a`.
 
 ### 2026-11-23 17:05 — first GEMM on the FPGA
 - Kernel build needed two Vivado workarounds (Route 35-13 driverless LUTRAM nets in unused/constant AXI converter
