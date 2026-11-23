@@ -402,7 +402,11 @@ in the plan). So the DSE can afford many builds.
       BUILD_DIR=build/gemm_soc` → `build/gemm_soc/sw/ddr_dma_test` (needs that build's `driver/user/liblitepcie.a`).
 - GemmSoC driver built + loaded (13:48), `info` OK (identifier `... 13:39:51`, scratch OK); `ddr_dma_test` rebuilt
   against this build's final headers.
-- [ ] `ddr_dma_test` on hardware: CH0 and CH1 write/read-back clean, GB/s recorded. **First runs (13:48–14:05) fail:**
+- [x] **`ddr_dma_test` on hardware: CH0 and CH1 round trips clean** (2026-11-23 14:08, after `driver.sh load` →
+      `BUILD_DIR=build/gemm_soc scripts/ddr_init.sh` (driver path, 15 s, both PASS)): 1 MB random and 64 MB counter
+      pattern OK on both channels; single-word BISTs 0 errors; no AER/DMAR. Throughput with 2 MB chunks: H2C 0.82 GB/s,
+      C2H 0.84 GB/s (64 MB). The per-chunk DMA start/stop (the driver reprograms 256 descriptors over MMIO) dominates;
+      to optimise later. History of the debugging below. **First runs (13:48–14:05) failed:**
   - Mechanics work: `h2c_beats` = 16384 (1 MB), `c2h_beats` = 16384, `h2c_dropped` 1024 (ring repeats after `length`),
     no AER/DMAR, no timeouts. Speed with 1 MB chunks ≈ 0.57 GB/s H2C, 0.6 GB/s C2H; 4 MB ≈ 0.8 GB/s.
   - Data: counter pattern (`--pattern counter`) shows read word *i* = written word *i*+4 at the start (32 B shift),
@@ -533,6 +537,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | GemmSoC (no CPU, DDR bridge) | Vivado timing / size | WNS +0.080 ns; 25.5k LUT, 19.5k FF, 73.5 BRAM |
 | 2026-11-23 | GemmSoC, no CPU | DDR3 calibration + 1 GB BIST, both channels | PASS, 0 bad words, 7.11 GB/s write / 7.20 GB/s read |
 | 2026-11-23 | HLS `default.json` (f32 PE 8×8, tile 128) | csynth estimate | 4.236 ns (target 5 ns), DSP 381, BRAM18 313, FF 78k, LUT 68k, 33 s |
+| 2026-11-23 | GemmSoC, DDR calibrated after driver load | **DMA ↔ DDR round trip** | **OK** CH0+CH1, 64 MB: H2C 0.82 GB/s, C2H 0.84 GB/s (2 MB chunks) |
 
 ## Open issues / decisions pending
 
@@ -547,6 +552,12 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 14:08 (phase 2, DMA ↔ DDR works)
+- Root cause of the failing round trips: the LitePCIe driver probe resets the SoC (`CSR_CTRL_RESET`) and wipes the DDR
+  calibration done before it. `ddr_init.py` now calibrates through the driver; round trips clean on both channels.
+- Meanwhile (no hardware): HLS of the default config works (est. 4.24 ns at 5 ns) after two kernel changes
+  (`hls::stream` in synthesis, `ConvertWidthC` without the dynamic 512-bit index).
 
 ### 2026-11-23 13:25 (phase 1 closed for DMA, phase 2 started)
 - User decision: don't provoke the freeze; arm crash capture every boot, keep the IOMMU on, continue the plan.
