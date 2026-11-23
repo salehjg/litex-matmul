@@ -13,8 +13,8 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ✅ DMA works (13.43 Gb/s, 0 errors) after the S7 PHY RX byte-enable fix · ⚠️ host freeze cause still open (capture armed) |
 | 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | ✅ 2026-11-23 14:09: round trips clean on both channels, 0.82/0.84 GB/s (optimisation pending) |
 | 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | 🟡 HLS csynth + IP export OK (est. 4.24 ns at 200 MHz); csim via Vitis and `HlsStep` integration pending |
-| 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | 🟡 integrated, fast check OK; first full build running |
-| 5 | `gemm_runner` end to end, verified results and counters | ⬜ |
+| 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ✅ 2026-11-23 17:04: builds, meets timing at 200 MHz |
+| 5 | `gemm_runner` end to end, verified results and counters | 🟡 first GEMM verified (256³, 22.85 GFLOP/s); size sweep next |
 | 6 | `gemm_build.py` complete (stages, caching, manifest) | ⬜ |
 | 7 | `gemm_dse.py` + example campaigns | ⬜ |
 | 8 | README usage + final notes | ⬜ |
@@ -534,6 +534,11 @@ in the plan). So the DSE can afford many builds.
       float32 A/B, `--map a=chX,...`, A at its channel's 0, B 0 or 512 MB, C 0 or 1 GB if shared; verify full/sampled
       (4096 random entries + corners) with tolerance 4·K·eps·Σ|a·b|; text + `--json` line per rep incl. perf counters;
       `--expect-build-id`).
+- [x] **First GEMM on the FPGA (2026-11-23 17:05): 256×256×256 float32, full verification OK** (65536 entries, 0 bad,
+      max rel err 2.09e-07): 293718 cycles @ 200.000 MHz = 1.469 ms, **22.85 GFLOP/s = 89 % of the 25.6 GFLOP/s peak**.
+      `scripts/gemm_run.py build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5 --program --sizes 256x256x256 --verify full`:
+      the whole bring-up (program, rescan, driver, DDR calibration after the driver, host tools) ran by itself, 29 s.
+      Only the usual JTAG-reload AER lines; no UnxCmplt at the probe this time.
 - [ ] Correct results for several sizes, both memory maps
 - [ ] Counter bytes match analytic traffic
 
@@ -587,7 +592,8 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | GemmSoC, no CPU | DDR3 calibration + 1 GB BIST, both channels | PASS, 0 bad words, 7.11 GB/s write / 7.20 GB/s read |
 | 2026-11-23 | HLS `default.json` (f32 PE 8×8, tile 128) | csynth estimate | 4.236 ns (target 5 ns), DSP 381, BRAM18 313, FF 78k, LUT 68k, 33 s |
 | 2026-11-23 | GemmSoC, DDR calibrated after driver load | **DMA ↔ DDR round trip** | **OK** CH0+CH1, 64 MB: H2C 0.82 GB/s, C2H 0.84 GB/s (2 MB chunks) |
-| 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | Vivado timing / size | WNS +0.049 ns; 64.6k LUT, 87k FF, 238.5 BRAM tiles |
+| 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | Vivado timing / size | WNS +0.049 ns; 64.6k LUT, 87k FF, 238.5 BRAM tiles, 383 DSP |
+| 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | **GEMM 256³** | **verified, 1.469 ms, 22.85 GFLOP/s (89 % of peak)** |
 
 ## Open issues / decisions pending
 
@@ -602,6 +608,11 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 17:05 — first GEMM on the FPGA
+- Kernel build needed two Vivado workarounds (Route 35-13 driverless LUTRAM nets in unused/constant AXI converter
+  FIFOs): single-direction converters, own `AxiWriteToNative` for C. Build 4 meets timing at 200 MHz.
+- 256³ float32 verified on the card, 22.85 GFLOP/s (89 % of peak), fully automatic bring-up.
 
 ### 2026-11-23 16:28 (resumed)
 - Rebuild with the kernel (USER-port fix) running. The `synth_ip ... project mode` critical warning also appears for
