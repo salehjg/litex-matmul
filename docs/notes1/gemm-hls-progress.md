@@ -19,6 +19,54 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 7 | `gemm_dse.py` + example campaigns | ⬜ |
 | 8 | README usage + final notes | ⬜ |
 
+## DDR memory map: where the matrices are
+
+The card has two independent DDR3 channels, **CH0 and CH1, 2 GB each** (64-bit DDR3-1000, 512-bit native port).
+Addresses below are **byte addresses inside a channel** (0x0000_0000 … 0x7FFF_FFFF); there is no common address space
+across channels (CPU-less GemmSoC; the kernel's AXI masters and the host DMA bridge address one channel each).
+
+**Which channel each matrix is on** is fixed per build by `memory_map` in the build config (`configs/gemm/*.json`):
+`hw/gemm/gemm_soc.py` connects each kernel AXI master (A = `gmem0`, B = `gmem1`, C = `gmem2`) to a crossbar port of
+that channel. The host must use the same map: `scripts/gemm_run.py` / `gemm_dse.py` read it from the build's
+`config.resolved.json` and pass it to `gemm_runner --map`. Default (all builds so far):
+
+```
+memory_map: {"a": "ch0", "b": "ch1", "c": "ch1"}
+```
+
+**Where inside the channel** (`sw/gemm_host/tools/gemm_runner.cpp`):
+- A at offset 0 of its channel.
+- B at offset 0 of its channel, or at **0x2000_0000 (512 MB)** if it shares the channel with A.
+- C at offset 0 of its channel, or at **0x4000_0000 (1 GB)** if it shares the channel with A or B.
+
+With the default map this gives:
+
+| Matrix | Shape (float32, row-major) | Channel | Start | End (exclusive) | Size | Room before the next region |
+|---|---|---|---|---|---|---|
+| A | N × K | **CH0** | 0x0000_0000 | 4·N·K (rounded up to 64 B) | 4·N·K B | whole 2 GB channel |
+| B | K × M | **CH1** | 0x0000_0000 | 4·K·M (rounded up to 64 B) | 4·K·M B | 1 GB (C starts at 1 GB) |
+| C | N × M | **CH1** | 0x4000_0000 | 0x4000_0000 + 4·N·M | 4·N·M B | 1 GB (to the end of CH1) |
+
+Example 2048³: A = 16 MB at CH0 0x0000_0000–0x00FF_FFFF; B = 16 MB at CH1 0x0000_0000–0x00FF_FFFF; C = 16 MB at
+CH1 0x4000_0000–0x40FF_FFFF.
+
+Details that matter:
+- **Traffic per channel (default map):** CH0 carries only the A reads; CH1 carries the B reads and the C writes. For
+  1024³ the counters showed 32 MiB of A reads on CH0, and 32 MiB of B reads + 4 MiB of C writes on CH1.
+- **Host DMA lengths** are whole 64-byte DDR words (A and B are zero-padded to that). C is read back in whole 8 KB DMA
+  buffers (at least 2), so the DMA may read up to ~16 KB past the end of C. Harmless reads, but keep any other data out
+  of that slack.
+- **Kernel reads past A/B:** for N or M not a multiple of the 128-row/column tile, the kernel reads whole tiles of
+  A (and B), i.e. past the end of the matrix. Harmless (reads only), but A/B must not end within one tile of the
+  channel end. The kernel **writes only the valid N × M part of C** (`WriteC` checks the bounds).
+- **Calibration overwrites DDR:** `scripts/ddr_init.sh` runs a 1 GB BIST from address 0 on both channels, so any
+  data in the first 1 GB of either channel is destroyed. Calibrate first, then load matrices (the bring-up does this
+  order; every run re-sends A and B anyway).
+- **Capacity limits with the default map:** A ≤ 2 GB (N·K ≤ 512 M floats), B ≤ 1 GB (K·M ≤ 256 M floats),
+  C ≤ 1 GB (N·M ≤ 256 M floats). `gemm_runner` does not check these yet (open item).
+- The DMA bridge (`hw/gemm/ddr_dma.py`, `sw/gemm_host/src/ddr_dma.cpp`) uses the same per-channel byte addresses; the
+  host picks the channel with `ddr_dma_sel`.
+
 ## Phase checklists
 
 ### Phase 0: scaffolding ✅
@@ -585,6 +633,10 @@ in the plan). So the DSE can afford many builds.
 - [x] Campaigns in `configs/dse/`: `hls_pe_tile` (HLS only, PN×tile_n×tile_m = 12 points), `pe_sweep` (PN 8/16/32,
       tile 256, 4 sizes), `clock_sweep` (150/200/250 MHz), `vivado_preset_sweep` (default/explore/aggressive),
       `size_sweep` (one build, 5×3×3 sizes). All dry-run OK.
+- [ ] **Campaign `pe_sweep` running** (started 2026-11-23 17:10, `results/pe_sweep/dse.log`): HLS reused for all three
+      points; `f32_pe8x8_t256x256_200mhz-e87d80b7` built (710 s, WNS +0.03 ns, WHS +0.013 ns, timing met);
+      PE 16×8 building at 17:28; PE 32×8 and the runs on the card follow.
+- [ ] Open: `gemm_runner` should reject sizes that do not fit the memory map (see "DDR memory map" above).
 - [x] **Campaign `hls_pe_tile` run (17:08–17:10, 4 HLS jobs in parallel, 2.7 min for 12 points)**,
       `results/hls_pe_tile/builds.{jsonl,csv}`. All OK points estimate 4.20–4.24 ns at the 5 ns target. Resources:
 
