@@ -11,7 +11,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 |---|---|---|
 | 0 | Scaffolding: submodule, docs, `.gitignore`, README | ✅ 2026-11-23 |
 | 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ✅ DMA works (13.43 Gb/s, 0 errors) after the S7 PHY RX byte-enable fix · ⚠️ host freeze cause still open (capture armed) |
-| 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | ⬜ |
+| 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | 🟡 started 2026-11-23 13:25 |
 | 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | ⬜ |
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ⬜ |
 | 5 | `gemm_runner` end to end, verified results and counters | ⬜ |
@@ -326,9 +326,13 @@ retry fix works).
 - Freeze watch after the working DMA run (`misc/crash_debug/watch_host.sh 20 60 after_fixed_dma`, 13:03–13:23, crash
   capture armed): **no freeze**. Uptime 1 h 55 min at 13:23 with 3 bitstream loads, 3 DMA test runs (1 stalled,
   2 working) and 4 Vivado builds this boot.
-- **Open:** reproduce freeze #1's conditions with the stock-PHY probe build (`build/dma_probe/`, 11:45): several
-  *stalled* DMA tests in a row, CSR polling during a stalled test, driver left loaded. Needs the user present (it may
-  freeze the machine on purpose). Expected: 16 beats per completion,
+- **Decision (user, 2026-11-23 13:25): move on, watch passively.** The freezes are treated as a likely side effect of
+  the stalled DMA (now fixed), not provoked on purpose. **Rule for all further board work: run
+  `misc/crash_debug/arm_crash_capture.sh` once per boot and keep the IOMMU on**, so a new freeze leaves a pstore log
+  (`/var/lib/systemd/pstore/`). If one happens: stop, read the log, record it here.
+  Not done (kept for later if freezes return): freeze #1's conditions with the stock-PHY probe build
+  (`build/dma_probe/` from 11:45 or `--stock-phy`): several stalled DMA tests in a row, CSR polling during a stalled
+  test, driver left loaded. Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
 
 **Fix options for the stall** (option 1 is built and waiting for its hardware test):
@@ -357,7 +361,7 @@ Loaded at 11:51:37 (`python3 misc/dma_debug/dma_probe_soc.py --load` + `scripts/
 the 30–60 min in the README or the ~45 min I assumed (the plan's "about 50 min" came from the board notes; corrected
 in the plan). So the DSE can afford many builds.
 
-### Phase 2: DMA ↔ DDR ⬜
+### Phase 2: DMA ↔ DDR 🟡
 - [ ] `hw/gemm/gemm_soc.py` without CPU; `csr.csv` DDR names unchanged versus the base SoC
 - [ ] `hw/gemm/ddr_dma.py` + Migen sim test
 - [ ] `sw/gemm_host/ddr_dma_test`: CH0 and CH1 write/read-back clean, GB/s recorded
@@ -432,6 +436,10 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 13:25 (phase 1 closed for DMA, phase 2 started)
+- User decision: don't provoke the freeze; arm crash capture every boot, keep the IOMMU on, continue the plan.
+- Phase 2 started.
 
 ### 2026-11-23 13:23 (phase 1, freeze watch after working DMA)
 - 20 min watch after the working 10 s DMA run: no freeze. Asked the user whether to provoke freeze #1's conditions
