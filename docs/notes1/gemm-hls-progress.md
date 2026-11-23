@@ -287,7 +287,21 @@ Probe SoC with it: `python3 misc/dma_debug/dma_probe_soc.py --build --rx-be-fix`
 Verilog `m_axis_rx_tkeep` now goes to an unused `tkeep` net instead of the RX byte enables. Same CSR map as
 `build/dma_probe`. Driver built (`BUILD_DIR=build/dma_probe_fix scripts/driver.sh build`), not loaded.
 Loaded 12:54:36 (`--rx-be-fix --load` + rescan): Gen2 x4, BAR0 128 KB, `enable` = 1 right after the rescan (the udev
-retry fix works). **Next:** the same DMA test with probes. Expected: 16 beats per completion,
+retry fix works).
+
+**✅ Fix verified on hardware (2026-11-23 12:54:54, `misc/dma_debug/logs/20261123-125456_fix_mrrs512.json`).**
+`run_probe_test.py --build-dir build/dma_probe_fix --seconds 2`, IOMMU on:
+- `dma_test`: **13.43 Gb/s** loopback (≈1.68 GB/s per direction at the same time; Gen2 x4 is 16 Gb/s raw per
+  direction), TX 370497 / RX 370337 buffers, **0 errors**. That is far past the 128 × 256-buffer skip, so the data
+  *was* checked this time. 12852 IRQs.
+- Probe: 6552656 read requests of 512 B, all ended, 0 error completions, 0 bad tags. `rd_split_words` =
+  `rd_fifo_out` = `cmp_beats` = 209684992, so queued == dequeued; `pending_min` 0, `pending_max` 256. Completion mix:
+  len16 37726, len32 55525, len64 13040218, len128 0, len_other 37200. Average 15.92 beats per completion; the RX byte enables now end the TLPs right.
+- Controller clean afterwards (8 tags free, queues empty). No DMAR/AER.
+- Kernel log: "Reading too late / Writing too late, N buffers lost" from the driver: user space did not keep up
+  with the free-running loopback ring. A software pacing message, not a hardware fault.
+- **Next:** use `S7PCIEPHYRXBE` in `boards/dupcb/target.py` (and `--pack`), rebuild the base SoC, repeat; then
+  the freeze question (see the bisection). Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
 
 **Fix options for the stall** (option 1 is built and waiting for its hardware test):
@@ -374,6 +388,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | probe SoC, driver, MMIO only | freeze bisection step B | no freeze in 15.5 min, 0 IRQs |
 | 2026-11-23 | probe SoC, IOMMU on | DMA loopback + probes | 137 reqs × 512 B, 274 cpl × 256 B, **17 beats/cpl**, pending −2/req → stall |
 | 2026-11-23 | probe SoC + RX be fix | Vivado timing | WNS +0.029 ns, WHS +0.021 ns (met) |
+| 2026-11-23 | probe SoC + RX be fix, IOMMU on | **DMA loopback 2 s** | **13.43 Gb/s, 0 errors** (370k buffers), queued == dequeued |
 
 ## Open issues / decisions pending
 
@@ -388,6 +403,11 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 12:55 (phase 1, DMA fixed)
+- Step C passed (no freeze 19 min after a DMA test, through a Vivado run).
+- Fixed probe SoC loaded, DMA test: **13.43 Gb/s loopback, 0 errors**. Root cause of the stall confirmed and fixed:
+  S7 PHY 128-bit RX byte enables from `tkeep` instead of `rx_is_eof`.
 
 ### 2026-11-23 12:46 (phase 1, fix candidate built)
 - `S7PCIEPHYRXBE` written, simulated (8/8), committed; probe SoC built with it (`build/dma_probe_fix/`, timing met),
