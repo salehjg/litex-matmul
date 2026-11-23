@@ -219,7 +219,8 @@ a non-system user is deprecated (still works on systemd 262).
       build/dma_probe --seconds 2 --tag stepC_mrrs512`, then `driver.sh unload` at 12:34:59. Same stall as before
       (`0.00 Gbps, TX 135, RX 8, 0 errors`, 1 IRQ), no DMAR/AER. Counters explained below. Log:
       `misc/dma_debug/logs/20261123-123459_stepC_mrrs512.json`.
-- [ ] **C (wait part): 20 min watch after the test, driver unloaded** (freeze #2's conditions). Running from 12:35,
+- [x] **C (wait part): 20 min watch after the test, driver unloaded → no freeze** (freeze #2's conditions did not
+      reproduce: still fine at 12:53:49, 19 min after the test). Running from 12:35,
       log `misc/crash_debug/logs/*_stepC_after_dma_unloaded.log`. Includes a Vivado run 12:39:51–12:45:18 (the fixed
       probe build), like freeze #2. **No freeze at 12:45 (10 min after the DMA test)**; freeze #2 came at 13 min.
 - [ ] If C freezes: read `/var/lib/systemd/pstore/` after the reboot. If not: repeat C a few times (freeze #1 came
