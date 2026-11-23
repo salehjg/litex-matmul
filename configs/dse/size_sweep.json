@@ -1,8 +1,8 @@
 {
   "campaign": "size_sweep",
-  "base": "configs/gemm/default.json",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
   "build_grid": {},
-  "runtime_grid": {"n": [128, 256, 512, 1024, 2048], "k": [256, 1024, 4096], "m": [128, 512, 2048],
+  "runtime_grid": {"n": [256, 512, 1024, 2048, 4096], "k": [256, 1024, 4096], "m": [256, 1024, 4096],
                    "repetitions": 2, "warmup": 1, "verify": "sampled"},
   "stages": ["build", "run"]
 }
