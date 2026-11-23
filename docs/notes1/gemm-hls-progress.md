@@ -312,7 +312,9 @@ retry fix works).
   (12:39); a new default probe build will overwrite `build/dma_probe/` with the fixed PHY.
   Not packed yet: `setup.litex.du-pcb.py --pack` would need `boards/dupcb/s7pciephy_rx_be.py` added to `FILES`
   (open decision, see "Open issues").
-- Base SoC rebuild with the fix started 12:56 (`scripts/build.sh`, log `build/base_rxbe_build.log`).
+- Base SoC rebuilt with the fix: 12:56:22–13:01:44 (`scripts/build.sh`, log `build/base_rxbe_build.log`), identifier
+  `LiteX SoC on DU-PCB-001-003 2026-11-23 12:56:22`, timing met (WNS +0.049 ns, WHS +0.015 ns),
+  `m_axis_rx_tkeep` → unused `main_tkeep` net (fix present).
 - **Next:** load it, run `scripts/driver.sh dma-test` long enough to pass the 128-loop skip; then keep watching for
   freezes (capture armed). Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
@@ -402,6 +404,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | probe SoC, IOMMU on | DMA loopback + probes | 137 reqs × 512 B, 274 cpl × 256 B, **17 beats/cpl**, pending −2/req → stall |
 | 2026-11-23 | probe SoC + RX be fix | Vivado timing | WNS +0.029 ns, WHS +0.021 ns (met) |
 | 2026-11-23 | probe SoC + RX be fix, IOMMU on | **DMA loopback 2 s** | **13.43 Gb/s, 0 errors** (370k buffers), queued == dequeued |
+| 2026-11-23 | base SoC + RX be fix | Vivado timing | WNS +0.049 ns, WHS +0.015 ns (met) |
 
 ## Open issues / decisions pending
 
