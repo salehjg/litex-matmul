@@ -802,6 +802,14 @@ in the plan). So the DSE can afford many builds.
   **C2H fixed (20:50):** writer enabled once per `read()`: C2H 0.84 → **1.49 GB/s** (per chunk start 0.005, stop
   0.031 ms), verified with random and counter patterns at 1/3/37/64 MB on both channels, and GEMM with full
   verification (1008×1008×1040, 2048³, 4096×512×3008).
+- **H2C: decision for the user.** The remaining 1 ms per 2 MB chunk is `udelay(1000)` in
+  `litepcie_dma_reader_stop()` of the generated driver (`build/<id>/driver/kernel/main.c`, from deps/litepcie).
+  The reader keeps streaming the ring until it is stopped (the bridge drops the excess), so the wait lets in-flight
+  read completions land before `enable=0` resets the reader. Shortening it (e.g. to 100 µs, still ~5–10× the expected
+  completion latency) would give H2C ≈ 1.3 GB/s (saves ~16 ms at 2048³, ~64 ms at 4096³), but a completion arriving
+  after the reset could stall the PCIe path, the failure class behind the earlier host freezes. Not done unattended.
+  Safer variant: the bridge back-pressures once `length` is reached (instead of dropping), so the reader stops
+  issuing requests before the stop; needs a gateware change + rebuild as well as the driver patch.
 - **Found while testing (fixed):** sizes the kernel cannot handle gave wrong results without an error:
   4096×512×3000 failed verification (12.26 M of 12.29 M elements wrong) with the old and the new DMA code alike;
   M must be a multiple of the M bus word (16 floats), as gemm_hls `RunHardware.cpp` checks. `BuildCfg.size_multiples()`
