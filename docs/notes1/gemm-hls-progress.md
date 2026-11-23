@@ -401,7 +401,11 @@ in the plan). So the DSE can afford many builds.
       write, read back, compare, GB/s, `--json`). `Makefile` builds per SoC build: `make -C sw/gemm_host
       BUILD_DIR=build/gemm_soc` → `build/gemm_soc/sw/ddr_dma_test` (needs that build's `driver/user/liblitepcie.a`).
 - [ ] `ddr_dma_test` on hardware: CH0 and CH1 write/read-back clean, GB/s recorded
-- [ ] `ddr_init.py` passes without a CPU
+- [x] **`ddr_init.py` passes without a CPU** (2026-11-23 13:47:57–13:48:10, 13 s; `python3 boards/dupcb/ddr_init.py
+      --bar .../resource0 --build-dir build/gemm_soc`, log `build/gemm_soc/logs/ddr_init.log`): CH0 window 50 steps (893 ps), CK at +56 (6 s), CH1 window
+      80 steps (1429 ps), CK at +72; all lanes 0 failed tests / 0 bit errors; 1 GB BIST per channel, 0 bad words,
+      write 7.11 GB/s, read 7.20 GB/s. Result: CH0 PASS, CH1 PASS. (`scripts/ddr_init.sh` is fixed to `build/dupcb`;
+      for other builds call `ddr_init.py` with `--build-dir`.)
 
 ### Phase 3: kernel port + HLS step 🟡
 - [x] Sources copied verbatim to `kernels/gemm/` (2026-11-23 13:45; `src/`, `include/`, `tb/test_gemm.cpp` from
@@ -486,6 +490,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | base SoC + RX be fix | Vivado timing | WNS +0.049 ns, WHS +0.015 ns (met) |
 | 2026-11-23 | base SoC + RX be fix, IOMMU on | **DMA loopback 10 s** | **13.42–13.44 Gb/s, 0 errors**, ~2.0 M buffers each way |
 | 2026-11-23 | GemmSoC (no CPU, DDR bridge) | Vivado timing / size | WNS +0.080 ns; 25.5k LUT, 19.5k FF, 73.5 BRAM |
+| 2026-11-23 | GemmSoC, no CPU | DDR3 calibration + 1 GB BIST, both channels | PASS, 0 bad words, 7.11 GB/s write / 7.20 GB/s read |
 
 ## Open issues / decisions pending
 
