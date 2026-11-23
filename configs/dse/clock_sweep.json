@@ -1,0 +1,7 @@
+{
+  "campaign": "clock_sweep",
+  "base": "configs/gemm/default.json",
+  "build_grid": {"clocks.accel_mhz": [150, 200, 250]},
+  "runtime_grid": {"triples": [[1024, 1024, 1024]], "repetitions": 2, "verify": "sampled"},
+  "stages": ["hls", "build", "run"]
+}

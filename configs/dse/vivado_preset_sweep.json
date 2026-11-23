@@ -1,0 +1,7 @@
+{
+  "campaign": "vivado_preset_sweep",
+  "base": "configs/gemm/default.json",
+  "build_grid": {"vivado.preset": ["default", "explore", "aggressive"]},
+  "runtime_grid": {"triples": [[1024, 1024, 1024]], "repetitions": 1, "verify": "sampled"},
+  "stages": ["build", "run"]
+}

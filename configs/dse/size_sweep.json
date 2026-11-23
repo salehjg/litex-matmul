@@ -1,0 +1,8 @@
+{
+  "campaign": "size_sweep",
+  "base": "configs/gemm/default.json",
+  "build_grid": {},
+  "runtime_grid": {"n": [128, 256, 512, 1024, 2048], "k": [256, 1024, 4096], "m": [128, 512, 2048],
+                   "repetitions": 2, "warmup": 1, "verify": "sampled"},
+  "stages": ["build", "run"]
+}

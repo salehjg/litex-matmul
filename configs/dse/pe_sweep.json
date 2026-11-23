@@ -1,0 +1,52 @@
+{
+  "campaign": "pe_sweep",
+  "base": "configs/gemm/default.json",
+  "build_grid": {
+    "kernel.parallelism_n": [
+      8,
+      16,
+      32
+    ],
+    "kernel.memory_tile_size_n": [
+      256
+    ],
+    "kernel.memory_tile_size_m": [
+      256
+    ]
+  },
+  "runtime_grid": {
+    "triples": [
+      [
+        512,
+        512,
+        512
+      ],
+      [
+        1024,
+        1024,
+        1024
+      ],
+      [
+        2048,
+        2048,
+        2048
+      ],
+      [
+        1000,
+        1008,
+        1040
+      ]
+    ],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": [
+    "hls",
+    "build",
+    "run"
+  ],
+  "jobs": {
+    "hls": "auto"
+  }
+}

@@ -284,6 +284,18 @@ class BuildCfg:
     def build_id(self):
         return f"{self.name}-{self.config_hash()[:8]}"
 
+    def auto_name(self):
+        """Name from the parameters that usually vary (plan section 5 naming convention)."""
+        k = self.kernel
+        short = {"float": "f32", "half": "f16", "int32_t": "i32", "int16_t": "i16", "uint8_t": "u8"}[k.data_type]
+        name = (f"{short}_pe{k.parallelism_n}x{k.parallelism_m}_t{k.memory_tile_size_n}x{k.memory_tile_size_m}"
+                f"_{self.clocks.accel_mhz:g}mhz")
+        if k.transposed_a:
+            name += "_tA"
+        if self.vivado.preset != "default":
+            name += f"_{self.vivado.preset}"
+        return name
+
 
 # Helpers ----------------------------------------------------------------------------------------------------------
 

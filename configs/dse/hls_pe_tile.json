@@ -1,0 +1,7 @@
+{
+  "campaign": "hls_pe_tile",
+  "base": "configs/gemm/default.json",
+  "build_grid": {"kernel.parallelism_n": [8, 16, 32], "kernel.memory_tile_size_n": [128, 256], "kernel.memory_tile_size_m": [128, 256]},
+  "stages": ["hls"],
+  "jobs": {"hls": "auto"}
+}

@@ -576,9 +576,15 @@ in the plan). So the DSE can afford many builds.
 - [ ] Stamps: a rerun with no change skips everything; a Vivado-only change reuses the HLS IP
 - [ ] `manifest.json`, `reports/summary.json`
 
-### Phase 7: DSE ⬜
-- [ ] `scripts/gemm_dse.py`, `ResultStore` (CSV + JSONL, schema_version)
-- [ ] Campaigns: PE sweep, clock sweep, Vivado preset sweep, size sweep
+### Phase 7: DSE 🟡
+- [x] `scripts/gemm_dse.py` + `flow/gemmflow/results.py` (`ResultStore`: JSONL source of truth + regenerated CSV,
+      flattened keys, fixed leading columns, `schema_version` 1) (2026-11-23 17:15): grid expansion (dotted keys,
+      cross product), validation (invalid points recorded with reason), stages hls (parallel, jobs = min(cores/4,
+      free GB/3)) / build (sequential) / run (bring-up + sizes), `--resume`, `--dry-run`. Point names from the
+      parameters (`BuildCfg.auto_name()`: `f32_pe16x8_t256x256_200mhz[_tA][_preset]`), so identical points share builds.
+- [x] Campaigns in `configs/dse/`: `hls_pe_tile` (HLS only, PN×tile_n×tile_m = 12 points), `pe_sweep` (PN 8/16/32,
+      tile 256, 4 sizes), `clock_sweep` (150/200/250 MHz), `vivado_preset_sweep` (default/explore/aggressive),
+      `size_sweep` (one build, 5×3×3 sizes). All dry-run OK.
 - [ ] `--resume` after an interruption
 
 ### Phase 8: docs ⬜
