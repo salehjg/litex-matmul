@@ -362,6 +362,24 @@ the 30–60 min in the README or the ~45 min I assumed (the plan's "about 50 min
 in the plan). So the DSE can afford many builds.
 
 ### Phase 2: DMA ↔ DDR 🟡
+
+**Design notes (2026-11-23 13:35, from reading LiteDRAM/LitePCIe/driver code):**
+- DDR side: reuse LiteDRAM's `LiteDRAMDMAWriter` / `LiteDRAMDMAReader` with `with_csr=True` (base, length,
+  enable, done, loop, offset CSRs; address generated inside). One write port + one read port per channel.
+- Bridge (`hw/gemm/ddr_dma.py`): `pcie_dma0.source` (128 b) → `stream.Converter(128, 512)` → writer of the selected
+  channel; reader of the selected channel → `Converter(512, 128)` → `pcie_dma0.sink`. The host disables the DMA
+  loopback (it stays in the SoC for `dma_test`). Data that arrives while the selected writer is not in RUN is
+  **dropped** (the writer stops accepting in DONE, which would otherwise back up into PCIe). `drained` per channel =
+  writer done and its data FIFO empty (command and data leave together, so the writes are in the controller).
+- **Host side (driver loop mode):** the driver runs both DMA directions in loop mode over a 256 × 8 KB ring; the
+  hardware reader streams the ring from the moment it is enabled, filled or not. So host → DDR uses **zero-copy**
+  (mmap of the ring), fills the whole ring first, then enables the reader; the bridge takes `length` bytes and drops
+  the repeats; > 2 MB goes in 2 MB chunks. DDR → host: enable the DMA writer, start the bridge reader (lengths in
+  multiples of 8 KB so every descriptor completes), poll `pcie_dma0_writer_table_loop_status` (exact; the IRQ-based
+  counts only move every 32 buffers); the CSR read also flushes the posted writes ahead of it.
+- No CPU (`cpu_type=None`): CH0 stays `add_sdram` (its Wishbone port is idle without a CPU), so the CSR names stay
+  and `ddr_init.py` is unchanged. DDR init comes from the host only (`scripts/ddr_init.sh`).
+
 - [ ] `hw/gemm/gemm_soc.py` without CPU; `csr.csv` DDR names unchanged versus the base SoC
 - [ ] `hw/gemm/ddr_dma.py` + Migen sim test
 - [ ] `sw/gemm_host/ddr_dma_test`: CH0 and CH1 write/read-back clean, GB/s recorded
