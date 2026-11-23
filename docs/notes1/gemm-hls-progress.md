@@ -220,7 +220,8 @@ a non-system user is deprecated (still works on systemd 262).
       (`0.00 Gbps, TX 135, RX 8, 0 errors`, 1 IRQ), no DMAR/AER. Counters explained below. Log:
       `misc/dma_debug/logs/20261123-123459_stepC_mrrs512.json`.
 - [ ] **C (wait part): 20 min watch after the test, driver unloaded** (freeze #2's conditions). Running from 12:35,
-      log `misc/crash_debug/logs/*_stepC_after_dma_unloaded.log`.
+      log `misc/crash_debug/logs/*_stepC_after_dma_unloaded.log`. Includes a Vivado run 12:39:51–12:45:18 (the fixed
+      probe build), like freeze #2. **No freeze at 12:45 (10 min after the DMA test)**; freeze #2 came at 13 min.
 - [ ] If C freezes: read `/var/lib/systemd/pstore/` after the reboot. If not: repeat C a few times (freeze #1 came
       right after DMA tests with the driver still loaded), then MRRS 256/128 (`misc/dma_debug/set_mrrs.sh`).
 
@@ -276,7 +277,18 @@ a non-system user is deprecated (still works on systemd 262).
 - **"0 errors" in `dma_test` means nothing here**: it skips checking for the first 128 × 256 buffers ("Skip the first
   128 DMA loops"), and only 8 buffers ever arrived.
 
-**Fix options for the stall** (to decide; none applied yet):
+**Fix candidate built (2026-11-23 12:45).** `boards/dupcb/s7pciephy_rx_be.py` (`S7PCIEPHYRXBE`, commit `804148c`):
+the RX byte enables of an EOF beat come from `rx_is_eof` (DWs up to the end position), plus the DWs of a straddled
+next TLP (`rx_is_sof` at DW2); other beats keep `tkeep`. Simulation `misc/dma_debug/test_rx_be.py`: 8/8 cases pass
+(e.g. 256 B completion last beat, EOF at DW2 → `be = 0x0fff`). Not used by `target.py` yet.
+Probe SoC with it: `python3 misc/dma_debug/dma_probe_soc.py --build --rx-be-fix` → `build/dma_probe_fix/`
+(identifier `... 2026-11-23 12:39:51`), 12:39:51–12:45:18, timing met (WNS +0.029 ns, WHS +0.021 ns). In the
+Verilog `m_axis_rx_tkeep` now goes to an unused `tkeep` net instead of the RX byte enables. Same CSR map as
+`build/dma_probe`. Driver built (`BUILD_DIR=build/dma_probe_fix scripts/driver.sh build`), not loaded.
+**Next:** after the step C watch, load it, run the same DMA test with probes. Expected: 16 beats per completion,
+`pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
+
+**Fix options for the stall** (option 1 is built and waiting for its hardware test):
 1. **Fix the RX byte enables in a PHY subclass in this repo (recommended).** `S7PCIEPHY` instantiates the core in
    `do_finalize()` from `self.pcie_phy_params`, so a subclass can, before finalize, replace
    `o_m_axis_rx_tkeep` with a dummy and drive `rx_datapath.sink.be` itself from `rx_is_eof` (last beat: DWs up to the
@@ -359,6 +371,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | probe SoC | Vivado timing | WNS +0.033 ns, WHS +0.016 ns (met) |
 | 2026-11-23 | probe SoC, driver, MMIO only | freeze bisection step B | no freeze in 15.5 min, 0 IRQs |
 | 2026-11-23 | probe SoC, IOMMU on | DMA loopback + probes | 137 reqs × 512 B, 274 cpl × 256 B, **17 beats/cpl**, pending −2/req → stall |
+| 2026-11-23 | probe SoC + RX be fix | Vivado timing | WNS +0.029 ns, WHS +0.021 ns (met) |
 
 ## Open issues / decisions pending
 
@@ -373,6 +386,11 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 12:46 (phase 1, fix candidate built)
+- `S7PCIEPHYRXBE` written, simulated (8/8), committed; probe SoC built with it (`build/dma_probe_fix/`, timing met),
+  driver built. Step C watch: no freeze 10 min after the DMA test, through a Vivado run.
+- From now on the progress file is committed after every step (the host may freeze).
 
 ### 2026-11-23 (phase 1, stall root cause found)
 - User armed crash capture and installed the udev fix (12:18).
