@@ -527,6 +527,11 @@ in the plan). So the DSE can afford many builds.
 - [ ] Counter bytes match analytic traffic
 
 ### Phase 6: build driver ⬜
+- [x] Pieces for the run flow (2026-11-23 16:28): `tcl/vivado/program.tcl` (JTAG load, checks DONE),
+      `flow/gemmflow/board.py` (`Board.bring_up()`: program → rescan → driver build/load → `ddr_init.sh` (after the
+      driver) → host tools; logs in `<build>/logs/`), `scripts/gemm_run.py` (bring-up + `gemm_runner` per size with the
+      build's memory map and build id → `results/<build_id>/runs.jsonl` with metadata). `gemm_soc.py --gemm-config`
+      now writes `<build>/config.resolved.json`.
 - [ ] `scripts/gemm_build.py`: stages, `--force`, `--dry-run`
 - [ ] Stamps: a rerun with no change skips everything; a Vivado-only change reuses the HLS IP
 - [ ] `manifest.json`, `reports/summary.json`
@@ -579,6 +584,11 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 16:28 (resumed)
+- Rebuild with the kernel (USER-port fix) running. The `synth_ip ... project mode` critical warning also appears for
+  LiteX's own PCIe IP, which builds fine, so it is harmless.
+- Added the board bring-up automation (`gemmflow/board.py`, `scripts/gemm_run.py`, `tcl/vivado/program.tcl`).
 
 ### 2026-11-23 14:15 (stopped: usage limit) — where to resume
 - Done today after phase 1: phase 2 complete (DMA ↔ DDR qualified; the driver-probe SoC reset was the bug), phase 3

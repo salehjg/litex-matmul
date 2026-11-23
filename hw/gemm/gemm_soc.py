@@ -93,6 +93,12 @@ def main():
 
     builder = Builder(soc, **parser.builder_argdict)
     builder.csr_csv = os.path.join(builder.output_dir, "csr.csv")
+    if cfg is not None:  # Traceability: the exact config of this build, with its hashes (read by scripts/gemm_run.py).
+        import json
+        os.makedirs(builder.output_dir, exist_ok=True)
+        with open(os.path.join(builder.output_dir, "config.resolved.json"), "w") as f:
+            json.dump({"build_id": cfg.build_id(), "config_hash": cfg.config_hash(), "hls_hash": cfg.hls_hash(),
+                       "config": cfg.to_dict()}, f, indent=2)
     if args.build:
         builder.build(**parser.toolchain_argdict)
         phy = getattr(soc, "ddrphy1", None) or getattr(soc, "ddrphy", None)
