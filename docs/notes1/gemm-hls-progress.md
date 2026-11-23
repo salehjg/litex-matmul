@@ -456,6 +456,9 @@ in the plan). So the DSE can afford many builds.
       from the plan (gemm_hls was tested with Vitis 2021.1): arrays of `hlslib::Stream` objects indexed in the unrolled
       PE loop. Also found: **`vitis-run` exits 0 even when csynth fails**, so `VitisHls.run_tcl` now scans the log for
       `ERROR:` lines and raises `ToolError`.
+      **Fix (14:01):** in synthesis `Stream` is now `hls::stream<T, depth>` (native, supports arrays; `hls::stream<T,N>`
+      derives from `hls::stream<T>` so `Stream<T>&` parameters still bind); simulation keeps `hlslib::Stream`; call sites
+      `Push/Pop` → `write/read` (35). g++ simulation still passes. HLS attempt 2 started 14:02.
 - [ ] hlslib compatibility with Vitis HLS 2026.1 *synthesis* checked (simulation: OK unmodified)
 
 ### Phase 4: SoC integration ⬜
