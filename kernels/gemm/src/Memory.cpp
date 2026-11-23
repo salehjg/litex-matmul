@@ -334,21 +334,24 @@ ConvertWidthC_N:
   ConvertWidthC_M:
     for (unsigned j = 0; j < OuterTilesM(size_m) * kOuterTileSizeMMemory; ++j) {
 #ifdef MM_CONVERT_B
-    ConvertWidthB_Memory:
+      // litex-matmul: all compute packs of one memory word are read in one (unrolled) iteration with constant
+      // indices, II = number of packs, so one pack per cycle as before. Upstream's II=1 loop indexed the 512-bit
+      // pack dynamically between the stream read and the conditional write: Vitis HLS 2026.1 estimated 10.6 ns for
+      // that at a 5 ns target.
+      #pragma HLS PIPELINE II=kMemoryWidthM / ComputePackM_t::kWidth
+      #pragma HLS LOOP_FLATTEN
       MemoryPackM_t memoryPack;
+    ConvertWidthC_Memory:
       for (unsigned j = 0; j < kMemoryWidthM / ComputePackM_t::kWidth; ++j) {
-        #pragma HLS PIPELINE II=1
-        #pragma HLS LOOP_FLATTEN
+        #pragma HLS UNROLL
         const auto computePack = narrow.read();
-      ConvertWidthB_Compute:
+      ConvertWidthC_Compute:
         for (unsigned w = 0; w < ComputePackM_t::kWidth; ++w) {
           #pragma HLS UNROLL
           memoryPack[j * ComputePackM_t::kWidth + w] = computePack[w];
         }
-        if (j == kMemoryWidthM / ComputePackM_t::kWidth - 1) {
-          wide.write(memoryPack);
-        }
       }
+      wide.write(memoryPack);
 #else
       #pragma HLS PIPELINE II=1
       #pragma HLS LOOP_FLATTEN

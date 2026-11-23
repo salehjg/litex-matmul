@@ -22,6 +22,9 @@ see `LICENSE.md`). The upstream repository is kept unmodified in `submodules/gem
 The first commit of this directory is a verbatim copy. Every later change is listed here (newest first) and is a
 separate commit, so `git log -p kernels/gemm` shows the full diff against upstream.
 
+- `src/Memory.cpp` `ConvertWidthC`: the packs of one memory word are read in one unrolled iteration (constant
+  indices, `PIPELINE II = packs per word`) instead of a II=1 loop with a dynamic 512-bit index and a conditional
+  write (Vitis HLS 2026.1 estimated 10.6 ns for that path at a 5 ns target).
 - Streams for Vitis HLS 2026.1: in synthesis (`HLSLIB_SYNTHESIS`) `Stream` is an alias of `hls::stream<T, depth>`
   (`include/MatrixMultiplication.h`), because 2026.1 fails on arrays of `hlslib::Stream` objects (HLS 214-177,
   unresolved Phi node on aSplit/aPipes/bPipes). Simulation still uses `hlslib::Stream`. Call sites use `write()` /

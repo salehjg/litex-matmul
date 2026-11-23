@@ -458,7 +458,14 @@ in the plan). So the DSE can afford many builds.
       `ERROR:` lines and raises `ToolError`.
       **Fix (14:01):** in synthesis `Stream` is now `hls::stream<T, depth>` (native, supports arrays; `hls::stream<T,N>`
       derives from `hls::stream<T>` so `Stream<T>&` parameters still bind); simulation keeps `hlslib::Stream`; call sites
-      `Push/Pop` → `write/read` (35). g++ simulation still passes. HLS attempt 2 started 14:02.
+      `Push/Pop` → `write/read` (35). g++ simulation still passes.
+      **Attempt 2 (14:02, 33 s): csynth + IP export OK** (`build/gemm/hls/40084106d9c3/prj/sol/impl/ip`, component.xml).
+      Estimates: DSP 381, BRAM18 313, FF 79183, LUT 72947; latency undef (dynamic sizes); 147 RTL ports (m_axi
+      gmem0/1/2 with 512-bit data, 32-bit address, ap_ctrl_hs, a/b/c address and size ports). **Estimated clock 10.648 ns
+      vs 5 ns**: all modules are at 4.0–4.2 ns (> 3.65 ns budget with 27 % uncertainty, < 5 ns) except
+      `ConvertWidthC` (Memory.cpp:335): a 512-bit dynamic index between the stream read and a conditional write in an
+      II=1 loop. **Fix (14:06):** read the packs of one memory word in one unrolled iteration (II = packs per word);
+      simulation passes. Attempt 3 started.
 - [ ] hlslib compatibility with Vitis HLS 2026.1 *synthesis* checked (simulation: OK unmodified)
 
 ### Phase 4: SoC integration ⬜
