@@ -258,14 +258,35 @@ a non-system user is deprecated (still works on systemd 262).
   outstanding requests, no AER/DMAR), so the stall itself leaves nothing wedged. Whether the host freeze needs DMA
   at all is what the step C watch and repeats decide.
 
+**Deeper cause: the 17th beat comes from wrong RX byte enables in the S7 PHY (code reading, 2026-11-23 12:45).**
+- The 128-bit header extracter (`litepcie/tlp/depacketizer.py`, `_LitePCIeTLPHeaderExtracter`) *does* realign the
+  payload (output beat = previous beat's DW3 + current DW0..2). A 64-DW completion behind a 3-DW header = 67 DW =
+  17 input beats comes out as **16** beats, unless the last input beat claims a valid DW3: `tail_valid =
+  sink.be[12:16] != 0` then emits a "tail" beat holding that DW3. For 67 DW, lane 3 of the last beat is empty.
+- `litepcie/phy/s7pciephy.py` (128-bit) feeds `m_axis_rx.be` from the core's `m_axis_rx_tkeep` (line 359) and uses
+  `rx_is_eof` (`m_axis_rx_tuser[21:17]`) only for `last` (line 520). On the 7-series 128-bit interface the end
+  position is in `rx_is_eof[3:0]`, not in `tkeep`, so the last beat claims all 4 DWs → a spurious tail beat on every
+  TLP whose last beat isn't full → **17 beats per 256 B completion, the 17th carrying one garbage DW marked valid**.
+- Before `f4dbb63` ("tlp/depacketizer: preserve shifted packet tails", 2026-08-25) the extracter did not look at
+  `be` for tails, which is why the same PHY worked with 2026.04.
+- Consequences: (1) the reader's `pending_words` underflow → stall (above); (2) on equal PHY/DMA widths the reader
+  drops `be`, so each spurious beat would put 16 junk bytes after every 256 B into the DMA stream; (3) per-tag
+  completion buffers sized for 32 beats per 512 B request receive 34 (in-order arrival hides it; out-of-order would
+  deadlock).
+- **"0 errors" in `dma_test` means nothing here**: it skips checking for the first 128 × 256 buffers ("Skip the first
+  128 DMA loops"), and only 8 buffers ever arrived.
+
 **Fix options for the stall** (to decide; none applied yet):
-1. Pin LitePCIe to **2026.04** (before the completion-path rework) in `setup.litex.du-pcb.py` and rebuild. Simplest;
-   loses the 2026.08 fixes.
-2. Keep 2026.08 and correct the reader accounting: count queued words as the beats the completions will really take
-   (per completion TLP `ceil((header_offset + len) / beat)`, i.e. +1 per completion here) or dequeue by valid
-   payload (`be`) instead of by beat; and keep `be` on the equal-width path. Needs a LitePCIe patch kept in this repo
-   (e.g. `patches/litepcie/*.patch` applied by the setup script) and reported upstream.
-3. Workaround without changing LitePCIe: none clean (the accounting is internal to the reader).
+1. **Fix the RX byte enables in a PHY subclass in this repo (recommended).** `S7PCIEPHY` instantiates the core in
+   `do_finalize()` from `self.pcie_phy_params`, so a subclass can, before finalize, replace
+   `o_m_axis_rx_tkeep` with a dummy and drive `rx_datapath.sink.be` itself from `rx_is_eof` (last beat: DWs up to the
+   end position) and `rx_is_sof` (straddled next TLP in the upper half). No change to `deps/`; keeps 2026.08; fixes
+   all three consequences. Check: probe shows 16 beats per completion, `pending_min` ≥ 0, DMA runs at speed, and a
+   longer `dma_test` (past the 128-loop skip, a few seconds) checks data. Report upstream (LitePCIe).
+2. Pin LitePCIe to **2026.04** in `setup.litex.du-pcb.py`. Simplest, but drops the 2026.08 fixes, and the PHY bug
+   stays latent.
+3. Patch `deps/litepcie` (reader accounting or PHY) as a patch file applied by the setup script: only if 1 is not
+   enough.
 
 **Probe SoC build (2026-11-23 11:45–11:50, `build/dma_probe/`).** Identifier `LiteX SoC on DU-PCB-001-003
 2026-11-23 11:45:08`. Timing met: WNS +0.033 ns, TNS 0, WHS +0.016 ns. 37 `dma_probe_*` CSRs. `pcie_dma0` moved
@@ -362,6 +383,9 @@ in the plan). So the DSE can afford many builds.
   options written down (pin 2026.04, or patch the reader).
 - Fixed `watch_host.sh` (grep with no match under `pipefail` ended the script after one minute).
 - Step C 20-min watch running (driver unloaded since 12:34:59).
+- Code reading: the 17th beat is a spurious "tail" made by the reworked header extracter because the S7 PHY takes
+  the 128-bit RX byte enables from `tkeep` instead of `rx_is_eof`. Recommended fix: PHY subclass in this repo.
+  `dma_test`'s "0 errors" is meaningless for short runs (it skips the first 128 × 256 buffers).
 
 ### 2026-11-23 (phase 1, bisection step A passed, probe SoC ready)
 - Step A: our design on the card for 17 min without the driver, through a Vivado run: no freeze. Trigger is most
