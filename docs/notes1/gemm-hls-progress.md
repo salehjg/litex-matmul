@@ -406,7 +406,12 @@ in the plan). So the DSE can afford many builds.
       `test/TestSimulation.cpp`, `LICENSE.md`), `ORIGIN.md` written (upstream commits, file map, change list). The g++
       simulation needs `ap_int.h`/`ap_fixed.h`/`hls_stream.h` from `Vitis/common/technology/autopilot`.
 - [ ] Interface pragmas changed (offset=direct, ap_none, ap_ctrl_hs, 32-bit addresses, m_axi knobs)
-- [ ] `gemmflow/config.py`: dataclasses, validation, `Config.h` rendering, hashes
+- [x] `flow/gemmflow/config.py` (2026-11-23 13:50): dataclasses `KernelCfg`/`MemoryMap`/`ClockCfg`/`HlsCfg`/
+      `VivadoCfg`/`SocCfg`/`BuildCfg`; unknown keys rejected; every gemm_hls CMake/`static_assert` rule checked
+      (plus the transpose warning and a rough DSP budget); Vivado presets resolved (`max_threads` auto = min(8, nproc));
+      `render_config_h()` fills `Config.h.in` incl. nested placeholders; `config_hash`, `hls_hash` (kernel + clocks +
+      hls + kernel source tree), `build_id` = `<name>-<hash8>`. `configs/gemm/default.json` (f32, PE 8×8, tile 128,
+      peak 25.6 GFLOP/s at 200 MHz) loads clean; negative cases (PM=3, tile_m=100, unknown key, bad type) rejected.
 - [ ] g++ simulation test passes (including non-tile-multiple sizes)
 - [ ] `tcl/hls/run_hls.tcl` + `HlsStep` + `HlsReport`; csynth + IP export of `default.json`
 - [ ] hlslib compatibility with Vitis HLS 2026.1 checked (fallback used? yes/no)
