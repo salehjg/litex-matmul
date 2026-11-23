@@ -635,7 +635,7 @@ in the plan). So the DSE can afford many builds.
 - [x] Campaigns in `configs/dse/`: `hls_pe_tile` (HLS only, PN×tile_n×tile_m = 12 points), `pe_sweep` (PN 8/16/32,
       tile 256, 4 sizes), `clock_sweep` (150/200/250 MHz), `vivado_preset_sweep` (default/explore/aggressive),
       `size_sweep` (one build, 5×3×3 sizes). All dry-run OK.
-- [x] **Campaign `pe_sweep` complete** (2026-11-23 17:10–~18:15, unattended; `results/pe_sweep/{dse.log,builds.*,runs.*}`).
+- [x] **Campaign `pe_sweep` complete** (2026-11-23 17:11–18:05, unattended; `results/pe_sweep/{dse.log,builds.*,runs.*}`).
       All three builds met timing, all 24 runs verified (sampled), every bring-up automatic (JTAG, rescan, driver,
       DDR calibration, host tools), no host problems. Tiles 256×256, 200 MHz, default memory map:
 
@@ -660,10 +660,10 @@ in the plan). So the DSE can afford many builds.
       latency grows with K (62 → 85 → 130 cycles for K = 512 → 1024 → 2048, more DRAM page misses for the K-strided
       accesses). B (8-beat bursts) waits 4.5–15 %, C writes stall ≤ 3 %.
       **Next knob:** `kernel.transposed_a = true` (host sends Aᵀ, the kernel reads it with bursts, no on-chip
-      transpose). Done (18:20): g++ simulation of the transposed path with PE 32×8 passes (256³, 512×256×512,
+      transpose). Done (~18:05): g++ simulation of the transposed path with PE 32×8 passes (256³, 512×256×512,
       272×512×256); `gemm_runner --transposed-a` sends Aᵀ (K × N; reference still uses A; N must be a multiple of
       16), passed automatically by `gemm_run.py` / `gemm_dse.py` from the config.
-- [x] **Campaign `transposed_a` complete** (18:21–~19:05, `results/transposed_a/`): both builds met timing (PE 16×8
+- [x] **Campaign `transposed_a` complete** (18:08–18:50, `results/transposed_a/`): both builds met timing (PE 16×8
       tA: 943 s, WNS +0.033, LUT 93.8k, DSP 701; PE 32×8 tA: 1485 s, WNS +0.038, LUT 153.5k, BRAM 414, DSP 1341),
       all 16 runs verified.
 
@@ -678,8 +678,10 @@ in the plan). So the DSE can afford many builds.
       (~0.7 GB/s per matrix at 87 GFLOP/s), so the remaining ~15 % at PE 32×8 is most likely per-tile fill/drain
       (A and B wait equally); next experiment: larger memory tiles (512) for PE 32×8 tA.
 - [ ] **Campaign `tiles_pe32_ta`** (PE 32×8, transposed A, tiles N×M ∈ {256, 512}², sizes 1024³/2048³/4096³):
-      HLS (19:07, all 4 OK, est 4.14–4.21 ns, DSP ~1321, BRAM18 662–694, LUT 214–223k: larger tiles cost almost no
-      BRAM); builds + runs started 19:08 with `--resume` (the 256×256 build is reused from `transposed_a`).
+      HLS (18:51–18:53, all 4 OK, est 4.14–4.21 ns, DSP ~1321, BRAM18 662–694, LUT 214–223k: larger tiles cost almost no
+      BRAM); builds + runs started 18:53 with `--resume` (the 256×256 build is reused from `transposed_a`).
+      At 19:02: 256×256 reused, 256×512 in Vivado; 512×256 and 512×512 follow (~25 min each), then the runs.
+      (Times in this file are from the result records; earlier entries had estimated times, corrected 19:02.)
 - [x] `gemm_runner` capacity check (was open): each matrix (C plus its C2H read slack) must end before the next
       region on its channel; e.g. B of 1.25 GB is rejected (`does not fit before 0x40000000`). Regression on PE 32×8:
       1024³ unchanged (86.53 GFLOP/s, full verification OK).
@@ -747,10 +749,10 @@ in the plan). So the DSE can afford many builds.
 
 ## Log
 
-### 2026-11-23 ~19:05 — transposed A
+### 2026-11-23 18:50 — transposed A
 - Transposed-A builds (PE 16×8, 32×8) benchmarked: PE 32×8 2048³ 82.3 → 87.5 GFLOP/s; A and B now wait equally.
 
-### 2026-11-23 ~18:15 — PE sweep done
+### 2026-11-23 18:05 — PE sweep done
 - Three kernels (PE 8×8, 16×8, 32×8, tile 256) built, loaded and benchmarked unattended by `gemm_dse.py`; all
   verified; best 86.5 GFLOP/s with PE 32×8. The A read path (single-beat transposing reads) is the bottleneck at
   larger PE counts; next: `transposed_a`.
