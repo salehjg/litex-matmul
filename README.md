@@ -99,7 +99,7 @@ read latency). JSON-driven build and design-space exploration. Plan:
 [`docs/notes1/gemm-hls-plan.md`](docs/notes1/gemm-hls-plan.md), status and measurements:
 [`docs/notes1/gemm-hls-progress.md`](docs/notes1/gemm-hls-progress.md).
 
-Measured (kernel time, float32, 200 MHz, all results verified against a host reference):
+Measured (kernel time, float32, all results verified against a host reference; 200 MHz unless noted):
 
 | Config | Peak | Best measured | LUT / DSP / BRAM tiles |
 |---|---|---|---|
@@ -107,11 +107,13 @@ Measured (kernel time, float32, 200 MHz, all results verified against a host ref
 | PE 8×8, tile 256 | 25.6 | 24.6 (2048³, 95.9 %) | 64.7k / 383 / 239 |
 | PE 16×8, tile 256 | 51.2 | 47.2 (2048³, 92.2 %) | 94.6k / 703 / 303 |
 | `pe32x8_ta_t512.json`: PE 32×8, transposed A, tile 512×512 | 102.4 | 95.5 (8192³, 93.2 %) | 153.9k / 1320 / 430.5 |
-| `pe32x8_ta_t1024x512.json`: PE 32×8, transposed A, tile 1024×512 | 102.4 | **98.6** (8192³, 96.3 %) | 154.3k / 1320 / 654.5 |
+| `pe32x8_ta_t1024x512.json`: PE 32×8, transposed A, tile 1024×512 | 102.4 | 98.6 (8192³, 96.3 %) | 154.3k / 1320 / 654.5 |
+| `pe32x8_ta_t1024x512_225mhz.json`: the same at **225 MHz**, Vivado preset `aggressive` | 115.2 | **110.9** (8192³, 96.2 %) | 152.0k / 1320 / 654.5 |
+| `default.json` at 250 MHz (`clocks.accel_mhz`): PE 8×8, tile 128 | 32.0 | 29.0 (1024³, 90.7 %) | 67.1k / 383 / 231 |
 
 `transposed_a: true` means the host sends Aᵀ (`gemm_runner --transposed-a`, passed automatically from the build's
 config), so the kernel reads A in bursts instead of single strided words; this and larger tiles are what took PE 32×8
-from 82 to 98.6 GFLOP/s.
+from 82 to 98.6 GFLOP/s, and 225 MHz (which only the `explore`/`aggressive` presets close) to 110.9.
 
 ```
 git submodule update --init --recursive                     # submodules/gemm_hls (+ hlslib): reference only
@@ -130,6 +132,9 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   (used by `gemm_run.py --program` and `gemm_dse.py`) does it in that order.
 - **Config:** `configs/gemm/*.json` (PE counts, tiles, bus widths, FIFO depths, m_axi bursts, memory map, accel clock,
   Vivado preset/directives/threads). Checked against every gemm_hls rule before any tool runs (`flow/gemmflow/config.py`).
+- **Timing:** a build that misses timing anywhere is recorded as `timing_failed` and never loaded. The PCIe Gen2 x8
+  core (500 MHz, inside the hard block) has only tens of ps of margin in every build and failed alone once; if a build
+  fails only there, rebuild with `vivado.preset: explore` or `aggressive`.
 - **Sizes:** N, K, M must be whole bus words for the build (64-byte words: K and M multiples of 16 floats, N too with
   transposed A); `gemm_runner` rejects other sizes. The kernel computes whole memory tiles, so matrices smaller than
   the tile run at a fraction of the peak (size sweep in the progress file).
@@ -137,7 +142,9 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
 - **DDR placement** (default `memory_map` a=ch0, b=ch1, c=ch1): A at CH0 0x0, B at CH1 0x0, C at CH1 0x4000_0000;
   limits A ≤ 2 GB, B ≤ 1 GB, C ≤ 1 GB, checked by `gemm_runner` (details in the progress file, "DDR memory map").
 - **Outputs:** `build/gemm/hls/<hls_hash>/`, `build/gemm/soc/<build_id>/` (config, manifest, reports/summary.json,
-  logs), `results/` (JSONL + CSV with build id, config hash, git sha, sizes, timing, counters). All git-ignored.
+  logs; `gemm_build.py <config> --report-only` rewrites the summary), `results/<campaign>/` (JSONL + CSV with build id,
+  config hash, git sha, sizes, timing, counters; `invocations.jsonl`; `gemm_dse.py --resume` continues an interrupted
+  campaign). All git-ignored.
 - **Layout:** `kernels/gemm/` (adapted HLS C++, changes in `ORIGIN.md`), `hw/gemm/` (SoC, DMA↔DDR bridge, kernel
   wrapper, AXI perf counters, tests), `tcl/` (HLS flow, Vivado hooks, JTAG program), `sw/gemm_host/` (C++: DMA,
   kernel control, `gemm_runner`, `ddr_dma_test`), `flow/gemmflow/` (Python package), `scripts/gemm_*.py`,
