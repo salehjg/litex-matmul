@@ -141,6 +141,9 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
 - **Host ↔ DDR transfers:** H2C 0.82 GB/s, C2H 1.49 GB/s (the driver's DMA stop costs 1 ms per 2 MB chunk on H2C).
 - **DDR placement** (default `memory_map` a=ch0, b=ch1, c=ch1): A at CH0 0x0, B at CH1 0x0, C at CH1 0x4000_0000;
   limits A ≤ 2 GB, B ≤ 1 GB, C ≤ 1 GB, checked by `gemm_runner` (details in the progress file, "DDR memory map").
+- **Tests (no tools, no card):** `.venv/bin/python -m unittest discover -s flow/tests` (config rules, size rules,
+  names, golden build ids, results, campaign expansion; < 1 s); gateware simulations
+  `.venv/bin/python hw/gemm/tests/test_axi_native.py` and `hw/gemm/tests/test_ddr_dma.py` (Migen, ~1 min).
 - **Outputs:** `build/gemm/hls/<hls_hash>/`, `build/gemm/soc/<build_id>/` (config, manifest, reports/summary.json,
   logs; `gemm_build.py <config> --report-only` rewrites the summary), `results/<campaign>/` (JSONL + CSV with build id,
   config hash, git sha, sizes, timing, counters; `invocations.jsonl`; `gemm_dse.py --resume` continues an interrupted

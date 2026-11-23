@@ -903,6 +903,13 @@ in the plan). So the DSE can afford many builds.
 ### Phase 8: docs 🟡
 - [ ] README usage section
 - [x] Final numbers and lessons: section "Summary and lessons" at the top (22:45)
+- [x] Unit tests for the Python flow (2026-11-24 00:55): `flow/tests/test_gemmflow.py`, stdlib `unittest`, 20 tests in
+      < 0.1 s, no tools or card. Covered: golden build ids of every `configs/gemm/*.json` (each matches a build dir on
+      disk; a hashing or default change would silently stop all reuse), Vivado knobs leave the HLS hash alone, auto
+      names, every rejection rule with its message, size multiples, presets and overrides, Config.h rendering,
+      ResultStore CSV (union of keys, leading columns), campaign expansion (names, a build shared across campaigns,
+      every campaign in `configs/dse/` expands), build reports (manifest only when a step ran). Gateware simulations
+      `hw/gemm/tests/test_axi_native.py` and `test_ddr_dma.py` re-run: PASS.
 
 ## Measurements
 
