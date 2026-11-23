@@ -18,12 +18,13 @@ from litex.gen import *
 from litex.soc.interconnect.axi import AXIInterface
 from litex.soc.interconnect.csr import CSR, CSRStorage, CSRStatus, CSRField
 
-from litedram.frontend.axi import LiteDRAMAXI2Native
+from litedram.frontend.axi import LiteDRAMAXI2NativeR, LiteDRAMAXI2NativeW
 
 from axi_perf import AxiPerfMonitor
 
 ARGS    = ["a", "b", "c", "size_n", "size_k", "size_m"]
 BUNDLES = {"gmem0": "a", "gmem1": "b", "gmem2": "c"}  # m_axi bundle -> matrix (kernels/gemm/src/Top.cpp)
+WRITES  = {"c"}                                        # matrices the kernel writes; A and B are read-only
 
 
 def _axi_field(axi, tail):
@@ -99,7 +100,13 @@ class HlsGemmKernel(LiteXModule):
             port = dram_ports[mat]
             axi = AXIInterface(data_width=port.data_width, address_width=32, id_width=1, clock_domain=cd)
             self.axi[bundle] = axi
-            conv = LiteDRAMAXI2Native(axi, port, w_buffer_depth=axi_w_buffer_depth, r_buffer_depth=axi_r_buffer_depth)
+            # Only the direction the kernel uses: with both paths, the unused one is constant after the IP netlist is
+            # linked, and Vivado leaves its distributed-RAM FIFO with driverless read-address pins (Route 35-13).
+            if mat in WRITES:
+                conv = LiteDRAMAXI2NativeW(axi, port, axi_w_buffer_depth, base_address=0)
+            else:
+                conv = LiteDRAMAXI2NativeR(axi, port, axi_r_buffer_depth, base_address=0)
+            self.comb += conv.cmd_grant.eq(1)
             setattr(self, f"axi2native_{mat}", ClockDomainsRenamer(cd)(conv))
             mon = AxiPerfMonitor(axi, run=busy, clear=start)
             setattr(self, f"perf_{mat}", ClockDomainsRenamer(cd)(mon))

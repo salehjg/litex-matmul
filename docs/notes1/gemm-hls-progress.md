@@ -514,6 +514,11 @@ in the plan). So the DSE can afford many builds.
       user ports but the packaged IP has none. Fixed in `hls_kernel.py` (skip `m_axi_*USER`); **rebuild not run yet**.
       Also: `CRITICAL WARNING [Vivado 12-5447] synth_ip is not supported in project mode` (from import_hls_ip.tcl);
       check whether the IP then synthesizes with the design (it should) or drop `synth_ip` from the Tcl.
+      **Build 2 (16:27–16:38):** synth + place OK (LUT 65438 = 21.9 %, FF 88266 = 14.8 %, BRAM 294.5 tiles = 30.8 %),
+      **route failed:** `ERROR: [Route 35-13] Driverless net ... storage_58/52 ... DPRA0..4`: the write-response FIFOs
+      of the `LiteDRAMAXI2Native` on the read-only bundles (A, B). The unused direction is constant once the IP netlist is
+      linked and Vivado leaves the LUTRAM read-address pins without a driver. **Fix:** only the used direction per
+      bundle (`LiteDRAMAXI2NativeR` for A/B, `LiteDRAMAXI2NativeW` for C, `cmd_grant` = 1). Fast check OK; build 3 next.
 - [ ] Full build of `default.json`: timing met, `reports/vivado.json` written
 
 ### Phase 5: end to end 🟡
