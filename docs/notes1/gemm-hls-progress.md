@@ -719,10 +719,20 @@ in the plan). So the DSE can afford many builds.
       **Best: 98.59 GFLOP/s** (1024×512, 8192³). The tile is now limited by BRAM (1024×1024 does not fit), and the
       kernel is within 4 % of its peak. At 8192³ the DMA (768 MB in, 256 MB out at 0.82–0.84 GB/s) is ~1 s of the
       12.15 s end to end.
-- [ ] **Campaign `memory_maps`** (PE 8×8 t128, maps A/B/C = CH0/CH0/CH0 and CH1/CH0/CH0; sizes 512³, 1024³,
-      1000×1008×1040, 2048³; full verification): started 20:47. Tests every matrix on
-      the channel it has not used yet and the shared-channel offsets (B at 512 MB, C at 1 GB). Build names now end
-      in `_m<a><b><c>` (channel digits) for non-default maps; default-map names are unchanged.
+- [x] **Campaign `memory_maps` complete** (20:47–21:13, `results/memory_maps/`): PE 8×8 t128 with maps A/B/C =
+      CH0/CH0/CH0 and CH1/CH0/CH0 (every matrix on the channel it had not used, plus the shared-channel offsets B at
+      512 MB and C at 1 GB). Both builds met timing (713 s, WNS +0.046; 730 s, WNS +0.033). **All 16 runs pass full
+      verification** (every element checked, max rel err ≤ 2.9e-07). Build names end in `_m<a><b><c>` for non-default
+      maps; default-map names are unchanged.
+
+      | Map A/B/C | 512³ | 1024³ | 1000×1008×1040 | 2048³ | B avg read latency at 2048³ |
+      |---|---|---|---|---|---|
+      | CH0/CH1/CH1 (default, earlier build) | — | — | — | 23.42 | — |
+      | CH0/CH0/CH0 | 23.17 | 23.27 | 20.53 | 23.35 | 46 cycles |
+      | CH1/CH0/CH0 | 23.21 | 23.35 | 20.59 | 23.42 | 39 cycles |
+
+      At PE 8×8 the kernel moves well under 1 GB/s, so sharing one channel costs only ~0.3 % (B waits 18 % instead
+      of 15 %, read latency 46 instead of 39 cycles). The map matters more for PE 32×8 (not measured).
 - [x] Phase 8 (docs), part 1 (20:16): README GEMM section has the measured-results table (best config later `pe32x8_ta_t1024x512.json`), the transposed-A knob and
       the DDR placement; `configs/gemm/pe32x8_ta_t512.json` is the best measured config (same build id as the
       campaign build, so `gemm_build.py` on it reuses `build/gemm/soc/f32_pe32x8_t512x512_200mhz_tA-dc42aa19`).
@@ -780,6 +790,8 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | transposed_a, PE 32×8, tile 256 | **best GEMM** | **87.54 GFLOP/s** (2048³, 85.5 % of 102.4), A in 16-beat bursts |
 | 2026-11-23 | tiles_pe32_ta, PE 32×8 tA, tile 512×512 | **best GEMM** | **95.07 GFLOP/s** (4096³, 92.8 % of 102.4); 94.31 at 2048³ |
 | 2026-11-23 | tiles_pe32_ta_1024, PE 32×8 tA, tile 1024×512 | **best GEMM** | **98.59 GFLOP/s** (8192³, 96.3 % of 102.4); 97.37 at 2048³ |
+| 2026-11-23 | memory_maps, PE 8×8 t128 | maps CH0/CH0/CH0, CH1/CH0/CH0 | all verified (full); 23.35 / 23.42 GFLOP/s at 2048³ |
+| 2026-11-23 | DDR DMA after C2H fix | 64 MB, both channels | H2C 0.82 GB/s, **C2H 1.49 GB/s** (was 0.84) |
 
 ## Open issues / decisions pending
 
@@ -822,6 +834,10 @@ in the plan). So the DSE can afford many builds.
   `gemm_runner --multiples N,K,M`, which rejects other sizes before any transfer.
 
 ## Log
+
+### 2026-11-23 21:13 — DMA read fix, size rules, memory maps
+- C2H 0.84 → 1.49 GB/s (writer enabled once per read); `gemm_runner` rejects sizes the kernel cannot handle;
+  the two untested memory maps verified on hardware. H2C stop-delay change left for the user to decide.
 
 ### 2026-11-23 20:44 — tile 1024×512
 - PE 32×8 transposed A with 1024×512 tiles: 98.59 GFLOP/s at 8192³ (96.3 % of peak), 69 % BRAM, timing met.
