@@ -378,6 +378,22 @@ Phases 1 and 3 do not depend on each other; phase 3 (HLS only) can start while b
 | ddr_init.py without a CPU (it used to run alongside the BIOS) | Check in phase 2 |
 | CH0 as `LiteDRAMCore` may change CSR names | Name the module `sdram`; compare `csr.csv` before and after |
 
+## 11b. As built: differences from this plan (2026-11-23)
+
+The design above is what was built, with these changes found on the way (details and evidence in the progress file):
+
+| Plan | As built | Why |
+|---|---|---|
+| LitePCIe `S7PCIEPHY` | `boards/dupcb/s7pciephy_rx_be.py` (`S7PCIEPHYRXBE`) in `target.py` | the stock PHY takes the 128-bit RX byte enables from `tkeep`; with LitePCIe 2026.08 every 256 B completion got a garbage 17th beat and the DMA reader stalled |
+| DDR calibrated once after the bitstream load | calibrate **after loading the driver**; `ddr_init.py --dev` uses the driver ioctl | the driver probe writes `CSR_CTRL_RESET`, which clears the calibration |
+| CH0 as a `LiteDRAMCore` named `sdram` | CH0 stays `add_sdram` (idle Wishbone port without CPU) | keeps CSR names and `ddr_init.py` unchanged with no `target.py` change; CSR region moves to 0x0 without a CPU |
+| Host DMA through liblitepcie as is | zero-copy rings, whole ring filled before the PCIe reader starts, 2 MB chunks, progress from the hardware loop status | the driver runs both directions in loop mode over a 256 × 8 KB ring |
+| `hlslib::Stream` everywhere | `hls::stream` in synthesis, hlslib in simulation; `ConvertWidthC` restructured | Vitis HLS 2026.1 fails on arrays of hlslib streams; a dynamic 512-bit index estimated 10.6 ns |
+| `LiteDRAMAXI2Native` per bundle | `LiteDRAMAXI2NativeR` for A/B, own `hw/gemm/axi_native.py` `AxiWriteToNative` for C | unused or constant-content converter FIFOs leave LUTRAMs with driverless read-address pins after the IP is linked (Vivado Route 35-13) |
+| `tcl/vivado/reports_json.tcl` | `flow/gemmflow/reports.py` parses LiteX's text reports | simpler, same data |
+| `vitis_hls` | `vitis-run --mode hls --tcl`; errors detected from the log | 2026.1 has no `vitis_hls` on PATH and `vitis-run` exits 0 when csynth fails |
+| (not planned) | `misc/` debug cases: DMA probe SoC, CSR peek, BIST probe, crash capture, XADC watch | the DMA stall and two host freezes |
+
 ## 12. References
 
 - `submodules/gemm_hls` (`README.md`, `kernel/`, `include/`, `scripts/Synthesis.tcl.in`, `scripts/build_manager.py`)
