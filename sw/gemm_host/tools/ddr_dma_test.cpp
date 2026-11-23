@@ -277,6 +277,11 @@ int main(int argc, char **argv) {
                     std::printf(" (%zu bad 64-bit words, first at byte 0x%zx: wrote %016" PRIx64 " read %016" PRIx64 ")",
                                 bad, first_bad * 8, src[first_bad], dst[first_bad]);
                 std::printf("\n");
+                // Per-phase times per chunk (copy into/out of the ring, start, wait for data, stop).
+                for (const auto &[name, t] : {std::pair<const char *, const TransferStats &>{"H2C", w}, {"C2H", r}})
+                    std::printf("  %s per chunk (%u chunks): copy %.3f ms  start %.3f ms  wait %.3f ms  stop %.3f ms\n",
+                                name, t.chunks, t.copy_s * 1e3 / t.chunks, t.start_s * 1e3 / t.chunks,
+                                t.wait_s * 1e3 / t.chunks, t.stop_s * 1e3 / t.chunks);
                 if (!ok) diagnose(src, dst);
 #ifdef CSR_DDR_DMA_DBG_PATTERN_ADDR
                 print_watchers(card);

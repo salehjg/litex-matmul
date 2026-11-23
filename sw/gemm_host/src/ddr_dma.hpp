@@ -18,6 +18,10 @@ namespace gemm {
 struct TransferStats {
     size_t bytes   = 0;
     double seconds = 0.0;  // Wall time of the whole call (copies + DMA + polling).
+    // Where the time goes, summed over chunks: ring copy, DMA/bridge start (driver ioctl + CSR writes), waiting for
+    // the data, stop (driver ioctl + CSR writes).
+    double copy_s = 0.0, start_s = 0.0, wait_s = 0.0, stop_s = 0.0;
+    unsigned chunks = 0;
     double gbps() const { return seconds > 0 ? bytes / seconds / 1e9 : 0.0; }  // GB/s
 };
 
@@ -33,8 +37,8 @@ public:
     TransferStats read(unsigned channel, uint64_t ddr_addr, void *dst, size_t length);
 
 private:
-    void write_chunk(unsigned channel, uint64_t ddr_addr, const char *src, size_t length);
-    void read_chunk(unsigned channel, uint64_t ddr_addr, char *dst, size_t length);
+    void write_chunk(unsigned channel, uint64_t ddr_addr, const char *src, size_t length, TransferStats &st);
+    void read_chunk(unsigned channel, uint64_t ddr_addr, char *dst, size_t length, TransferStats &st);
     void check(unsigned channel, uint64_t ddr_addr, size_t length) const;
 
     Card  &card_;
