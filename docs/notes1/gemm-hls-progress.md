@@ -13,7 +13,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ✅ DMA works (13.43 Gb/s, 0 errors) after the S7 PHY RX byte-enable fix · ⚠️ host freeze cause still open (capture armed) |
 | 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | ✅ 2026-11-23 14:09: round trips clean on both channels, 0.82/0.84 GB/s (optimisation pending) |
 | 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | 🟡 HLS csynth + IP export OK (est. 4.24 ns at 200 MHz); csim via Vitis and `HlsStep` integration pending |
-| 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ⬜ |
+| 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | 🟡 integrated, fast check OK; first full build running |
 | 5 | `gemm_runner` end to end, verified results and counters | ⬜ |
 | 6 | `gemm_build.py` complete (stages, caching, manifest) | ⬜ |
 | 7 | `gemm_dse.py` + example campaigns | ⬜ |
@@ -491,11 +491,22 @@ in the plan). So the DSE can afford many builds.
 - [x] hlslib with Vitis HLS 2026.1 synthesis: hlslib headers stay unmodified, but the kernel uses `hls::stream`
       instead of `hlslib::Stream` in synthesis (arrays of hlslib streams fail, HLS 214-177); DataPack etc. still hlslib
 
-### Phase 4: SoC integration ⬜
-- [ ] `hw/gemm/hls_kernel.py` (Instance from `csynth.xml`)
-- [ ] `hw/gemm/axi_perf.py` + Migen sim test
-- [ ] `tcl/vivado/{project_settings,import_hls_ip,floorplan,reports_json,program}.tcl`
-- [ ] `--no-compile-gateware` check passes
+### Phase 4: SoC integration 🟡
+- [x] `hw/gemm/hls_kernel.py` (2026-11-23 14:15): `HlsGemmKernel`, Instance of `gemm_kernel_ip` generated from the
+      csynth.xml port list (147 ports); `ap_ctrl_hs` (start held until `ap_ready`), active-low reset from the accel reset
+      + `soft_reset` CSR; CSRs `gemm_{start,soft_reset,status(done,idle,busy),build_id,cycles,a,b,c,size_n,size_k,
+      size_m}`; CDC: start via `PulseSynchronizer`, quasi-static args/soft reset and status/counters via `MultiReg`.
+      Each m_axi bundle → LiteX `AXIInterface` (512 b, 32-bit addr, ID 1; AXI3 2-bit LOCK truncated, WID and user
+      signals dropped/tied) → `LiteDRAMAXI2Native` (w/r buffers 32/64) → `get_port(mode="both", clock_domain="accel")`
+      on the channel from `memory_map`.
+- [x] `hw/gemm/axi_perf.py`: `AxiPerfMonitor` per bundle (ar/aw/r/w/b counts, ar/aw/w stalls, r_wait, r_backpressure,
+      b_wait, rd_outstanding_sum, rd_lat sum/min/max via AR timestamp FIFO, ts_overflow); cleared at start, counting
+      while busy; exposed as `gemm_perf_<a|b|c>_<counter>`. No separate sim test yet.
+- [x] `tcl/vivado/import_hls_ip.tcl` (ip_repo_paths → update_ip_catalog → create_ip → generate_target → synth_ip),
+      hooked through `platform.toolchain.pre_synthesis_commands` with `::P(...)` set by `gemm_soc.py` (no Tcl braces:
+      LiteX `str.format()`s the hook commands). `project_settings`, `floorplan`, `reports_json`, `program` Tcl: later.
+- [x] `gemm_soc.py --gemm-config <json>`: accel clock from the config, kernel added (needs the HLS run of that config),
+      output `build/gemm_soc_<build_id>/`. Fast check OK: 59 `gemm_*` CSRs, `gemm_kernel_ip` black box, hook in the Tcl.
 - [ ] Full build of `default.json`: timing met, `reports/vivado.json` written
 
 ### Phase 5: end to end ⬜
