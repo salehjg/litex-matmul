@@ -323,8 +323,12 @@ retry fix works).
   IRQs. Kernel: only the AER lines of the JTAG reload (13:02:01) and 42 driver "too late" pacing notices.
 - `scripts/status.sh` (13:03, driver unloaded, BAR0 via `litex_server`, no password): identifier `... 12:56:22`,
   `accel_freq` 200000288 Hz, `clk50_freq` 50000158 Hz, `leds_out` 0.
-- Freeze watch after the working DMA run: `misc/crash_debug/watch_host.sh 20 60 after_fixed_dma` from 13:04 (crash
-  capture armed). Expected: 16 beats per completion,
+- Freeze watch after the working DMA run (`misc/crash_debug/watch_host.sh 20 60 after_fixed_dma`, 13:03–13:23, crash
+  capture armed): **no freeze**. Uptime 1 h 55 min at 13:23 with 3 bitstream loads, 3 DMA test runs (1 stalled,
+  2 working) and 4 Vivado builds this boot.
+- **Open:** reproduce freeze #1's conditions with the stock-PHY probe build (`build/dma_probe/`, 11:45): several
+  *stalled* DMA tests in a row, CSR polling during a stalled test, driver left loaded. Needs the user present (it may
+  freeze the machine on purpose). Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
 
 **Fix options for the stall** (option 1 is built and waiting for its hardware test):
@@ -428,6 +432,10 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 13:23 (phase 1, freeze watch after working DMA)
+- 20 min watch after the working 10 s DMA run: no freeze. Asked the user whether to provoke freeze #1's conditions
+  with the stock-PHY build.
 
 ### 2026-11-23 13:03 (phase 1, DMA works on the production SoC)
 - Base SoC rebuilt with `S7PCIEPHYRXBE` (timing met), loaded, driver rebuilt: DMA loopback 13.43 Gb/s, 0 errors over
