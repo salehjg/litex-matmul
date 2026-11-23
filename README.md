@@ -83,6 +83,11 @@ Adding accelerator logic: in `target.py`, take a DDR CH1 port with
 - **Verified on this card (2026-11-20):** keep-alive, PCIe (Gen2, x4 in this PC's slot), both 200 MHz clocks and
   the 50 MHz, both DDR3 channels (CH0 893 ps / CH1 1429 ps write window, 1 GB BIST clean, 7.2 GB/s).
   DDR3 VDDQ (1.35 or 1.5 V) is unmeasured; I/O is SSTL15 like the MIG design that calibrated on this card.
+- **PCIe DMA (verified 2026-11-23):** `target.py` uses `S7PCIEPHYRXBE` (`boards/dupcb/s7pciephy_rx_be.py`), not
+  LitePCIe's `S7PCIEPHY`. The stock PHY takes the 128-bit RX byte enables from `tkeep`; with LitePCIe 2026.08 that
+  adds a garbage beat to every read completion and the DMA reader stalls after ~64 KB. With the fix:
+  `scripts/driver.sh dma-test` loopback 13.4 Gb/s (Gen2 x4), 0 errors. Driver: `scripts/driver.sh build|load`;
+  one-time `sudo scripts/setup_permissions.sh` for password-less use. Keep the IOMMU on (`scripts/iommu/`).
 
 ## GEMM HLS accelerator (in progress)
 

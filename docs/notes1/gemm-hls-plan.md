@@ -368,7 +368,8 @@ Phases 1 and 3 do not depend on each other; phase 3 (HLS only) can start while b
 
 | Risk | Plan |
 |---|---|
-| The LitePCIe kernel module may not build on Linux 7.3 (Arch), or the DMA path may misbehave (never verified on this card) | Phase 1 is first for this reason. Fix in the generated copy and record any patch in the progress file. |
+| ~~The LitePCIe kernel module may not build on Linux 7.3 (Arch), or the DMA path may misbehave (never verified on this card)~~ | **Resolved in phase 1 (2026-11-23):** the module builds unchanged on 7.3.5; the DMA stalled because the stock S7 PHY takes the 128-bit RX byte enables from `tkeep` (LitePCIe 2026.08 regression). Fixed by `boards/dupcb/s7pciephy_rx_be.py`: 13.43 Gb/s loopback, 0 errors |
+| The host froze twice while debugging the DMA (2026-11-23), cause unknown, not reproduced by the bisection | Crash capture (`misc/crash_debug/`) armed for all board work; the IOMMU stays on; details in the progress file |
 | hlslib @ a67e02f / gemm_hls (Vitis 2021.1) vs Vitis HLS 2026.1 | Fallback: copy and patch the needed headers (section 4.1). |
 | `vitis-run` Tcl API changes in 2026.1 | Verify on a tiny kernel first (phase 3) |
 | Timing at 200 MHz on -2L with large PE counts | `accel_mhz` and the presets are DSE knobs; floorplan option |

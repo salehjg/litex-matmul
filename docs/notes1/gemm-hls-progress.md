@@ -10,7 +10,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Scaffolding: submodule, docs, `.gitignore`, README | ✅ 2026-11-23 |
-| 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ⛔ **stall root cause found** (LitePCIe 2026.08 reader accounting); host freeze still being bisected (step C watch) |
+| 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ✅ DMA works (13.43 Gb/s, 0 errors) after the S7 PHY RX byte-enable fix · ⚠️ host freeze cause still open (capture armed) |
 | 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | ⬜ |
 | 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | ⬜ |
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ⬜ |
@@ -31,7 +31,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 - [x] `.gitignore` extended (results, HLS/Vivado scratch, host binaries)
 - [x] README: section pointing to the plan
 
-### Phase 1: host DMA bring-up ⛔ (DMA stalls, host locked up once)
+### Phase 1: host DMA bring-up ✅ DMA works · ⚠️ freeze cause open
 - [x] Base SoC full build (`scripts/build.sh`, 2026-11-23, **~6 min**: synth 1:31, place 0:47, route 0:47, bitstream 0:43): WNS +0.059 ns, WHS +0.012 ns, 0 failing
       endpoints; `build/dupcb/gateware/dupcb.bit`, `csr.csv`, `driver/` generated
 - [x] User tools built against the generated headers (`driver/user/litepcie_util`, `litepcie_test`)
