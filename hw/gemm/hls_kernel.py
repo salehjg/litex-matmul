@@ -112,6 +112,8 @@ class HlsGemmKernel(LiteXModule):
         params = {}
         for p in rtl_ports:
             name, d, bits = p["name"], p["dir"], p["bits"]
+            if name.startswith("m_axi_") and name.endswith("USER"):
+                continue  # In csynth.xml, but the packaged IP (component.xml) has no AXI user ports.
             key = ("i_" if d == "in" else "o_") + name
             if name == "ap_clk":
                 params[key] = ClockSignal(cd)

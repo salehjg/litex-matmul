@@ -509,7 +509,11 @@ in the plan). So the DSE can afford many builds.
       output `build/gemm_soc_<build_id>/`. Fast check OK: 59 `gemm_*` CSRs, `gemm_kernel_ip` black box, hook in the Tcl.
 - [ ] First full build with the kernel: started 2026-11-23 ~14:12 in the background
       (`python3 hw/gemm/gemm_soc.py --gemm-config configs/gemm/default.json --build --vivado-max-threads 8`, log
-      `build/gemm_soc_kernel_build.log`, output `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/`). Result not yet checked.
+      `build/gemm_soc_kernel_build.log`, output `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/`). **Failed (14:15):**
+      `ERROR: [Synth 8-11365] ... named port connection 'm_axi_gmemX_*USER' does not exist`: csynth.xml lists the AXI
+      user ports but the packaged IP has none. Fixed in `hls_kernel.py` (skip `m_axi_*USER`); **rebuild not run yet**.
+      Also: `CRITICAL WARNING [Vivado 12-5447] synth_ip is not supported in project mode` (from import_hls_ip.tcl);
+      check whether the IP then synthesizes with the design (it should) or drop `synth_ip` from the Tcl.
 - [ ] Full build of `default.json`: timing met, `reports/vivado.json` written
 
 ### Phase 5: end to end 🟡
@@ -580,7 +584,7 @@ in the plan). So the DSE can afford many builds.
 - Done today after phase 1: phase 2 complete (DMA ↔ DDR qualified; the driver-probe SoC reset was the bug), phase 3
   HLS csynth + IP export working (est. 4.24 ns), phase 4 integrated (fast check OK), phase 5 runner written.
 - **Resume here:**
-  1. Check `build/gemm_soc_kernel_build.log` (EXIT, WNS/WHS in `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/gateware/
+  1. Rebuild with the kernel (user-port fix applied) and check `build/gemm_soc_kernel_build.log` (EXIT, WNS/WHS in `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/gateware/
      dupcb_timing.rpt`, utilization). If the IP import or timing fails, fix there first.
   2. Board sequence (crash capture armed: `misc/crash_debug/arm_crash_capture.sh` after every boot; IOMMU on):
      `python3 hw/gemm/gemm_soc.py --gemm-config configs/gemm/default.json --load` → `scripts/pcie_rescan.sh` →
