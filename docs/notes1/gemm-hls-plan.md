@@ -395,6 +395,10 @@ The design above is what was built, with these changes found on the way (details
 | `tcl/vivado/reports_json.tcl` | `flow/gemmflow/reports.py` parses LiteX's text reports | simpler, same data |
 | `vitis_hls` | `vitis-run --mode hls --tcl`; errors detected from the log | 2026.1 has no `vitis_hls` on PATH and `vitis-run` exits 0 when csynth fails |
 | (not planned) | `misc/` debug cases: DMA probe SoC, CSR peek, BIST probe, crash capture, XADC watch | the DMA stall and two host freezes |
+| Timing met = all clocks | still all clocks; a build that fails anywhere is `timing_failed` and never loaded | the PCIe Gen2 x8 core path (500 MHz, hard block → its LOC'd RX BRAM) is within ±80 ps in every build and failed alone once; a PCIe-core timing error is the class of fault behind the host freezes |
+| Accel clock 200 MHz, higher only with kernel changes | PE 8×8 closes at 250 MHz (29.0 GFLOP/s); PE 32×8 misses 225 MHz by 41 ps (default preset) | with a tighter target HLS pipelines deeper even when its estimate does not change; only a routed build decides |
+| `manifest.json` + `reports/summary.json` per build from `gemm_build.py` | written by `gemm_build.py` and `gemm_dse.py` (`steps.write_build_reports`); `gemm_build.py --report-only` regenerates the summary | DSE builds had neither |
+| Result rows keyed by build id | run rows carry the full `build_id` plus `hw_build_id` (read from the bitstream); `--resume` matches on `config_hash`; `invocations.jsonl` per campaign | the hardware id overwrote the build id, so `--resume` never matched |
 
 ## 12. References
 
