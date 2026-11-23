@@ -26,3 +26,7 @@ usage_statistics_webtalk.*
 # host software binaries/objects
 sw/gemm_host/bin/
 sw/gemm_host/*.o
+# misc/ debug cases: generated logs
+misc/**/logs/
+# misc/ debug cases: keep the tools, not their output
+misc/**/logs/
