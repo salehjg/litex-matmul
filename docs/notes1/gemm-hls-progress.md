@@ -748,6 +748,9 @@ in the plan). So the DSE can afford many builds.
       M/512 (N = 256, M = 256: 11 GFLOP/s, an eighth of 88). K sets the per-tile fill/drain share (K = 256: 87.5,
       K = 4096: 98.2 GFLOP/s). So the best tile depends on the workload: for matrices ≤ 512 the 256×256 builds are
       faster. End to end, the DMA (H2C 0.82 GB/s) dominates below ~1024³.
+- [ ] **Campaigns `clock_sweep` (PE 8×8 t128 at 150/200/250 MHz) then `vivado_preset_sweep` (default/explore/
+      aggressive at 200 MHz)**: started 21:14, chained in one background job, logs in
+      `results/{clock_sweep,vivado_preset_sweep}/dse.log`. 5 builds (the 200 MHz default-preset build is shared).
 - [x] Phase 8 (docs), part 1 (20:16): README GEMM section has the measured-results table (best config later `pe32x8_ta_t1024x512.json`), the transposed-A knob and
       the DDR placement; `configs/gemm/pe32x8_ta_t512.json` is the best measured config (same build id as the
       campaign build, so `gemm_build.py` on it reuses `build/gemm/soc/f32_pe32x8_t512x512_200mhz_tA-dc42aa19`).
