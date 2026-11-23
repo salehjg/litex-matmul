@@ -55,7 +55,8 @@ scripts/build.sh                         # full bitstream (Vivado, ~30-60 min)
 scripts/load.sh                          # load over JTAG (volatile)
 scripts/pcie_rescan.sh                   # card in this PC: let Linux find it again
 scripts/status.sh                        # ident, measured clocks, LEDs
-scripts/ddr_init.sh                      # calibrate + test both DDR3 channels (after every load)
+scripts/ddr_init.sh                      # calibrate + test both DDR3 channels (after every load, and after
+                                         # scripts/driver.sh load: the driver's probe resets the SoC)
 scripts/console.sh                       # BIOS console (Ctrl-C to quit)
 scripts/sim.sh                           # SoC + firmware in Verilator (needs verilator)
 scripts/clean.sh

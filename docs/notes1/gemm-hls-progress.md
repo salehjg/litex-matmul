@@ -11,7 +11,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 |---|---|---|
 | 0 | Scaffolding: submodule, docs, `.gitignore`, README | ✅ 2026-11-23 |
 | 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ✅ DMA works (13.43 Gb/s, 0 errors) after the S7 PHY RX byte-enable fix · ⚠️ host freeze cause still open (capture armed) |
-| 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | 🟡 started 2026-11-23 13:25 |
+| 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | ✅ 2026-11-23 14:09: round trips clean on both channels, 0.82/0.84 GB/s (optimisation pending) |
 | 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | 🟡 HLS csynth + IP export OK (est. 4.24 ns at 200 MHz); csim via Vitis and `HlsStep` integration pending |
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ⬜ |
 | 5 | `gemm_runner` end to end, verified results and counters | ⬜ |
@@ -361,7 +361,7 @@ Loaded at 11:51:37 (`python3 misc/dma_debug/dma_probe_soc.py --load` + `scripts/
 the 30–60 min in the README or the ~45 min I assumed (the plan's "about 50 min" came from the board notes; corrected
 in the plan). So the DSE can afford many builds.
 
-### Phase 2: DMA ↔ DDR 🟡
+### Phase 2: DMA ↔ DDR ✅
 
 **Design notes (2026-11-23 13:35, from reading LiteDRAM/LitePCIe/driver code):**
 - DDR side: reuse LiteDRAM's `LiteDRAMDMAWriter` / `LiteDRAMDMAReader` with `with_csr=True` (base, length,
@@ -385,8 +385,10 @@ in the plan). So the DSE can afford many builds.
       0xf0000000): the generated driver (`CSR_BASE 0x0L`), `ddr_init.py` (reads `mems.csr.base`) and `litex_server`
       handle it; `misc/dma_debug/csr_peek.py` now reads the base from `csr.csv` too.
 - [x] `hw/gemm/ddr_dma.py` (`PCIeDDRBridge`): 30 CSRs `ddr_dma_{sel,drained,clear,h2c_beats,h2c_dropped,c2h_beats}` +
-      `ddr_dma_ch{0,1}_{writer,reader}_{base,length,enable,done,loop,offset}`. No separate Migen sim test (the
-      hardware test with the C++ tool covers it; a sim would need a DRAM model); noted as a deviation from the plan.
+      `ddr_dma_ch{0,1}_{writer,reader}_{base,length,enable,done,loop,offset}`. Simulation test
+      `hw/gemm/tests/test_ddr_dma.py` (LiteDRAM's `DRAMMemory` model, random gaps/back-pressure, drop path, aborted
+      transfer): PASS. Optional `with_debug` (C2H pattern generator + protocol watchers, `--ddr-dma-debug`), built
+      once (`build/gemm_soc_dbg/`), not needed in the end.
 - [x] Bridge fix before the first hardware test (13:55): drop H2C data *before* the 128→512 converter while the selected
       writer is not running and hold the converter in reset then (a transfer stopped mid-stream must not leave a
       partial DDR word for the next one, and stale data must never wait in front of a writer that starts later);
@@ -406,7 +408,9 @@ in the plan). So the DSE can afford many builds.
       `BUILD_DIR=build/gemm_soc scripts/ddr_init.sh` (driver path, 15 s, both PASS)): 1 MB random and 64 MB counter
       pattern OK on both channels; single-word BISTs 0 errors; no AER/DMAR. Throughput with 2 MB chunks: H2C 0.82 GB/s,
       C2H 0.84 GB/s (64 MB). The per-chunk DMA start/stop (the driver reprograms 256 descriptors over MMIO) dominates;
-      to optimise later. History of the debugging below. **First runs (13:48–14:05) failed:**
+      to optimise later. Qualification (14:08): 256 MB × 3 repetitions × both channels OK (H2C 0.82, C2H 0.84 GB/s,
+      `build/gemm_soc/logs/ddr_dma_256mb.log`); 64 MB at 0x40000000 and 0x7c000000 (top of the 2 GB) OK on both.
+      History of the debugging below. **First runs (13:48–14:05) failed:**
   - Mechanics work: `h2c_beats` = 16384 (1 MB), `c2h_beats` = 16384, `h2c_dropped` 1024 (ring repeats after `length`),
     no AER/DMAR, no timeouts. Speed with 1 MB chunks ≈ 0.57 GB/s H2C, 0.6 GB/s C2H; 4 MB ≈ 0.8 GB/s.
   - Data: counter pattern (`--pattern counter`) shows read word *i* = written word *i*+4 at the start (32 B shift),
