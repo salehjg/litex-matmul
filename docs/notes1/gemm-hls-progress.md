@@ -422,7 +422,12 @@ in the plan). So the DSE can afford many builds.
       N K M = 256 256 256, 257 256 272 (upstream's non-multiple case), 64 32 16, 300 512 128: all verified, each
       < 1 s. One change needed: `Utility.h` without hlslib's OpenCL header (see `kernels/gemm/ORIGIN.md`).
       hlslib `a67e02f` works unmodified with g++ 16 + Vitis 2026.1 headers in simulation.
-- [ ] `tcl/hls/run_hls.tcl` + `HlsStep` + `HlsReport`; csynth + IP export of `default.json`
+- [x] `tcl/hls/run_hls.tcl` (inputs only via `params.tcl`, D7), `flow/gemmflow/tools.py` (`Tool` → `VitisHls`,
+      `Vivado`: Xilinx env from `config.sh`, log file, `ToolError` with log path), `flow/gemmflow/hls.py` (`HlsRun`:
+      `Config.h` + `params.tcl` into `build/gemm/hls/<hls_hash[:12]>/`, stamp file, up-to-date check; `HlsReport`:
+      csynth.xml summary + RTL ports). Synthesis cflags as upstream: `-O3 -DMM_SYNTHESIS -DHLSLIB_SYNTHESIS
+      -DMM_DYNAMIC_SIZES -DHLSLIB_STREAM_TIMEOUT=16 -DHLSLIB_LEGACY_SDX=0` (2026-11-23 13:46)
+- [ ] First HLS run of `default.json` (csynth + IP export)
 - [ ] hlslib compatibility with Vitis HLS 2026.1 *synthesis* checked (simulation: OK unmodified)
 
 ### Phase 4: SoC integration ⬜
