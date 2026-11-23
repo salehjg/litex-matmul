@@ -130,6 +130,10 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   (used by `gemm_run.py --program` and `gemm_dse.py`) does it in that order.
 - **Config:** `configs/gemm/*.json` (PE counts, tiles, bus widths, FIFO depths, m_axi bursts, memory map, accel clock,
   Vivado preset/directives/threads). Checked against every gemm_hls rule before any tool runs (`flow/gemmflow/config.py`).
+- **Sizes:** N, K, M must be whole bus words for the build (64-byte words: K and M multiples of 16 floats, N too with
+  transposed A); `gemm_runner` rejects other sizes. The kernel computes whole memory tiles, so matrices smaller than
+  the tile run at a fraction of the peak (size sweep in the progress file).
+- **Host ↔ DDR transfers:** H2C 0.82 GB/s, C2H 1.49 GB/s (the driver's DMA stop costs 1 ms per 2 MB chunk on H2C).
 - **DDR placement** (default `memory_map` a=ch0, b=ch1, c=ch1): A at CH0 0x0, B at CH1 0x0, C at CH1 0x4000_0000;
   limits A ≤ 2 GB, B ≤ 1 GB, C ≤ 1 GB, checked by `gemm_runner` (details in the progress file, "DDR memory map").
 - **Outputs:** `build/gemm/hls/<hls_hash>/`, `build/gemm/soc/<build_id>/` (config, manifest, reports/summary.json,
