@@ -3,6 +3,7 @@
 //   ddr_dma_test [--channel 0|1|both] [--size-mb N] [--addr BYTES] [--seed S] [--repeat R] [--json]
 //
 // Exit status 0 only if every byte matched on every channel and repetition.
+#include <algorithm>
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
@@ -15,6 +16,10 @@
 
 #include "card.hpp"
 #include "ddr_dma.hpp"
+
+extern "C" {
+#include "csr.h"
+}
 
 using namespace gemm;
 
@@ -30,6 +35,7 @@ struct Options {
     bool     counter = false;     // --pattern counter: word i = (channel << 56) | (rep << 48) | i
     bool     read_twice = false;  // --read-twice: read back twice (C2H stability)
     bool     read_only_bist = false;  // --read-only-bist: only read; check the LiteDRAM BIST counter pattern
+    bool     c2h_pattern = false;     // --c2h-pattern: debug build only, C2H from the bridge's pattern generator
 };
 
 [[noreturn]] void usage(const char *argv0) {
@@ -54,6 +60,7 @@ Options parse(int argc, char **argv) {
         else if (a == "--pattern")   { std::string v = next(); if (v == "counter") o.counter = true; else if (v != "random") usage(argv[0]); }
         else if (a == "--read-twice") o.read_twice = true;
         else if (a == "--read-only-bist") o.read_only_bist = true;
+        else if (a == "--c2h-pattern") o.c2h_pattern = true;
         else usage(argv[0]);
     }
     return o;
@@ -160,6 +167,57 @@ int check_bist_counter(DdrDma &ddr, unsigned ch, uint64_t addr, size_t size) {
     return bad_words == 0 ? 0 : 1;
 }
 
+#ifdef CSR_DDR_DMA_DBG_PATTERN_ADDR
+// Debug build: print the bridge's protocol watcher counters.
+void print_watchers(Card &card) {
+    struct { const char *name; uint32_t addr; } w[] = {
+        {"rdata_overflow", CSR_DDR_DMA_DBG_RDATA_OVERFLOW_ADDR},
+        {"reader_change", CSR_DDR_DMA_DBG_READER_CHANGE_ADDR}, {"reader_vdrop", CSR_DDR_DMA_DBG_READER_VDROP_ADDR},
+        {"reader_beats", CSR_DDR_DMA_DBG_READER_BEATS_ADDR},
+        {"down_change", CSR_DDR_DMA_DBG_DOWN_CHANGE_ADDR}, {"down_vdrop", CSR_DDR_DMA_DBG_DOWN_VDROP_ADDR},
+        {"down_beats", CSR_DDR_DMA_DBG_DOWN_BEATS_ADDR},
+        {"sink_change", CSR_DDR_DMA_DBG_SINK_CHANGE_ADDR}, {"sink_vdrop", CSR_DDR_DMA_DBG_SINK_VDROP_ADDR},
+        {"sink_beats", CSR_DDR_DMA_DBG_SINK_BEATS_ADDR},
+    };
+    std::printf("  watchers:");
+    for (auto &x : w) std::printf(" %s=%u", x.name, card.csr_read(x.addr));
+    std::printf("\n");
+}
+
+// Debug build: C2H from the pattern generator (beat k = k in every 32-bit lane), straight into the PCIe DMA writer.
+int c2h_pattern(Card &card, size_t size) {
+    const size_t buffers = std::max<size_t>(2, (size + Card::kBufferBytes - 1) / Card::kBufferBytes);
+    const size_t bytes   = std::min(buffers * Card::kBufferBytes, Card::kRingBytes);
+    card.csr_write(CSR_DDR_DMA_DBG_CLEAR_ADDR, 1);
+    card.csr_write(CSR_DDR_DMA_DBG_PATTERN_ADDR, 0);
+    card.dma_writer_enable(true);
+    card.csr_write(CSR_DDR_DMA_DBG_PATTERN_LEN_ADDR, uint32_t(bytes));
+    card.csr_write(CSR_DDR_DMA_DBG_PATTERN_ADDR, 1);
+    const auto t0 = std::chrono::steady_clock::now();
+    while (card.c2h_buffers_done_hint() < bytes / Card::kBufferBytes) {
+        if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(2)) {
+            std::printf("C2H pattern: timeout (%" PRIu64 " buffers done)\n", card.c2h_buffers_done_hint());
+            break;
+        }
+    }
+    std::vector<uint32_t> buf(bytes / 4);
+    std::memcpy(buf.data(), card.c2h_ring(), bytes);
+    card.csr_write(CSR_DDR_DMA_DBG_PATTERN_ADDR, 0);
+    card.dma_writer_enable(false);
+    size_t bad = 0, first = SIZE_MAX;
+    for (size_t k = 0; k < bytes / 16; k++)
+        for (int l = 0; l < 4; l++)
+            if (buf[4 * k + l] != uint32_t(k)) { bad++; if (first == SIZE_MAX) first = k; }
+    std::printf("C2H pattern: %zu bytes, %zu bad 32-bit lanes", bytes, bad);
+    if (bad)
+        std::printf(" (first at beat %zu: %08x %08x %08x %08x)", first, buf[4 * first], buf[4 * first + 1],
+                    buf[4 * first + 2], buf[4 * first + 3]);
+    std::printf("\n");
+    print_watchers(card);
+    return bad ? 1 : 0;
+}
+#endif
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -169,6 +227,14 @@ int main(int argc, char **argv) {
         DdrDma ddr(card);
         std::printf("card: %s\n", card.identifier().c_str());
 
+        if (opt.c2h_pattern) {
+#ifdef CSR_DDR_DMA_DBG_PATTERN_ADDR
+            return c2h_pattern(card, opt.size);
+#else
+            std::fprintf(stderr, "--c2h-pattern needs a debug build (gemm_soc.py --ddr-dma-debug)\n");
+            return 2;
+#endif
+        }
         if (opt.read_only_bist) {
             int rc = 0;
             for (unsigned ch : opt.channels) rc |= check_bist_counter(ddr, ch, opt.addr, opt.size);
@@ -212,6 +278,9 @@ int main(int argc, char **argv) {
                                 bad, first_bad * 8, src[first_bad], dst[first_bad]);
                 std::printf("\n");
                 if (!ok) diagnose(src, dst);
+#ifdef CSR_DDR_DMA_DBG_PATTERN_ADDR
+                print_watchers(card);
+#endif
                 if (opt.json)
                     std::printf("{\"test\":\"ddr_dma\",\"channel\":%u,\"rep\":%u,\"bytes\":%zu,\"addr\":%" PRIu64
                                 ",\"seed\":%" PRIu64 ",\"h2c_s\":%.6f,\"h2c_gbps\":%.4f,\"c2h_s\":%.6f,\"c2h_gbps\":%.4f,"

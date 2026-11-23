@@ -507,10 +507,18 @@ in the plan). So the DSE can afford many builds.
       LiteX `str.format()`s the hook commands). `project_settings`, `floorplan`, `reports_json`, `program` Tcl: later.
 - [x] `gemm_soc.py --gemm-config <json>`: accel clock from the config, kernel added (needs the HLS run of that config),
       output `build/gemm_soc_<build_id>/`. Fast check OK: 59 `gemm_*` CSRs, `gemm_kernel_ip` black box, hook in the Tcl.
+- [ ] First full build with the kernel: started 2026-11-23 ~14:12 in the background
+      (`python3 hw/gemm/gemm_soc.py --gemm-config configs/gemm/default.json --build --vivado-max-threads 8`, log
+      `build/gemm_soc_kernel_build.log`, output `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/`). Result not yet checked.
 - [ ] Full build of `default.json`: timing met, `reports/vivado.json` written
 
-### Phase 5: end to end ⬜
-- [ ] `gemm_runner`: build-ID check, DMA in/out, start/poll, counters, JSON output
+### Phase 5: end to end 🟡
+- [x] `gemm_runner` written and compiling (2026-11-23 14:14, untested on hardware): `sw/gemm_host/src/gemm_kernel.{hpp,cpp}`
+      (`GemmKernel`: args, start with CDC-safe status wait, cycles, measured accel Hz, all `gemm_perf_*` counters via an
+      X-list from the build's csr.h; compiled in only if the build has the kernel), `tools/gemm_runner.cpp` (seeded
+      float32 A/B, `--map a=chX,...`, A at its channel's 0, B 0 or 512 MB, C 0 or 1 GB if shared; verify full/sampled
+      (4096 random entries + corners) with tolerance 4·K·eps·Σ|a·b|; text + `--json` line per rep incl. perf counters;
+      `--expect-build-id`).
 - [ ] Correct results for several sizes, both memory maps
 - [ ] Counter bytes match analytic traffic
 
@@ -567,6 +575,22 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 14:15 (stopped: usage limit) — where to resume
+- Done today after phase 1: phase 2 complete (DMA ↔ DDR qualified; the driver-probe SoC reset was the bug), phase 3
+  HLS csynth + IP export working (est. 4.24 ns), phase 4 integrated (fast check OK), phase 5 runner written.
+- **Resume here:**
+  1. Check `build/gemm_soc_kernel_build.log` (EXIT, WNS/WHS in `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/gateware/
+     dupcb_timing.rpt`, utilization). If the IP import or timing fails, fix there first.
+  2. Board sequence (crash capture armed: `misc/crash_debug/arm_crash_capture.sh` after every boot; IOMMU on):
+     `python3 hw/gemm/gemm_soc.py --gemm-config configs/gemm/default.json --load` → `scripts/pcie_rescan.sh` →
+     `BUILD_DIR=build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5 scripts/driver.sh build && ... driver.sh load` →
+     `BUILD_DIR=... scripts/ddr_init.sh` (after the driver!) → `make -C sw/gemm_host BUILD_DIR=...` →
+     `build/.../sw/gemm_runner --n 256 --k 256 --m 256 --verify full` (then larger sizes, non-multiples of the tile).
+  3. Then: phase 6 (`scripts/gemm_build.py` with stages/stamps/manifest), phase 7 (DSE), DMA throughput optimisation
+     (keep the DMA running instead of per-2 MB start/stop), `reports_json.tcl`, AXI perf monitor sim test.
+- Open: `setup.litex.du-pcb.py --pack` decision (README, .gitignore, scripts/env.sh, pcie_rescan.sh, ddr_init.sh,
+  boards/dupcb/target.py, ddr_init.py and the new s7pciephy_rx_be.py changed since the archive).
 
 ### 2026-11-23 14:08 (phase 2, DMA ↔ DDR works)
 - Root cause of the failing round trips: the LitePCIe driver probe resets the SoC (`CSR_CTRL_RESET`) and wipes the DDR
