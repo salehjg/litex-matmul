@@ -10,7 +10,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Scaffolding: submodule, docs, `.gitignore`, README | ✅ 2026-11-23 |
-| 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ⛔ DMA loopback stalls in the reader (reproducible, with or without IOMMU); next: debug build with probes |
+| 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ⛔ DMA reader stalls; **host froze twice** (no trace); bisecting the freeze |
 | 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | ⬜ |
 | 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | ⬜ |
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ⬜ |
@@ -176,6 +176,36 @@ to 3 s instead of `ATTR{enable}="1"` (rule checked with `udevadm verify`). **Nee
 (`litex_server`, `status.sh`, `ddr_init.py`); the driver enables the card itself. udev also warns that `OWNER=` for
 a non-system user is deprecated (still works on systemd 262).
 
+**Host freeze #2 (2026-11-23 ~03:59) and what it rules out.**
+- Timeline: IOMMU retest at 03:45 (driver unloaded 03:45:32), then commits, the probe SoC fast check, and the probe
+  SoC Vivado build started ~03:56. The kernel logged **nothing** after the unload. The machine stopped at ~03:59:08,
+  during synthesis: `dupcb_synth.dcp` was created (0 bytes), and the build log's tail is zero-filled (page cache
+  lost). Even NVMe writes stopped, and the NVMe hangs off the CPU, not the chipset, so the **whole machine** froze, not just the PCH.
+- The lockup→panic sysctls were set but nothing happened (no automatic reboot after 10 s). **Correction:** EFI
+  pstore is disabled by default on Arch (`CONFIG_EFI_VARS_PSTORE_DEFAULT_DISABLE=y`), so a panic would not have been
+  saved anyway. `misc/crash_debug/arm_crash_capture.sh` now turns it on at runtime and adds the RCU-stall panic.
+  That is the detector that catches a CPU stuck on a PCIe access, because the stuck CPU can't take its own watchdog
+  NMI but the other CPUs notice it.
+- **Pattern:** both freezes came ~10–15 min after our bitstream was loaded (03:10→03:19, 03:44→03:59). Freeze #1
+  happened with the driver loaded, right after DMA tests, with nothing heavy running. Freeze #2 happened 13 min after
+  a DMA test, with the driver unloaded and Vivado running.
+- **History:** no unexplained freezes before the card was installed. The 2026-11-11 unclean boot predates the card (then
+  `82:00.0` was the Realtek NIC). On 2026-11-20 the LiteX design ran here (MMIO only, no driver/DMA) in a 12 h
+  boot that shut down cleanly.
+- The card is slot-powered only (no aux connector). Topology: card on Z890 PCH root port `80:1c.4`; NVMe on the CPU
+  (`00:01.0`); USB/keyboard, NIC, SATA on the PCH.
+- **Heat/supply ruled out** (`misc/fpga_health/`, XADC over JTAG): flash image 47 °C; our base SoC **39 °C, flat for
+  9 min** after a JTAG load + rescan with no driver; VCCINT 0.957 V, VCCAUX 1.80 V, VCCBRAM 0.957 V, all steady.
+  No freeze in those 9 min.
+
+**Bisection of the freeze (in progress).** Each step runs with crash capture armed:
+- [ ] **A: our design loaded, no driver, heavy load.** The probe SoC Vivado build (~45 min) runs from 11:47 with the
+      base SoC on the card since 11:34. Survives → the driver/DMA path is implicated. Freezes → it is the design or
+      link itself.
+- [ ] **B: driver loaded, MMIO only** (`driver.sh load`, `info`), then wait 20 min.
+- [ ] **C: one DMA test, driver unloaded, wait 20 min** (repeats freeze #2's conditions).
+- [ ] Then the probe SoC: same DMA test with counters, to explain the stall.
+
 ### Phase 2: DMA ↔ DDR ⬜
 - [ ] `hw/gemm/gemm_soc.py` without CPU; `csr.csv` DDR names unchanged versus the base SoC
 - [ ] `hw/gemm/ddr_dma.py` + Migen sim test
@@ -240,6 +270,17 @@ a non-system user is deprecated (still works on systemd 262).
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 (phase 1, freeze #2, bisection)
+- Host froze again (~03:59), this time with no DMA running (Vivado synthesis, driver unloaded for 13 min). No trace.
+- Committed the work so far (user allowed commits in this repo): baseline LiteX setup (original files from the setup
+  archive), plan + submodule, phase 1 scripts, misc/ debug cases.
+- Found EFI pstore disabled on Arch (so no panic could ever have been saved); added `misc/crash_debug/`.
+- Ruled out heat and supply problems (XADC over JTAG, `misc/fpga_health/`). Started the bisection (step A).
+- LitePCIe 2026.08 history: the reader / TLP controller / depacketizer were reworked in Aug–Sep 2026 (`2ca518e`
+  tag recycling after ordered retirement, `ea77120`/`04a3262` reader completion handling, `5b0133a`/`aa88789`
+  completion buffer accounting, `f4dbb63` depacketizer tails, `75500a0` descriptor retirement on completion). This is a
+  candidate regression for the *stall*; 2026.04 predates all of it.
 
 ### 2026-11-23 (phase 1, IOMMU retest)
 - IOMMU enabled by the user (`scripts/iommu/`, moved there from the home directory at the user's request; paths in
