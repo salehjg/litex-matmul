@@ -310,6 +310,9 @@ class BuildCfg:
             name += "_tA"
         if self.vivado.preset != "default":
             name += f"_{self.vivado.preset}"
+        mm = self.memory_map
+        if (mm.a, mm.b, mm.c) != ("ch0", "ch1", "ch1"):  # non-default map: channel digits of A, B, C
+            name += f"_m{mm.a[-1]}{mm.b[-1]}{mm.c[-1]}"
         return name
 
 

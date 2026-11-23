@@ -1,0 +1,9 @@
+{
+  "campaign": "memory_maps",
+  "base": "configs/gemm/default.json",
+  "build_grid": {"memory_map": [{"a": "ch0", "b": "ch0", "c": "ch0"}, {"a": "ch1", "b": "ch0", "c": "ch0"}]},
+  "runtime_grid": {"triples": [[512, 512, 512], [1024, 1024, 1024], [1000, 1008, 1040], [2048, 2048, 2048]],
+                   "repetitions": 2, "warmup": 0, "verify": "full"},
+  "stages": ["hls", "build", "run"],
+  "jobs": {"hls": "auto"}
+}

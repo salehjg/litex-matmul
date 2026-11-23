@@ -719,6 +719,10 @@ in the plan). So the DSE can afford many builds.
       **Best: 98.59 GFLOP/s** (1024×512, 8192³). The tile is now limited by BRAM (1024×1024 does not fit), and the
       kernel is within 4 % of its peak. At 8192³ the DMA (768 MB in, 256 MB out at 0.82–0.84 GB/s) is ~1 s of the
       12.15 s end to end.
+- [ ] **Campaign `memory_maps`** (PE 8×8 t128, maps A/B/C = CH0/CH0/CH0 and CH1/CH0/CH0; sizes 512³, 1024³,
+      1000×1008×1040, 2048³; full verification): started 20:47. Tests every matrix on
+      the channel it has not used yet and the shared-channel offsets (B at 512 MB, C at 1 GB). Build names now end
+      in `_m<a><b><c>` (channel digits) for non-default maps; default-map names are unchanged.
 - [x] Phase 8 (docs), part 1 (20:16): README GEMM section has the measured-results table (best config later `pe32x8_ta_t1024x512.json`), the transposed-A knob and
       the DDR placement; `configs/gemm/pe32x8_ta_t512.json` is the best measured config (same build id as the
       campaign build, so `gemm_build.py` on it reuses `build/gemm/soc/f32_pe32x8_t512x512_200mhz_tA-dc42aa19`).
