@@ -22,7 +22,11 @@ import random
 import sys
 import time
 
+import fcntl
+import struct
+
 from litex.tools.remote.comm_pcie import CommPCIe
+from litex.tools.remote.csr_builder import CSRBuilder
 
 MODULES   = 8               # Byte lanes (x8 chips) used per channel.
 DATABITS  = 64
@@ -46,6 +50,36 @@ class Bar(CommPCIe):
 
     def write(self, addr, data):
         CommPCIe.write(self, addr - self.offset, data)
+
+class Driver(CSRBuilder):
+    """CSRs through the LitePCIe driver (/dev/litepcieN, LITEPCIE_IOCTL_REG), for when the driver is loaded: the
+    kernel then refuses a BAR0 mmap. The driver's probe resets the SoC (CSR_CTRL_RESET), which clears the DDR
+    calibration, so with the driver in use DDR has to be calibrated *after* loading it. csr.csv addresses are
+    absolute; the driver subtracts the CSR base itself."""
+    IOCTL_REG = (3 << 30) | (12 << 16) | (ord("S") << 8) | 0  # _IOWR('S', 0, struct litepcie_ioctl_reg)
+
+    def __init__(self, dev, csr_csv):
+        CSRBuilder.__init__(self, comm=self, csr_csv=csr_csv)
+        self.dev = dev
+
+    def open(self):
+        self.fd = os.open(self.dev, os.O_RDWR)
+
+    def close(self):
+        os.close(self.fd)
+
+    def _io(self, addr, value, is_write):
+        buf = bytearray(struct.pack("<IIB3x", addr, value, is_write))
+        fcntl.ioctl(self.fd, self.IOCTL_REG, buf)
+        return struct.unpack("<IIB3x", buf)[1]
+
+    def read(self, addr, length=None, burst="incr"):
+        values = [self._io(addr + 4*i, 0, 0) for i in range(1 if length is None else length)]
+        return values[0] if length is None else values
+
+    def write(self, addr, data):
+        for i, value in enumerate(data if isinstance(data, list) else [data]):
+            self._io(addr + 4*i, value, 1)
 
 # One channel --------------------------------------------------------------------------------------
 
@@ -329,7 +363,9 @@ def run_channel(ch, args):
 
 def main():
     parser = argparse.ArgumentParser(description="Calibrate and test the DDR3 channels over PCIe.")
-    parser.add_argument("--bar",       required=True, help="BAR0 file: /sys/bus/pci/devices/<bdf>/resource0.")
+    where = parser.add_mutually_exclusive_group(required=True)
+    where.add_argument("--bar",        help="BAR0 file: /sys/bus/pci/devices/<bdf>/resource0 (driver not loaded).")
+    where.add_argument("--dev",        help="LitePCIe device, e.g. /dev/litepcie0 (driver loaded).")
     parser.add_argument("--channel",   default="all", choices=["all", "0", "1"], help="Channel(s) (default all).")
     parser.add_argument("--build-dir", default="build/dupcb", help="Build directory (csr.csv, sdram_init.py).")
     parser.add_argument("--stride",    default=2, type=int, help="CK phase scan step, fine steps (default 2).")
@@ -338,7 +374,8 @@ def main():
     parser.add_argument("--bist-size", default=0x4000_0000, type=lambda x: int(x, 0), help="Final BIST size, bytes (default 1 GB).")
     args = parser.parse_args()
 
-    bus = Bar(args.bar, os.path.join(args.build_dir, "csr.csv"))
+    csr_csv = os.path.join(args.build_dir, "csr.csv")
+    bus = Bar(args.bar, csr_csv) if args.bar else Driver(args.dev, csr_csv)
     bus.open()
     try:
         chans = [0, 1] if args.channel == "all" else [int(args.channel)]

@@ -417,6 +417,17 @@ in the plan). So the DSE can afford many builds.
   - Next: debug build (`gemm_soc.py --ddr-dma-debug` → `build/gemm_soc_dbg/`): C2H test-pattern source straight into
     the PCIe writer (bypasses DDR/reader/converter) + protocol watchers (rdata overflow, data change / valid drop while
     stalled at reader output, converter output, PCIe writer input).
+  - **ROOT CAUSE (14:08): the LitePCIe driver's probe resets the SoC** (`litepcie_writel(CSR_CTRL_RESET_ADDR, 1)`,
+    "Reset LitePCIe core", main.c:1236), which clears every DDR PHY calibration register. `ddr_init.py` ran at
+    13:47:57, the driver was loaded at 13:48:31, so **all DDR tests ran on an uncalibrated DDR**. Proof: a plain BIST
+    (`misc/dma_debug/bist_probe.py`, same procedure as `ddr_init.py`) now fails on every word (16 MB sequential:
+    262144/262144 bad; single words: all bad), although `ddr_init.py`'s 1 GB BIST passed before the driver load. The
+    "half-burst" shifts and read-to-read differences are an uncalibrated read path; the bridge was fine (simulation).
+    Probably also the cause of the unexpected completion (UnxCmplt) logged at that probe.
+  - **Fix:** calibrate *after* loading the driver. `ddr_init.py` can now go through the driver (`--dev /dev/litepcie0`,
+    `Driver(CSRBuilder)` using `LITEPCIE_IOCTL_REG`; the kernel refuses the BAR0 mmap while the driver is bound), and
+    `scripts/ddr_init.sh` uses it automatically when `/dev/litepcie0` exists (and honours `BUILD_DIR`).
+    Order: load bitstream → rescan → `driver.sh load` → `ddr_init.sh` → DMA tests.
 - [x] **`ddr_init.py` passes without a CPU** (2026-11-23 13:47:57–13:48:10, 13 s; `python3 boards/dupcb/ddr_init.py
       --bar .../resource0 --build-dir build/gemm_soc`, log `build/gemm_soc/logs/ddr_init.log`): CH0 window 50 steps (893 ps), CK at +56 (6 s), CH1 window
       80 steps (1429 ps), CK at +72; all lanes 0 failed tests / 0 bit errors; 1 GB BIST per channel, 0 bad words,
