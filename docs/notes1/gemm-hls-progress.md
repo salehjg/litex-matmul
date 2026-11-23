@@ -585,6 +585,19 @@ in the plan). So the DSE can afford many builds.
 - [x] Campaigns in `configs/dse/`: `hls_pe_tile` (HLS only, PN×tile_n×tile_m = 12 points), `pe_sweep` (PN 8/16/32,
       tile 256, 4 sizes), `clock_sweep` (150/200/250 MHz), `vivado_preset_sweep` (default/explore/aggressive),
       `size_sweep` (one build, 5×3×3 sizes). All dry-run OK.
+- [x] **Campaign `hls_pe_tile` run (17:08–17:10, 4 HLS jobs in parallel, 2.7 min for 12 points)**,
+      `results/hls_pe_tile/builds.{jsonl,csv}`. All OK points estimate 4.20–4.24 ns at the 5 ns target. Resources:
+
+      | PE | tiles (N×M) | DSP | BRAM18 | LUT |
+      |---|---|---|---|---|
+      | 8×8 | 128×128 / 128×256 / 256×256 | 381 / 373 / 361 | 313 | 67–68k |
+      | 16×8 | 128×128 … 256×256 | 681–701 | 425–441 | 117–118k |
+      | 32×8 | 128×128 … 256×256 | 1321–1341 | 665 | 210–216k |
+
+      SoC without kernel ≈ 25k LUT, so PE 32×8 would be ~80 % of the 298.6k LUTs (routing risk); PE 16×8 ~48 %.
+      One point failed in HLS: `f32_pe8x8_t256x128` hits `static_assert(kInnerTilesM >= kInnerTilesN)` in Compute.cpp
+      (tile_m/PM ≥ tile_n/PN for double buffering), which `config.py` did not check: **rule added**; the point is now
+      rejected as invalid before any tool runs.
 - [ ] `--resume` after an interruption
 
 ### Phase 8: docs ⬜

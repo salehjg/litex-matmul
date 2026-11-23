@@ -193,6 +193,11 @@ class BuildCfg:
             errors.append(f"memory_tile_size_n = {k.memory_tile_size_n} must be a multiple of parallelism_n = {k.parallelism_n}")
         if k.memory_tile_size_m % k.parallelism_m:
             errors.append(f"memory_tile_size_m = {k.memory_tile_size_m} must be a multiple of parallelism_m = {k.parallelism_m}")
+        elif k.memory_tile_size_n % k.parallelism_n == 0 and \
+                k.memory_tile_size_m // k.parallelism_m < k.memory_tile_size_n // k.parallelism_n:
+            # src/Compute.cpp static_assert(kInnerTilesM >= kInnerTilesN): double buffering of A.
+            errors.append(f"tile_m/PM = {k.memory_tile_size_m // k.parallelism_m} must be >= tile_n/PN = "
+                          f"{k.memory_tile_size_n // k.parallelism_n} (double buffering of A, Compute.cpp)")
         if k.transposed_a:
             if k.memory_tile_size_n % (bw.n // e):
                 errors.append(f"transposed A: memory_tile_size_n must be a multiple of bus_width_bytes.n / sizeof = {bw.n // e}")
