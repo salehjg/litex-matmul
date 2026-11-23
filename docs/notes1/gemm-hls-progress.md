@@ -777,6 +777,14 @@ in the plan). So the DSE can afford many builds.
 - `/usr/local/sbin/litepcie-modctl` and the sudoers lines name the slot `0000:82:00.0`. Moving the card means
   re-running `sudo scripts/setup_permissions.sh`.
 - Risks are listed in plan §11.
+- **DMA throughput (in progress, 20:20):** DDR transfers run at ~0.8 GB/s against 1.68 GB/s raw PCIe loopback.
+  Suspect: the generated LitePCIe driver's `litepcie_dma_{reader,writer}_stop()` waits `udelay(1000)`, and
+  `DdrDma` stops the DMA after every 2 MB chunk (~1.25 ms of data), so ~1 ms of every ~2.5 ms is that wait.
+  Steps: (1) per-phase timing in `DdrDma` / `ddr_dma_test` (copy/start/wait/stop per chunk; commit 93feb59) to
+  confirm; (2) C2H: enable the PCIe DMA writer once per `read()` instead of per chunk (the writer only moves what
+  the bridge sends, and its loop status counts buffers since the enable), written and parked until the running
+  campaign has built its host tools; (3) H2C cannot stay enabled (the reader loops over the ring without flow
+  control), so the options there are a shorter stop delay in the generated driver copy, or a larger ring.
 
 ## Log
 
