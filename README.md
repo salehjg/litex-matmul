@@ -98,14 +98,27 @@ C = A·B at 200 MHz, the host reads C back together with performance counters (c
 read latency). JSON-driven build and design-space exploration. Plan:
 [`docs/notes1/gemm-hls-plan.md`](docs/notes1/gemm-hls-plan.md), status and measurements:
 [`docs/notes1/gemm-hls-progress.md`](docs/notes1/gemm-hls-progress.md).
-First results (PE 8×8, 25.6 GFLOP/s peak): 2048³ verified at 23.4 GFLOP/s (91.5 % of peak).
+
+Measured (kernel time, float32, 200 MHz, all results verified against a host reference):
+
+| Config | Peak | Best measured | LUT / DSP / BRAM tiles |
+|---|---|---|---|
+| `default.json`: PE 8×8, tile 128 | 25.6 GFLOP/s | 23.4 (2048³, 91.5 %) | 64.6k / 383 / 238.5 |
+| PE 8×8, tile 256 | 25.6 | 24.6 (2048³, 95.9 %) | 64.7k / 383 / 239 |
+| PE 16×8, tile 256 | 51.2 | 47.2 (2048³, 92.2 %) | 94.6k / 703 / 303 |
+| `pe32x8_ta_t512.json`: PE 32×8, transposed A, tile 512×512 | 102.4 | **95.1** (4096³, 92.8 %) | 153.9k / 1320 / 430.5 |
+
+`transposed_a: true` means the host sends Aᵀ (`gemm_runner --transposed-a`, passed automatically from the build's
+config), so the kernel reads A in bursts instead of single strided words; this and larger tiles are what took PE 32×8
+from 82 to 95 GFLOP/s.
 
 ```
 git submodule update --init --recursive                     # submodules/gemm_hls (+ hlslib): reference only
 sudo scripts/setup_permissions.sh                           # once: password-less board access
 misc/crash_debug/arm_crash_capture.sh                       # once per boot (see docs: host freezes)
 
-.venv/bin/python scripts/gemm_build.py configs/gemm/default.json          # HLS -> Vivado -> host tools (~15 min)
+.venv/bin/python scripts/gemm_build.py configs/gemm/default.json          # HLS -> Vivado -> host tools (~15 min;
+                                                                          #  PE 32x8 builds ~25 min)
 .venv/bin/python scripts/gemm_run.py build/gemm/soc/<build_id> --program \
         --sizes 1024x1024x1024 2048x2048x2048 --reps 3 --verify sampled  # load + bring-up + runs
 .venv/bin/python scripts/gemm_dse.py configs/dse/pe_sweep.json            # sweep: builds + runs -> results/<campaign>/
@@ -116,6 +129,8 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   (used by `gemm_run.py --program` and `gemm_dse.py`) does it in that order.
 - **Config:** `configs/gemm/*.json` (PE counts, tiles, bus widths, FIFO depths, m_axi bursts, memory map, accel clock,
   Vivado preset/directives/threads). Checked against every gemm_hls rule before any tool runs (`flow/gemmflow/config.py`).
+- **DDR placement** (default `memory_map` a=ch0, b=ch1, c=ch1): A at CH0 0x0, B at CH1 0x0, C at CH1 0x4000_0000;
+  limits A ≤ 2 GB, B ≤ 1 GB, C ≤ 1 GB, checked by `gemm_runner` (details in the progress file, "DDR memory map").
 - **Outputs:** `build/gemm/hls/<hls_hash>/`, `build/gemm/soc/<build_id>/` (config, manifest, reports/summary.json,
   logs), `results/` (JSONL + CSV with build id, config hash, git sha, sizes, timing, counters). All git-ignored.
 - **Layout:** `kernels/gemm/` (adapted HLS C++, changes in `ORIGIN.md`), `hw/gemm/` (SoC, DMA↔DDR bridge, kernel
