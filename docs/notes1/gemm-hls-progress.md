@@ -286,7 +286,8 @@ Probe SoC with it: `python3 misc/dma_debug/dma_probe_soc.py --build --rx-be-fix`
 (identifier `... 2026-11-23 12:39:51`), 12:39:51–12:45:18, timing met (WNS +0.029 ns, WHS +0.021 ns). In the
 Verilog `m_axis_rx_tkeep` now goes to an unused `tkeep` net instead of the RX byte enables. Same CSR map as
 `build/dma_probe`. Driver built (`BUILD_DIR=build/dma_probe_fix scripts/driver.sh build`), not loaded.
-**Next:** after the step C watch, load it, run the same DMA test with probes. Expected: 16 beats per completion,
+Loaded 12:54:36 (`--rx-be-fix --load` + rescan): Gen2 x4, BAR0 128 KB, `enable` = 1 right after the rescan (the udev
+retry fix works). **Next:** the same DMA test with probes. Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
 
 **Fix options for the stall** (option 1 is built and waiting for its hardware test):
