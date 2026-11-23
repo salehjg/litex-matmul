@@ -1,0 +1,12 @@
+# Created by setup.litex.du-pcb.py
+.venv/
+deps/
+config.sh
+# Build output
+build/
+*.jou
+*.log
+*.str
+.Xil/
+__pycache__/
+*.pyc
