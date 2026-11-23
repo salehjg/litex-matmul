@@ -8,9 +8,12 @@
 #   hls   : Vitis HLS of every valid point (parallel, sized by free RAM and cores) -> estimates, no Vivado
 #   build : LiteX + Vivado + host tools per point, one at a time (15 GB RAM)
 #   run   : per built point: JTAG load + bring-up, then gemm_runner for every size
-# Results in results/<campaign>/: campaign.json, builds.jsonl/.csv (one row per point and stage), runs.jsonl/.csv (one
-# row per point, size and repetition). Invalid points are recorded with status "invalid" and the reason.
-# --resume skips stages/sizes already recorded as ok for a point.
+# Results in results/<campaign>/: campaign.json (the latest invocation), invocations.jsonl (every invocation: time,
+# argv, stages, git state), builds.jsonl/.csv (one row per point and stage), runs.jsonl/.csv (one row per point, size
+# and repetition; build_id = full build id, hw_build_id = the id read from the bitstream). Invalid points are
+# recorded with status "invalid" and the reason.
+# --resume skips stages/sizes already recorded as ok for a point (and the bring-up of a point with nothing left).
+# Each build also gets <build>/reports/summary.json (+ manifest.json when a step ran), as with gemm_build.py.
 #
 
 import argparse
@@ -30,7 +33,7 @@ from gemmflow.board import Board                       # noqa: E402
 from gemmflow.config import BuildCfg, ConfigError      # noqa: E402
 from gemmflow.manifest import manifest                 # noqa: E402
 from gemmflow.results import ResultStore               # noqa: E402
-from gemmflow.steps import HlsStep, SocStep, HostStep  # noqa: E402
+from gemmflow.steps import HlsStep, SocStep, HostStep, write_build_reports  # noqa: E402
 from gemmflow.tools import ToolError                   # noqa: E402
 
 
@@ -95,9 +98,12 @@ def main():
     out = os.path.join(ROOT, "results", name)
     builds = ResultStore(os.path.join(out, "builds.jsonl"))
     runs = ResultStore(os.path.join(out, "runs.jsonl"))
-    os.makedirs(out, exist_ok=True)
-    with open(os.path.join(out, "campaign.json"), "w") as f:
-        json.dump({"campaign": camp, "stages": stages, "manifest": manifest()}, f, indent=2)
+    if not a.dry_run:
+        os.makedirs(out, exist_ok=True)
+        with open(os.path.join(out, "campaign.json"), "w") as f:
+            json.dump({"campaign": camp, "stages": stages, "manifest": manifest()}, f, indent=2)
+        with open(os.path.join(out, "invocations.jsonl"), "a") as f:
+            f.write(json.dumps({"timestamp": now(), "argv": sys.argv[1:], "stages": stages, "manifest": manifest()}) + "\n")
 
     # Expand + validate ------------------------------------------------------------------------------------------
     cfgs = []
@@ -159,6 +165,7 @@ def main():
                     seconds, skipped = st.run()
                     summary[Step.name] = {"seconds": round(seconds, 1), "skipped": skipped, **st.summary()}
                     print(f"  {Step.name}: {'up to date' if skipped else f'{seconds:.0f} s'}", flush=True)
+                write_build_reports(cfg, bdir, summary)
                 soc = summary["soc"]
                 status = "ok" if soc.get("timing_met") else "timing_failed"
                 record(cfg, "build", status, summary)
@@ -173,11 +180,19 @@ def main():
     # Runs -----------------------------------------------------------------------------------------------------
     if "run" in stages:
         rt = camp.get("runtime_grid", {})
-        have = {(r["build_id"], r["n"], r["k"], r["m"], r["rep"]) for r in runs.rows()} if a.resume else set()
+        # Keyed on config_hash: rows written before 2026-11-23 22:40 carry the 8-hex hardware id as build_id.
+        have = {(r["config_hash"], r["n"], r["k"], r["m"], r["rep"]) for r in runs.rows()
+                if r.get("status") == "ok"} if a.resume else set()
+        reps = rt.get("repetitions", 1)
         timing_ok = {r["build_id"] for r in builds.rows() if r.get("stage") == "build" and r.get("status") == "ok"}
         for cfg, bdir in built:
             if cfg.build_id() not in timing_ok:
                 print(f"run {cfg.build_id()}: skipped (no build with timing met)")
+                continue
+            todo = [(n, k, m) for n, k, m in sizes_of(rt)
+                    if not all((cfg.config_hash(), n, k, m, r) in have for r in range(reps))]
+            if not todo:
+                print(f"run {cfg.build_id()}: all sizes already recorded")
                 continue
             print(f"run {cfg.build_id()}: bring-up", flush=True)
             try:
@@ -187,15 +202,13 @@ def main():
                 runs.write_csv()
                 sys.exit(1)
             mm = cfg.memory_map
-            for n, k, m in sizes_of(rt):
-                if all((cfg.build_id(), n, k, m, r) in have for r in range(rt.get("repetitions", 1))):
-                    continue
+            for n, k, m in todo:
                 cmd = [os.path.join(bdir, "sw", "gemm_runner"), "--n", str(n), "--k", str(k), "--m", str(m),
-                       "--reps", str(rt.get("repetitions", 1)), "--warmup", str(rt.get("warmup", 0)),
+                       "--reps", str(reps), "--warmup", str(rt.get("warmup", 0)),
                        "--verify", rt.get("verify", "sampled"), "--map", f"a={mm.a},b={mm.b},c={mm.c}",
                        "--expect-build-id", cfg.config_hash()[:8], "--json"] + \
                       (["--transposed-a"] if cfg.kernel.transposed_a else []) + \
-              ["--multiples", ",".join(map(str, cfg.size_multiples()))]
+                      ["--multiples", ",".join(map(str, cfg.size_multiples()))]
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
                 for line in proc.stdout.splitlines():
                     if line.startswith("{"):
@@ -205,7 +218,8 @@ def main():
                                      "hls_hash": cfg.hls_hash(), "timestamp": now(), "git_sha": manifest()["git_sha"],
                                      "git_dirty": manifest()["git_dirty"], "peak_gflops": cfg.peak_gflops(),
                                      "pct_of_peak": round(100 * row["gflops"] / cfg.peak_gflops(), 2),
-                                     "config": cfg.to_dict(), **row})
+                                     "config": cfg.to_dict(), **row,
+                                     "build_id": cfg.build_id(), "hw_build_id": row.get("build_id")})
                         print(f"  {n}x{k}x{m} rep {row['rep']}: {row['gflops']:.2f} GFLOP/s, verify {status}")
                 if proc.returncode not in (0, 1):
                     print(f"  {n}x{k}x{m}: gemm_runner error {proc.returncode}: {proc.stderr.strip()[-300:]}")

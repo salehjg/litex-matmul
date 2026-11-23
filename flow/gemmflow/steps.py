@@ -4,6 +4,7 @@
 #   HlsStep  : Vitis HLS of the kernel        -> build/gemm/hls/<hls_hash[:12]>/   (shared by all configs with that hash)
 #   SocStep  : LiteX + Vivado of GemmSoC       -> build/gemm/soc/<build_id>/
 #   HostStep : liblitepcie + sw/gemm_host tools -> build/gemm/soc/<build_id>/sw/
+# write_build_reports() writes <build>/reports/summary.json (and manifest.json) for gemm_build.py and gemm_dse.py.
 #
 
 import hashlib
@@ -15,6 +16,7 @@ import time
 
 from .config import ROOT, tree_hash
 from .hls import HlsRun
+from .manifest import manifest
 from .reports import VivadoReport
 from .tools import Tool, ToolError
 
@@ -152,3 +154,19 @@ class HostStep(Step):
                 p = subprocess.run(args, stdout=f, stderr=subprocess.STDOUT)
                 if p.returncode:
                     raise ToolError(f"{' '.join(args)} failed", log)
+
+
+def write_build_reports(cfg, build_dir, steps):
+    """Write <build>/reports/summary.json (config, hashes, per-step summaries) and, if a step actually ran,
+    <build>/manifest.json (the tree state its outputs were made from; an all-skipped rerun keeps the old one).
+    `steps` maps a step name to its summary dict ("seconds", "skipped", ...). Returns the summary."""
+    m = manifest()
+    summary = {"build_id": cfg.build_id(), "config_hash": cfg.config_hash(), "hls_hash": cfg.hls_hash(),
+               "config": cfg.to_dict(), "manifest": m, "steps": steps}
+    os.makedirs(os.path.join(build_dir, "reports"), exist_ok=True)
+    if any(not st.get("skipped", True) for st in steps.values()):
+        with open(os.path.join(build_dir, "manifest.json"), "w") as f:
+            json.dump(m, f, indent=2)
+    with open(os.path.join(build_dir, "reports", "summary.json"), "w") as f:
+        json.dump(summary, f, indent=2)
+    return summary

@@ -626,7 +626,13 @@ in the plan). So the DSE can afford many builds.
       Not yet run end to end.
 - [x] Stamps: a rerun with no change skips everything (the shared 200 MHz build in `vivado_preset_sweep`: all steps
       up to date, 0 s); a Vivado-only change reuses the HLS IP (`explore`/`aggressive` points: `hls: up to date`)
-- [ ] `manifest.json`, `reports/summary.json`
+- [x] `manifest.json`, `reports/summary.json` (22:35): only `gemm_build.py` wrote them, so none of the 17 DSE builds
+      had them although the README promised them. Now `steps.write_build_reports()` is shared by `gemm_build.py` and
+      `gemm_dse.py`: `reports/summary.json` always, `manifest.json` only when a step actually ran (an all-skipped rerun
+      keeps the build-time manifest). `gemm_build.py --report-only` writes the summary from existing outputs without
+      running anything; it backfilled the 16 earlier builds (no `manifest.json` for those: their build-time git state
+      is in the campaigns' `builds.jsonl`). `up_to_date: false` for `host` in 9 of them only means the stamp is older
+      than `sw/gemm_host`: `Board.bring_up()` rebuilds the host tools with make before any run.
 
 ### Phase 7: DSE ✅
 - [x] `scripts/gemm_dse.py` + `flow/gemmflow/results.py` (`ResultStore`: JSONL source of truth + regenerated CSV,
@@ -807,7 +813,15 @@ in the plan). So the DSE can afford many builds.
       One point failed in HLS: `f32_pe8x8_t256x128` hits `static_assert(kInnerTilesM >= kInnerTilesN)` in Compute.cpp
       (tile_m/PM ≥ tile_n/PN for double buffering), which `config.py` did not check: **rule added**; the point is now
       rejected as invalid before any tool runs.
-- [ ] `--resume` after an interruption
+- [ ] `--resume` after an interruption. Tested (22:29) on a copy of the finished `vivado_preset_sweep`: no Vivado,
+      no card access, the timing-failed point is re-checked from its stamps and skipped. **Two bugs fixed on the way:**
+      (1) run rows took `build_id` from `gemm_runner`'s JSON, i.e. the 8-hex id read from the bitstream, so
+      `--resume` never matched a recorded size and would have rerun everything; rows now carry the full build id
+      plus `hw_build_id`, and resume matches on `config_hash` (also correct for older rows, which keep the 8-hex
+      `build_id`). (2) Resume counted failed rows as done; now only `ok` rows. Also: a point with nothing left skips
+      its bring-up (it used to reprogram the card first), `--dry-run` writes nothing, and every invocation is
+      appended to `results/<campaign>/invocations.jsonl` (`campaign.json` only holds the latest one).
+      Still to do: a partial resume on the card (after `clock_pe32_ta`).
 
 ### Phase 8: docs 🟡
 - [ ] README usage section
