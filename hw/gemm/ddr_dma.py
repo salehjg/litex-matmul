@@ -21,7 +21,7 @@ from migen import *
 
 from litex.gen import *
 from litex.soc.interconnect import stream
-from litex.soc.interconnect.csr import CSRStorage, CSRStatus
+from litex.soc.interconnect.csr import CSRStorage, CSRStatus, CSRField
 
 from litedram.frontend.dma import LiteDRAMDMAReader, LiteDRAMDMAWriter
 
@@ -34,8 +34,29 @@ class _Channel(LiteXModule):
         self.drained        = self.writer._done.status & ~self.writer.fifo.source.valid
 
 
+class _StreamWatch(LiteXModule):
+    """Debug: counts stream protocol violations on one endpoint (valid/ready/data signals)."""
+    def __init__(self, valid, ready, data, clear, width=32):
+        self.data_change = Signal(width)  # data changed while valid was held and not accepted
+        self.valid_drop  = Signal(width)  # valid dropped before the beat was accepted
+        self.beats       = Signal(width)
+        stalled = Signal()
+        data_d  = Signal(len(data))
+        self.sync += [
+            stalled.eq(valid & ~ready),
+            data_d.eq(data),
+            If(clear,
+                self.data_change.eq(0), self.valid_drop.eq(0), self.beats.eq(0),
+            ).Else(
+                If(stalled & valid & (data != data_d), self.data_change.eq(self.data_change + 1)),
+                If(stalled & ~valid, self.valid_drop.eq(self.valid_drop + 1)),
+                If(valid & ready, self.beats.eq(self.beats + 1)),
+            ),
+        ]
+
+
 class PCIeDDRBridge(LiteXModule):
-    def __init__(self, dma, channels, counter_width=32):
+    def __init__(self, dma, channels, counter_width=32, with_debug=False):
         """dma: LitePCIeDMA (user-side source/sink). channels: list of (write_port, read_port) native ports, same
         data width, in the DMA's clock domain."""
         dw_pcie = len(dma.source.data)
@@ -98,7 +119,10 @@ class PCIeDDRBridge(LiteXModule):
                 ch.reader.source.ready.eq(down.sink.ready),
             ]
         self.comb += Case(sel, cases)
-        self.comb += down.source.connect(dma.sink, omit={"last"})
+        if not with_debug:
+            self.comb += down.source.connect(dma.sink, omit={"last"})
+        else:
+            self.add_debug(dma, chans, channels, down, sel, counter_width)
 
         # Counters -----------------------------------------------------------------------------------------
         clear = self.clear.re
@@ -113,3 +137,68 @@ class PCIeDDRBridge(LiteXModule):
             self.h2c_dropped.status.eq(dropped),
             self.c2h_beats.status.eq(c2h),
         ]
+
+    # Debug (with_debug=True only) -----------------------------------------------------------------------------
+    def add_debug(self, dma, chans, channels, down, sel, counter_width):
+        """C2H test pattern (full-rate counter into the PCIe DMA writer, bypassing DDR) and protocol watchers."""
+        dw_pcie = len(dma.sink.data)
+        self.dbg_clear       = CSRStorage(description="Write any value: clear the debug counters.")
+        self.dbg_pattern     = CSRStorage(fields=[
+            CSRField("enable", size=1, description="1: C2H comes from the pattern generator, not from DDR."),
+        ])
+        self.dbg_pattern_len = CSRStorage(32, description="Pattern length in bytes (multiple of 16); counting starts "
+                                                          "when dbg_pattern.enable goes 0 -> 1.")
+        clear = self.dbg_clear.re
+
+        # Pattern generator: beat k = k replicated in every 32-bit lane.
+        pat_en   = self.dbg_pattern.fields.enable
+        pat_en_d = Signal()
+        count    = Signal(32)
+        left     = Signal(32)
+        self.sync += [
+            pat_en_d.eq(pat_en),
+            If(pat_en & ~pat_en_d,
+                count.eq(0),
+                left.eq(self.dbg_pattern_len.storage[4:]),
+            ).Elif(dma.sink.valid & dma.sink.ready & pat_en,
+                count.eq(count + 1),
+                left.eq(left - 1),
+            ),
+        ]
+        pat_valid = pat_en & pat_en_d & (left != 0)
+        self.comb += [
+            If(pat_en,
+                dma.sink.valid.eq(pat_valid),
+                dma.sink.data.eq(Replicate(count, dw_pcie // 32)),
+                down.source.ready.eq(0),
+            ).Else(
+                down.source.connect(dma.sink, omit={"last"}),
+            ),
+        ]
+
+        # Watchers: selected reader output, converter output (= PCIe writer input), DRAM read data overflow.
+        rd_valid, rd_ready, rd_data = Signal(), Signal(), Signal(len(chans[0].reader.source.data))
+        rdata_overflow = Signal()
+        self.comb += Case(sel, {n: [
+            rd_valid.eq(ch.reader.source.valid), rd_ready.eq(ch.reader.source.ready), rd_data.eq(ch.reader.source.data),
+            rdata_overflow.eq(channels[n][1].rdata.valid & ~channels[n][1].rdata.ready),
+        ] for n, ch in enumerate(chans)})
+        self.w_reader = _StreamWatch(rd_valid, rd_ready, rd_data, clear, counter_width)
+        self.w_down   = _StreamWatch(down.source.valid, down.source.ready, down.source.data, clear, counter_width)
+        self.w_sink   = _StreamWatch(dma.sink.valid, dma.sink.ready, dma.sink.data, clear, counter_width)
+        overflow = Signal(counter_width)
+        self.sync += If(clear, overflow.eq(0)).Elif(rdata_overflow, overflow.eq(overflow + 1))
+
+        csrs = {
+            "dbg_rdata_overflow":   overflow,
+            "dbg_reader_change":    self.w_reader.data_change, "dbg_reader_vdrop": self.w_reader.valid_drop,
+            "dbg_reader_beats":     self.w_reader.beats,
+            "dbg_down_change":      self.w_down.data_change,   "dbg_down_vdrop":   self.w_down.valid_drop,
+            "dbg_down_beats":       self.w_down.beats,
+            "dbg_sink_change":      self.w_sink.data_change,   "dbg_sink_vdrop":   self.w_sink.valid_drop,
+            "dbg_sink_beats":       self.w_sink.beats,
+        }
+        for name, sig in csrs.items():
+            csr = CSRStatus(counter_width, name=name)
+            self.comb += csr.status.eq(sig)
+            setattr(self, name, csr)

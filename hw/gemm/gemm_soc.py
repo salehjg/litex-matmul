@@ -26,7 +26,7 @@ from litex.soc.integration.builder import Builder       # noqa: E402
 
 
 class GemmSoC(base.BaseSoC):
-    def __init__(self, **kwargs):
+    def __init__(self, ddr_dma_debug=False, **kwargs):
         # No CPU: both DDR channels belong to the host DMA and (later) the kernel. CH0 stays add_sdram (its Wishbone
         # port is idle without a CPU), so the DDR CSR names, and with them ddr_init.py, are unchanged. DDR init comes
         # from the host only (scripts/ddr_init.sh).
@@ -37,17 +37,19 @@ class GemmSoC(base.BaseSoC):
         channels = []
         for sdram in [self.sdram, self.sdram1]:
             channels.append((sdram.crossbar.get_port(mode="write"), sdram.crossbar.get_port(mode="read")))
-        self.ddr_dma = PCIeDDRBridge(self.pcie_dma0, channels)
+        self.ddr_dma = PCIeDDRBridge(self.pcie_dma0, channels, with_debug=ddr_dma_debug)
 
 
 def main():
     parser = LiteXArgumentParser(platform=dupcb_platform.Platform, description="GemmSoC on the DU-PCB-001-003.")
     parser.add_target_argument("--sys-clk-freq", default=125e6, type=float, help="System clock frequency.")
+    parser.add_target_argument("--ddr-dma-debug", action="store_true",
+        help="DDR bridge debug: C2H test pattern + protocol watchers (build/gemm_soc_dbg).")
     args = parser.parse_args()
     if args.output_dir is None:
-        args.output_dir = os.path.join(ROOT, "build", "gemm_soc")
+        args.output_dir = os.path.join(ROOT, "build", "gemm_soc_dbg" if args.ddr_dma_debug else "gemm_soc")
 
-    soc = GemmSoC(sys_clk_freq=args.sys_clk_freq, **parser.soc_argdict)
+    soc = GemmSoC(ddr_dma_debug=args.ddr_dma_debug, sys_clk_freq=args.sys_clk_freq, **parser.soc_argdict)
 
     builder = Builder(soc, **parser.builder_argdict)
     builder.csr_csv = os.path.join(builder.output_dir, "csr.csv")

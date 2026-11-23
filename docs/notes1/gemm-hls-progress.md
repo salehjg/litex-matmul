@@ -402,7 +402,21 @@ in the plan). So the DSE can afford many builds.
       BUILD_DIR=build/gemm_soc` → `build/gemm_soc/sw/ddr_dma_test` (needs that build's `driver/user/liblitepcie.a`).
 - GemmSoC driver built + loaded (13:48), `info` OK (identifier `... 13:39:51`, scratch OK); `ddr_dma_test` rebuilt
   against this build's final headers.
-- [ ] `ddr_dma_test` on hardware: CH0 and CH1 write/read-back clean, GB/s recorded
+- [ ] `ddr_dma_test` on hardware: CH0 and CH1 write/read-back clean, GB/s recorded. **First runs (13:48–14:05) fail:**
+  - Mechanics work: `h2c_beats` = 16384 (1 MB), `c2h_beats` = 16384, `h2c_dropped` 1024 (ring repeats after `length`),
+    no AER/DMAR, no timeouts. Speed with 1 MB chunks ≈ 0.57 GB/s H2C, 0.6 GB/s C2H; 4 MB ≈ 0.8 GB/s.
+  - Data: counter pattern (`--pattern counter`) shows read word *i* = written word *i*+4 at the start (32 B shift),
+    then from ~2.4 KB on, in every 64 B DDR word the **lower 32 B are right and the upper 32 B wrong**.
+  - **C2H is nondeterministic:** two reads of static DDR content (BIST-written, `--read-only-bist`) differ in 22–23 %
+    (CH1) / 40 % (CH0) of the 8-byte words, starting at ~0x970 both channels.
+  - Ruled out: zero-copy/cache coherence (`litepcie_util -z dma_test` loopback 13.4 Gb/s 0 errors), PCIe writer
+    buffering depth (onset does not move with `pcie_dma0_buffering_writer_fifo_control` 1024/256/64), FIFO memory
+    mapping (all four 32×512 bridge FIFOs are RAM32M distributed RAM), bridge logic against a single-outstanding DRAM
+    model (`hw/gemm/tests/test_ddr_dma.py` PASS incl. back-pressure, drop path, aborted transfer).
+  - The onset (~2.4 KB) is just past the LiteDRAM reader FIFO depth (32 × 64 B = 2 KB).
+  - Next: debug build (`gemm_soc.py --ddr-dma-debug` → `build/gemm_soc_dbg/`): C2H test-pattern source straight into
+    the PCIe writer (bypasses DDR/reader/converter) + protocol watchers (rdata overflow, data change / valid drop while
+    stalled at reader output, converter output, PCIe writer input).
 - [x] **`ddr_init.py` passes without a CPU** (2026-11-23 13:47:57–13:48:10, 13 s; `python3 boards/dupcb/ddr_init.py
       --bar .../resource0 --build-dir build/gemm_soc`, log `build/gemm_soc/logs/ddr_init.log`): CH0 window 50 steps (893 ps), CK at +56 (6 s), CH1 window
       80 steps (1429 ps), CK at +72; all lanes 0 failed tests / 0 bit errors; 1 GB BIST per channel, 0 bad words,
