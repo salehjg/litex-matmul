@@ -24,17 +24,20 @@ import os
 import struct
 import sys
 
-CSR_BASE = 0xf0000000  # LiteX default CSR origin; BAR0 maps the CSR region from offset 0.
+CSR_BASE = 0xf0000000  # LiteX CSR origin with a CPU; without a CPU it is 0. CSRMap reads the real one from csr.csv.
 
 
 class CSRMap:
     """Registers of one build, from its csr.csv: name -> (address, size in 32-bit words, mode)."""
     def __init__(self, csv_path):
         self.registers = {}
+        self.csr_base  = CSR_BASE
         with open(csv_path) as f:
             for row in csv.reader(f):
                 if row and row[0] == "csr_register":
                     self.registers[row[1]] = (int(row[2], 16), int(row[3]), row[4])
+                elif row and row[0] == "memory_region" and row[1] == "csr":
+                    self.csr_base = int(row[2], 16)  # BAR0 maps the CSR region from offset 0.
 
     def match(self, patterns):
         names = []
@@ -88,20 +91,21 @@ class DriverBus(Bus):
 
 
 class BarBus(Bus):
-    """Through the BAR0 sysfs file (no driver bound)."""
-    def __init__(self, bar):
-        self.fd  = os.open(bar, os.O_RDWR | os.O_SYNC)
-        self.map = mmap.mmap(self.fd, os.fstat(self.fd).st_size)
+    """Through the BAR0 sysfs file (no driver bound). csr_base: CSRMap.csr_base of the loaded build."""
+    def __init__(self, bar, csr_base=CSR_BASE):
+        self.base = csr_base
+        self.fd   = os.open(bar, os.O_RDWR | os.O_SYNC)
+        self.map  = mmap.mmap(self.fd, os.fstat(self.fd).st_size)
 
     def read32(self, addr):
-        return struct.unpack_from("<I", self.map, addr - CSR_BASE)[0]
+        return struct.unpack_from("<I", self.map, addr - self.base)[0]
 
     def write32(self, addr, value):
-        struct.pack_into("<I", self.map, addr - CSR_BASE, value)
+        struct.pack_into("<I", self.map, addr - self.base, value)
 
 
-def open_bus(dev=None, bar=None):
-    return BarBus(bar) if bar else DriverBus(dev or "/dev/litepcie0")
+def open_bus(dev=None, bar=None, csr_base=CSR_BASE):
+    return BarBus(bar, csr_base) if bar else DriverBus(dev or "/dev/litepcie0")
 
 
 def main():
@@ -114,7 +118,7 @@ def main():
     args = parser.parse_args()
 
     csrs = CSRMap(args.csv)
-    bus  = open_bus(args.dev, args.bar)
+    bus  = open_bus(args.dev, args.bar, csrs.csr_base)
     for w in args.write:
         name, value = w.split("=", 1)
         csrs.write(bus, name, int(value, 0))

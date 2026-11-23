@@ -380,8 +380,14 @@ in the plan). So the DSE can afford many builds.
 - No CPU (`cpu_type=None`): CH0 stays `add_sdram` (its Wishbone port is idle without a CPU), so the CSR names stay
   and `ddr_init.py` is unchanged. DDR init comes from the host only (`scripts/ddr_init.sh`).
 
-- [ ] `hw/gemm/gemm_soc.py` without CPU; `csr.csv` DDR names unchanged versus the base SoC
-- [ ] `hw/gemm/ddr_dma.py` + Migen sim test
+- [x] `hw/gemm/gemm_soc.py` (`GemmSoC(BaseSoC)`, `cpu_type=None`): fast check OK (2026-11-23 13:45). DDR CSR names
+      unchanged (`sdram*`, `ddrphy*`, `ddrclk*`). **Without a CPU LiteX puts the CSR region at 0x0** (not
+      0xf0000000): the generated driver (`CSR_BASE 0x0L`), `ddr_init.py` (reads `mems.csr.base`) and `litex_server`
+      handle it; `misc/dma_debug/csr_peek.py` now reads the base from `csr.csv` too.
+- [x] `hw/gemm/ddr_dma.py` (`PCIeDDRBridge`): 30 CSRs `ddr_dma_{sel,drained,clear,h2c_beats,h2c_dropped,c2h_beats}` +
+      `ddr_dma_ch{0,1}_{writer,reader}_{base,length,enable,done,loop,offset}`. No separate Migen sim test (the
+      hardware test with the C++ tool covers it; a sim would need a DRAM model); noted as a deviation from the plan.
+- [ ] Full build of `GemmSoC`
 - [ ] `sw/gemm_host/ddr_dma_test`: CH0 and CH1 write/read-back clean, GB/s recorded
 - [ ] `ddr_init.py` passes without a CPU
 
