@@ -42,7 +42,8 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 - [x] Bitstream loaded over JTAG, rescan: `10ee:7028`, BAR0 128 KB, **Gen2 x4**
 - [x] `driver.sh load`: probe OK, identifier `LiteX SoC on DU-PCB-001-003 2026-11-23 03:03:52`, 1 MSI vector
 - [x] `driver.sh info`: identifier and scratch register (0x12345678, 0xdeadbeef) read back correctly, so **MMIO works**
-- [ ] ⛔ `driver.sh dma-test` **fails**: 0 Gbps, TX_BUFFERS stuck at 129, RX 0, no data errors (nothing comes back)
+- [x] `driver.sh dma-test`: failed at first (0 Gbps, reader stall); **works since the RX byte-enable fix**: 13.43 Gb/s
+      loopback, 0 errors over 10 s (2026-11-23 13:02)
 - [ ] ⛔ About 3 min after the last test the **host hard-locked** (PSU power cycle needed). No panic/oops in the
       journal (it ends 03:19:39), pstore empty, lockup→panic is off on this host
 - [x] **User:** `scripts/iommu/step1_iommu_on.sh`, reboot, `scripts/iommu/step2_after_reboot.sh` (2026-11-23).
@@ -51,7 +52,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 - [x] Probe SoC (`misc/dma_debug/`) built and loaded (2026-11-23 11:51), its driver built (not loaded)
 - [x] **Root cause of the stall found** with the probe counters (step C below): the LitePCIe 2026.08 DMA reader's
       `pending_words` underflows because each 256 B completion arrives as 17 beats, not 16
-- [ ] Fix the stall (options below), re-test DMA, measure GB/s
+- [x] Fix the stall: `S7PCIEPHYRXBE` in `target.py`; re-tested on the probe SoC and the base SoC: 13.43 Gb/s, 0 errors
 - [x] **User:** re-ran `sudo scripts/setup_permissions.sh` (12:18): `enable` = 1 after udev trigger, rule has the retry
 - [x] **User:** `misc/crash_debug/arm_crash_capture.sh` (12:18): `efi_pstore` backend registered, lockup/hung/RCU
       panics on, `kernel.panic=10`, SysRq 1
@@ -317,8 +318,10 @@ retry fix works).
   `m_axis_rx_tkeep` → unused `main_tkeep` net (fix present).
 - Loaded 13:01:57 (`scripts/load.sh` + `scripts/pcie_rescan.sh`): Gen2 x4, BAR0 128 KB, `enable` = 1.
 - Driver rebuilt for this build (13:02), loaded, `info`: identifier `... 12:56:22`, scratch register OK.
-- **Next:** `scripts/driver.sh dma-test -w 32 -t 10` (past the 128-loop skip); then keep watching for freezes
-  (capture armed). Expected: 16 beats per completion,
+- **✅ DMA on the production base SoC (13:02:34, IOMMU on):** `scripts/driver.sh dma-test -w 32 -t 10`: steady
+  **13.42–13.44 Gb/s** loopback, ~2.0 M buffers of 8 KB each way (~16.5 GB per direction), **0 errors**, 72928
+  IRQs. Kernel: only the AER lines of the JTAG reload (13:02:01) and 42 driver "too late" pacing notices.
+- **Next:** `scripts/status.sh` (BAR0 path without the driver), then keep watching for freezes (capture armed). Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
 
 **Fix options for the stall** (option 1 is built and waiting for its hardware test):
@@ -407,6 +410,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | probe SoC + RX be fix | Vivado timing | WNS +0.029 ns, WHS +0.021 ns (met) |
 | 2026-11-23 | probe SoC + RX be fix, IOMMU on | **DMA loopback 2 s** | **13.43 Gb/s, 0 errors** (370k buffers), queued == dequeued |
 | 2026-11-23 | base SoC + RX be fix | Vivado timing | WNS +0.049 ns, WHS +0.015 ns (met) |
+| 2026-11-23 | base SoC + RX be fix, IOMMU on | **DMA loopback 10 s** | **13.42–13.44 Gb/s, 0 errors**, ~2.0 M buffers each way |
 
 ## Open issues / decisions pending
 
@@ -421,6 +425,10 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 13:03 (phase 1, DMA works on the production SoC)
+- Base SoC rebuilt with `S7PCIEPHYRXBE` (timing met), loaded, driver rebuilt: DMA loopback 13.43 Gb/s, 0 errors over
+  10 s. The generated LitePCIe driver + DMA path is now verified on this card (it never was before).
 
 ### 2026-11-23 12:55 (phase 1, DMA fixed)
 - Step C passed (no freeze 19 min after a DMA test, through a Vivado run).
