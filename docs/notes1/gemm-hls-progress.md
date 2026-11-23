@@ -677,11 +677,26 @@ in the plan). So the DSE can afford many builds.
       the other points are unchanged (they were compute-bound already). Traffic is far below the DDR bandwidth
       (~0.7 GB/s per matrix at 87 GFLOP/s), so the remaining ~15 % at PE 32×8 is most likely per-tile fill/drain
       (A and B wait equally); next experiment: larger memory tiles (512) for PE 32×8 tA.
-- [ ] **Campaign `tiles_pe32_ta`** (PE 32×8, transposed A, tiles N×M ∈ {256, 512}², sizes 1024³/2048³/4096³):
-      HLS (18:51–18:53, all 4 OK, est 4.14–4.21 ns, DSP ~1321, BRAM18 662–694, LUT 214–223k: larger tiles cost almost no
-      BRAM); builds + runs started 18:53 with `--resume` (the 256×256 build is reused from `transposed_a`).
-      At 19:02: 256×256 reused, 256×512 in Vivado; 512×256 and 512×512 follow (~25 min each), then the runs.
-      (Times in this file are from the result records; earlier entries had estimated times, corrected 19:02.)
+- [x] **Campaign `tiles_pe32_ta` complete** (PE 32×8, transposed A, tiles N×M ∈ {256, 512}², sizes
+      1024³/2048³/4096³; 18:51–20:11, `results/tiles_pe32_ta/`). HLS 18:51–18:53 (all 4 OK, est 4.14–4.21 ns).
+      The 256×256 build was reused from `transposed_a`; the other three built 18:53–20:09 (1471/1555/1486 s), all met
+      timing; all 24 runs verified (sampled, max rel err ≤ 2.6e-07). Times in this file are from the result records
+      (earlier entries had estimated times, corrected 19:02).
+
+      | Tile N×M | WNS / WHS ns | LUT | BRAM tiles | DSP | 1024³ | 2048³ | 4096³ | A / B r_wait at 4096³ |
+      |---|---|---|---|---|---|---|---|---|
+      | 256×256 | +0.038 / +0.012 | 153.5k | 414.0 | 1341 | 86.57 (84.5 %) | 87.54 (85.5 %) | 88.34 (86.3 %) | 16.6 / 16.6 % |
+      | 256×512 | +0.038 / +0.014 | 153.8k | 414.5 | 1335 | 87.53 (85.5 %) | 88.74 (86.7 %) | 89.40 (87.3 %) | 8.1 / 10.0 % |
+      | 512×256 | **+0.007** / +0.016 | 153.2k | 430.5 | 1328 | 92.33 (90.2 %) | 93.45 (91.3 %) | 94.37 (92.2 %) | 10.5 / 8.6 % |
+      | 512×512 | +0.031 / +0.016 | 153.9k | 430.5 | 1320 | 92.92 (90.8 %) | 94.31 (92.1 %) | **95.07 (92.8 %)** | 5.3 / 5.3 % |
+
+      GFLOP/s (% of the 102.4 peak), kernel time only. 4096³ end to end incl. DMA: 1806 → 1695 ms.
+      **Findings:** larger tiles cost almost nothing (+16.5 BRAM tiles for tile N 512, LUT/DSP unchanged) and halve
+      the time the kernel waits for A and B. The N tile matters more than the M tile (512×256 beats 256×512 by ~5
+      GFLOP/s): a larger N tile means fewer passes over B. **Best: 95.07 GFLOP/s** (512×512, 4096³). The 512×256
+      build closed with only +0.007 ns, so this region is near the edge at 200 MHz.
+      Possible next steps: tile 1024 (BRAM for the A/B buffers grows with the tile; HLS estimate first), or a
+      clock campaign on the 512×512 build (HLS est 4.21 ns, so ~220 MHz may be reachable).
 - [x] `gemm_runner` capacity check (was open): each matrix (C plus its C2H read slack) must end before the next
       region on its channel; e.g. B of 1.25 GB is rejected (`does not fit before 0x40000000`). Regression on PE 32×8:
       1024³ unchanged (86.53 GFLOP/s, full verification OK).
@@ -734,6 +749,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | **GEMM 2048³** | **verified (sampled), 733.5 ms, 23.42 GFLOP/s (91.5 %)** |
 | 2026-11-23 | pe_sweep, tile 256, 200 MHz | **best GEMM** | PE 8×8 24.56, PE 16×8 47.19, **PE 32×8 86.54 GFLOP/s** (1024³, 84.5 % of 102.4) |
 | 2026-11-23 | transposed_a, PE 32×8, tile 256 | **best GEMM** | **87.54 GFLOP/s** (2048³, 85.5 % of 102.4), A in 16-beat bursts |
+| 2026-11-23 | tiles_pe32_ta, PE 32×8 tA, tile 512×512 | **best GEMM** | **95.07 GFLOP/s** (4096³, 92.8 % of 102.4); 94.31 at 2048³ |
 
 ## Open issues / decisions pending
 
@@ -748,6 +764,10 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 20:11 — larger tiles
+- Tile campaign for PE 32×8 transposed A done: 512×512 tiles reach 95.07 GFLOP/s at 4096³ (92.8 % of peak), up
+  from 88.34 with 256×256; extra cost 16.5 BRAM tiles. All builds met timing (512×256 only by +0.007 ns).
 
 ### 2026-11-23 18:50 — transposed A
 - Transposed-A builds (PE 16×8, 32×8) benchmarked: PE 32×8 2048³ 82.3 → 87.5 GFLOP/s; A and B now wait equally.
