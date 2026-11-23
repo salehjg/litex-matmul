@@ -10,3 +10,19 @@ build/
 .Xil/
 __pycache__/
 *.pyc
+# GEMM HLS flow (docs/notes1/gemm-hls-plan.md)
+results/
+*.hls/
+vitis_hls.log
+vitis-run*.log
+hls_*.log
+.ipcache/
+*.backup.jou
+*.backup.log
+webtalk*
+usage_statistics_webtalk.*
+.ipynb_checkpoints/
+.pytest_cache/
+# host software binaries/objects
+sw/gemm_host/bin/
+sw/gemm_host/*.o

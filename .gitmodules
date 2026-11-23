@@ -1,0 +1,3 @@
+[submodule "submodules/gemm_hls"]
+	path = submodules/gemm_hls
+	url = https://github.com/spcl/gemm_hls

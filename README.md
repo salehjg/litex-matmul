@@ -83,3 +83,18 @@ Adding accelerator logic: in `target.py`, take a DDR CH1 port with
 - **Verified on this card (2026-11-20):** keep-alive, PCIe (Gen2, x4 in this PC's slot), both 200 MHz clocks and
   the 50 MHz, both DDR3 channels (CH0 893 ps / CH1 1429 ps write window, 1 GB BIST clean, 7.2 GB/s).
   DDR3 VDDQ (1.35 or 1.5 V) is unmeasured; I/O is SSTL15 like the MIG design that calibrated on this card.
+
+## GEMM HLS accelerator (in progress)
+
+An HLS GEMM kernel, adapted from [spcl/gemm_hls](https://github.com/spcl/gemm_hls), built into this SoC: host sends
+A/B over PCIe DMA into both DDR3 channels, the kernel computes C, the host reads C back with performance counters.
+JSON-driven build and design-space exploration. Plan: [`docs/notes1/gemm-hls-plan.md`](docs/notes1/gemm-hls-plan.md),
+status: [`docs/notes1/gemm-hls-progress.md`](docs/notes1/gemm-hls-progress.md).
+
+```
+git submodule update --init --recursive   # submodules/gemm_hls (+ hlslib): reference only, never edited
+```
+
+Planned layout: `kernels/gemm/` (adapted HLS C++), `hw/gemm/` (LiteX SoC, DMA bridge, perf counters), `tcl/` (HLS and
+Vivado hook scripts), `sw/gemm_host/` (C++ runner), `flow/gemmflow/` (Python build/DSE package),
+`scripts/gemm_{build,run,dse}.py`, `configs/{gemm,dse}/`. Outputs go to `build/gemm/` and `results/` (git-ignored).
