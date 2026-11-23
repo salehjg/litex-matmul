@@ -60,7 +60,13 @@ class VitisHls(Tool):
 
     def run_tcl(self, tcl, cwd, log, timeout=None):
         exe = os.path.join(self.xilinx_root, "Vitis", "bin", "vitis-run")
-        return self.run([exe, "--mode", "hls", "--tcl", tcl], cwd, log, timeout)
+        seconds = self.run([exe, "--mode", "hls", "--tcl", tcl], cwd, log, timeout)
+        # vitis-run exits 0 even when csynth_design fails: the log is the only reliable status.
+        with open(log, errors="replace") as f:
+            errors = [l.strip() for l in f if l.startswith("ERROR:")]
+        if errors:
+            raise ToolError(f"{self.name}: {len(errors)} ERROR line(s), first: {errors[0][:300]}", log)
+        return seconds
 
 
 class Vivado(Tool):

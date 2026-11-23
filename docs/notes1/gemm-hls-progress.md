@@ -427,7 +427,13 @@ in the plan). So the DSE can afford many builds.
       `Config.h` + `params.tcl` into `build/gemm/hls/<hls_hash[:12]>/`, stamp file, up-to-date check; `HlsReport`:
       csynth.xml summary + RTL ports). Synthesis cflags as upstream: `-O3 -DMM_SYNTHESIS -DHLSLIB_SYNTHESIS
       -DMM_DYNAMIC_SIZES -DHLSLIB_STREAM_TIMEOUT=16 -DHLSLIB_LEGACY_SDX=0` (2026-11-23 13:46)
-- [ ] First HLS run of `default.json` (csynth + IP export)
+- [ ] First HLS run of `default.json` (csynth + IP export). **Attempt 1 (13:46) failed in 19 s:**
+      `vitis-run --mode hls --tcl` accepts the legacy Tcl (`open_project`/`open_solution`, warns it won't show in the IDE),
+      but csynth stops with `ERROR: [HLS 214-177] ... Cannot apply disaggregate pragma/directive on object 'aSplit' /
+      'aPipes' / 'bPipes' as there is an unresolved Phi node on it (Top.cpp:125)`. That is the hlslib-vs-2026.1 risk
+      from the plan (gemm_hls was tested with Vitis 2021.1): arrays of `hlslib::Stream` objects indexed in the unrolled
+      PE loop. Also found: **`vitis-run` exits 0 even when csynth fails**, so `VitisHls.run_tcl` now scans the log for
+      `ERROR:` lines and raises `ToolError`.
 - [ ] hlslib compatibility with Vitis HLS 2026.1 *synthesis* checked (simulation: OK unmodified)
 
 ### Phase 4: SoC integration ⬜
