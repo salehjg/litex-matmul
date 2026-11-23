@@ -16,15 +16,20 @@ TARGET="$ROOT/boards/dupcb/target.py"
 BUILD="$ROOT/build/dupcb"
 # PCI address of the card (empty if not enumerated). LitePCIe uses Xilinx vendor ID 10ee.
 pcie_bdf() { lspci -D -d 10ee: | head -n1 | cut -d' ' -f1; }
-# Path of the card's BAR0 file, after making sure Linux has the device enabled (needs sudo).
+# Installed by scripts/setup_permissions.sh: password-less litepcie.ko load/unload.
+MODCTL=/usr/local/sbin/litepcie-modctl
+# Write "1" to a sysfs file: directly if the kernel lets us (scripts/setup_permissions.sh), else through sudo.
+sysfs_write1() { { echo 1 > "$1"; } 2> /dev/null || echo 1 | sudo tee "$1" > /dev/null; }
+# Path of the card's BAR0 file, after making sure Linux has the device enabled.
+# Without scripts/setup_permissions.sh this asks for the sudo password.
 pcie_bar() {
     local bdf dev
     bdf="$(pcie_bdf)"
     [[ -n "$bdf" ]] || { echo "Card not on the PCIe bus (try scripts/pcie_rescan.sh)." >&2; return 1; }
     dev="/sys/bus/pci/devices/$bdf"
-    sudo -v   # The LiteX tools run "sudo chmod" on the BAR file.
-    # Linux leaves a driverless device disabled; only root may enable it.
-    [[ "$(cat "$dev/enable")" != 0 ]] || echo 1 | sudo tee "$dev/enable" > /dev/null
+    [[ -x "$MODCTL" ]] || sudo -v   # LiteX runs "sudo chmod" on BAR0 (no password after the setup).
+    # Linux leaves a driverless device disabled (the udev rule from the setup enables it).
+    [[ "$(cat "$dev/enable")" != 0 ]] || sysfs_write1 "$dev/enable"
     echo "$dev/resource0"
 }
 # Start litex_server on BAR0 in the background (stopped when the script exits).
