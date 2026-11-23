@@ -16,21 +16,21 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ✅ 2026-11-23 17:04: builds, meets timing at 200 MHz |
 | 5 | `gemm_runner` end to end, verified results and counters | ✅ 2026-11-23 17:06: sizes 256³–2048³ + non-multiples verified, 23.4 GFLOP/s (91.5 % of peak), counters = analytic traffic |
 | 6 | `gemm_build.py` complete (stages, caching, manifest) | ✅ stages + stamps (unchanged steps skipped, HLS IP shared across Vivado knobs); DSE builds now also write `reports/summary.json` |
-| 7 | `gemm_dse.py` + example campaigns | ✅ 10 campaigns run (PE, transposed A, tiles, memory maps, sizes, clocks, Vivado presets; 11th running); best 98.6 GFLOP/s |
+| 7 | `gemm_dse.py` + example campaigns | ✅ 12 campaigns run (PE, transposed A, tiles, memory maps, sizes, clocks, Vivado presets); best 110.9 GFLOP/s (PE 32×8, 225 MHz) |
 | 8 | README usage + final notes | 🟡 README GEMM section + measured table, summary and lessons above; final clock numbers pending |
 
 ## Summary and lessons (2026-11-23, 22:45)
 
-**Where it stands.** Every piece of the plan works end to end on the card, unattended: JSON config → HLS →
+**Where it stands** (best result updated 2026-11-24 00:41). Every piece of the plan works end to end on the card, unattended: JSON config → HLS →
 LiteX/Vivado → JTAG load → PCIe rescan → driver → DDR calibration → host tools → GEMM runs with verification →
-JSONL/CSV. The DSE driver ran 10 campaigns so far (16 Vivado builds, 18 automatic bring-ups, 188 run rows, all
-verified OK) with no manual step and no host problem.
+JSONL/CSV. The DSE driver ran 12 campaigns (20 Vivado builds, 21 automatic bring-ups, 206 run rows, all verified
+OK) with no manual step and no host problem.
 
 | What | Result |
 |---|---|
-| Best kernel | PE 32×8, transposed A, tile 1024×512, 200 MHz: **98.59 GFLOP/s** at 8192³ (96.3 % of 102.4); 154k LUT (52 %), 1320 DSP (69 %), 654.5 BRAM tiles (69 %) |
-| Same, end to end | 8192³ in 12.00 s (kernel 11.15 s; the rest is DMA of 768 MB in, 256 MB out) |
-| Highest clock so far | PE 8×8 at 250 MHz: 29.02 GFLOP/s (90.7 %). PE 32×8: 225 MHz misses by 41 ps with the default preset (presets being tried), 250 MHz by 0.78 ns |
+| Best kernel | PE 32×8, transposed A, tile 1024×512, **225 MHz** (`aggressive` preset): **110.86 GFLOP/s** at 8192³ (96.2 % of 115.2); 152k LUT (51 %), 1320 DSP (69 %), 654.5 BRAM tiles (69 %). At 200 MHz (default preset): 98.59 |
+| Same, end to end | 8192³ in 10.77 s (kernel 9.92 s; the rest is DMA of 768 MB in, 256 MB out) |
+| Highest clocks | PE 8×8 at 250 MHz: 29.02 GFLOP/s (90.7 %). PE 32×8 at 225 MHz with `explore`/`aggressive` (default preset misses by 41 ps); 250 MHz misses by 0.78 ns |
 | Host ↔ DDR | H2C 0.82 GB/s, C2H 1.49 GB/s (PCIe Gen2 x4 slot; raw DMA loopback 1.68 GB/s) |
 | DDR3 | both channels calibrated by the host, 1 GB BIST clean, ~7.1–7.2 GB/s each |
 | Build times | HLS 0.5–4 min (shared across Vivado knobs); Vivado PE 8×8 12–14 min, PE 32×8 ~25 min |
@@ -50,7 +50,8 @@ verified OK) with no manual step and no host problem.
    fraction of the peak (pick the tile for the workload), and sizes that are not bus-word multiples gave wrong
    results without an error until `gemm_runner --multiples` began rejecting them.
 7. **The HLS clock estimate is not a limit:** with a tighter target HLS pipelines deeper, and Vivado closed PE 8×8 at
-   250 MHz although HLS estimated 4.24 ns. Only a routed build decides.
+   250 MHz although HLS estimated 4.24 ns. Only a routed build decides. For PE 32×8 at 225 MHz the Vivado preset
+   decided (default −0.041, aggressive +0.049 ns): try the presets before changing the kernel.
 8. **The marginal path in every build is in the PCIe hard block** (Gen2 x8 core clock at 500 MHz, 0 logic levels,
    −0.009 … +0.076 ns), not in the kernel. Open decision below.
 9. **DMA speed was the driver, not the link:** `udelay(1000)` in each DMA stop cost ~40 % of the time. C2H was fixed by
@@ -848,10 +849,25 @@ in the plan). So the DSE can afford many builds.
       loop counter, 7 logic levels). 250 MHz is far off (−0.775 ns, the same dataflow-control paths): that would need
       kernel changes such as registering the dataflow control fan-out.
       End to end 8192³ is now 12.00 s (was 12.15 s before the C2H fix).
-- [ ] **Campaign `pe32_ta_225_presets`** (23:32): the same config at 225 MHz with the `aggressive` and `explore` Vivado
-      presets. Their phys_opt directives replicate high-fanout drivers, which is the 225 MHz failure mode; on PE 8×8,
-      `aggressive` raised accel slack from +0.05 to +0.23 ns. Two builds of ~32 min each (HLS reused), then 2048³ to
-      8192³ if timing is met. Log `results/pe32_ta_225_presets/dse.log`.
+- [x] **Campaign `pe32_ta_225_presets` complete** (2026-11-23 23:31 – 2026-11-24 00:41, `results/pe32_ta_225_presets/`):
+      PE 32×8 tA tile 1024×512 at **225 MHz** with the `aggressive` and `explore` presets (HLS reused). **Both met
+      timing**, and all 12 runs verified (sampled, 4098 elements each, max rel err ≤ 2.0e-07), at a measured
+      224.9996 MHz.
+
+      | Preset | Build | WNS accel | WNS PCIe 500 | WNS sys | LUT / FF | GFLOP/s 2048³ / 4096³ / 8192³ |
+      |---|---|---|---|---|---|---|
+      | default (`clock_pe32_ta`) | 1911 s | −0.041 (34 endpoints) | +0.057 | +0.169 | 151.5k / 236.0k | not run |
+      | aggressive | 2017 s | **+0.049** | +0.046 | +0.145 | 152.0k / 235.8k | 109.33 / 110.34 / **110.86** |
+      | explore | 2063 s | +0.007 | +0.031 | +0.108 | 151.3k / 235.9k | the same to 4 digits |
+
+      **New best: 110.86 GFLOP/s at 8192³ (96.2 % of 115.2)**, +12.4 % over 200 MHz. Kernel cycles are unchanged
+      (2.2316 G vs 2.2304 G at 200 MHz), so the kernel is still compute-bound at 225 MHz. End to end 8192³: 10.77 s
+      (kernel 9.92 s). DSP 1320 and BRAM 654.5 tiles, as at 200 MHz. Config: `configs/gemm/pe32x8_ta_t1024x512_225mhz.json`
+      (`aggressive`, build `f32_pe32x8_t1024x512_225mhz_tA_aggressive-db5adf1c`, reused by `gemm_build.py`).
+      **What made it close:** the preset's phys_opt (driver replication on the 256-bit C-pipe FIFO enables and the
+      dataflow control). The kernel is unchanged. This campaign was the first to run on the fixed `gemm_dse.py`: run
+      rows carry `build_id` = full id and `hw_build_id` = `db5adf1c`/`8c43d008`, plus `invocations.jsonl`, and the build
+      dirs got `manifest.json` + `reports/summary.json`.
 - [x] Phase 8 (docs), part 1 (20:16): README GEMM section has the measured-results table (best config later `pe32x8_ta_t1024x512.json`), the transposed-A knob and
       the DDR placement; `configs/gemm/pe32x8_ta_t512.json` is the best measured config (same build id as the
       campaign build, so `gemm_build.py` on it reuses `build/gemm/soc/f32_pe32x8_t512x512_200mhz_tA-dc42aa19`).
@@ -925,6 +941,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | clock_sweep, PE 8×8 t128 | 150 / 200 / 250 MHz | 17.68 / timing failed by 9 ps (PCIe path) / **29.02 GFLOP/s** at 1024³; 250 MHz met (WNS +0.045) |
 | 2026-11-23 | vivado_preset_sweep, PE 8×8 t128, 200 MHz | default / explore / aggressive | WNS −0.009 / +0.017 / +0.076 ns, build 724 / 789 / 793 s, 23.36 GFLOP/s for both that met timing |
 | 2026-11-23 | clock_pe32_ta, PE 32×8 tA t1024×512 | 200 / 225 / 250 MHz | 98.59 GFLOP/s (8192³, reproduced) / WNS −0.041 (34 endpoints, C-pipe fan-out) / −0.775 ns |
+| 2026-11-24 | pe32_ta_225_presets, PE 32×8 tA t1024×512, 225 MHz | aggressive / explore | both met (WNS +0.049 / +0.007); **110.86 GFLOP/s** (8192³, 96.2 % of 115.2) |
 
 ## Open issues / decisions pending
 
@@ -978,6 +995,11 @@ in the plan). So the DSE can afford many builds.
   `gemm_runner --multiples N,K,M`, which rejects other sizes before any transfer.
 
 ## Log
+
+### 2026-11-24 00:41 — 225 MHz closes: 110.9 GFLOP/s
+- PE 32×8 tA tile 1024×512 meets timing at 225 MHz with the `aggressive` (+0.049 ns) and `explore` (+0.007 ns) presets
+  and runs at 110.86 GFLOP/s at 8192³ (96.2 % of 115.2), +12.4 % over 200 MHz, all verified. New best config
+  `configs/gemm/pe32x8_ta_t1024x512_225mhz.json`.
 
 ### 2026-11-23 23:32 — PE 32×8 at 225/250 MHz
 - Best config at 225 MHz misses timing by 41 ps (34 endpoints, route-dominated C-pipe FIFO enables and dataflow
