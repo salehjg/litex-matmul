@@ -16,15 +16,15 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ✅ 2026-11-23 17:04: builds, meets timing at 200 MHz |
 | 5 | `gemm_runner` end to end, verified results and counters | ✅ 2026-11-23 17:06: sizes 256³–2048³ + non-multiples verified, 23.4 GFLOP/s (91.5 % of peak), counters = analytic traffic |
 | 6 | `gemm_build.py` complete (stages, caching, manifest) | ✅ stages + stamps (unchanged steps skipped, HLS IP shared across Vivado knobs); DSE builds now also write `reports/summary.json` |
-| 7 | `gemm_dse.py` + example campaigns | ✅ 11 campaigns run (PE, transposed A, tiles, memory maps, sizes, clocks, Vivado presets); best 98.6 GFLOP/s |
+| 7 | `gemm_dse.py` + example campaigns | ✅ 10 campaigns run (PE, transposed A, tiles, memory maps, sizes, clocks, Vivado presets; 11th running); best 98.6 GFLOP/s |
 | 8 | README usage + final notes | 🟡 README GEMM section + measured table, summary and lessons above; final clock numbers pending |
 
 ## Summary and lessons (2026-11-23, 22:45)
 
 **Where it stands.** Every piece of the plan works end to end on the card, unattended: JSON config → HLS →
 LiteX/Vivado → JTAG load → PCIe rescan → driver → DDR calibration → host tools → GEMM runs with verification →
-JSONL/CSV. The DSE driver ran 11 campaigns (17 Vivado builds, 18 automatic bring-ups, 201 verified run rows) with no
-manual step and no host problem.
+JSONL/CSV. The DSE driver ran 10 campaigns so far (16 Vivado builds, 18 automatic bring-ups, 188 run rows, all
+verified OK) with no manual step and no host problem.
 
 | What | Result |
 |---|---|
