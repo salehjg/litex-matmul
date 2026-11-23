@@ -10,7 +10,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Scaffolding: submodule, docs, `.gitignore`, README | ✅ 2026-11-23 |
-| 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ⛔ DMA reader stalls; **host froze twice** (no trace); bisecting the freeze |
+| 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ⛔ **stall root cause found** (LitePCIe 2026.08 reader accounting); host freeze still being bisected (step C watch) |
 | 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | ⬜ |
 | 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | ⬜ |
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ⬜ |
@@ -49,10 +49,12 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
       Checked: `intel_iommu=on` in `/proc/cmdline`, 26 IOMMU groups, card alone in group 24, sysctls 1/1/10
 - [x] Retest DMA with the IOMMU on: **still stalls, but no DMAR fault, no AER error, host stayed up** (details below)
 - [x] Probe SoC (`misc/dma_debug/`) built and loaded (2026-11-23 11:51), its driver built (not loaded)
-- [ ] Root cause of the stall (probe counters, step C below), fix
-- [ ] **User:** re-run `sudo scripts/setup_permissions.sh` once more (enable-after-rescan race fix, see below);
-      still pending at 11:51 (`enable` = 0 after the rescan)
-- [ ] **User:** `misc/crash_debug/arm_crash_capture.sh` (once per boot) before steps B/C; not yet run this boot
+- [x] **Root cause of the stall found** with the probe counters (step C below): the LitePCIe 2026.08 DMA reader's
+      `pending_words` underflows because each 256 B completion arrives as 17 beats, not 16
+- [ ] Fix the stall (options below), re-test DMA, measure GB/s
+- [x] **User:** re-ran `sudo scripts/setup_permissions.sh` (12:18): `enable` = 1 after udev trigger, rule has the retry
+- [x] **User:** `misc/crash_debug/arm_crash_capture.sh` (12:18): `efi_pstore` backend registered, lockup/hung/RCU
+      panics on, `kernel.panic=10`, SysRq 1
 - [ ] `scripts/status.sh` (needs the updated udev rule)
 
 **DMA stall: what was measured.** CSRs were read through the driver, because mmap of `resource0` returns EINVAL
@@ -208,14 +210,62 @@ a non-system user is deprecated (still works on systemd 262).
       expected AER lines from the JTAG reload (11:34:41: root-port RxErr + CmpltTO when the link drops). Together with
       the clean 12 h MMIO-only session on 2026-11-20, this points at the **LitePCIe driver/DMA path** as the trigger.
       Caveat: the Vivado load lasted ~5 min, not the ~45 min assumed.
-- [ ] **B: driver loaded, MMIO only.** Probe build: `BUILD_DIR=build/dma_probe scripts/driver.sh load`,
-      `driver.sh info`, read the (cleared) probe counters with `misc/dma_debug/csr_peek.py`, then wait ~15 min.
-- [ ] **C: one DMA test with probe counters, driver unloaded, wait ~20 min** (repeats freeze #2's conditions):
-      `misc/dma_debug/run_probe_test.py --build-dir build/dma_probe --seconds 2`, then `driver.sh unload`. The JSON log
-      in `misc/dma_debug/logs/` has the counters that explain the stall (pending_words shadow, completion sizes and
-      errors, beats in/out, FIFO/queue levels at the moment the reader was disabled).
-- [ ] If C freezes: read `/var/lib/systemd/pstore/` after the reboot. If it doesn't: repeat C a few times, then
-      MRRS 256/128 (`misc/dma_debug/set_mrrs.sh`).
+- [x] **B: driver loaded, MMIO only → no freeze.** Probe build, crash capture armed. `BUILD_DIR=build/dma_probe
+      scripts/driver.sh load` at 12:19:09, `info` OK (identifier `... 11:45:08`, scratch OK). Probe at rest: all
+      counters 0, `levels_live` = all 8 tags free, `flags_live` 0x2d82 (reader idle, completion path ready), MRRS 512,
+      MPS 256. Watched 15.5 min (`misc/crash_debug/watch_host.sh`, log
+      `misc/crash_debug/logs/20261123-122047_stepB_driver_mmio_only.log`): no freeze, 0 IRQs, no kernel messages.
+- [x] **C (test part): one DMA test with probe counters**, 12:34:57, `misc/dma_debug/run_probe_test.py --build-dir
+      build/dma_probe --seconds 2 --tag stepC_mrrs512`, then `driver.sh unload` at 12:34:59. Same stall as before
+      (`0.00 Gbps, TX 135, RX 8, 0 errors`, 1 IRQ), no DMAR/AER. Counters explained below. Log:
+      `misc/dma_debug/logs/20261123-123459_stepC_mrrs512.json`.
+- [ ] **C (wait part): 20 min watch after the test, driver unloaded** (freeze #2's conditions). Running from 12:35,
+      log `misc/crash_debug/logs/*_stepC_after_dma_unloaded.log`.
+- [ ] If C freezes: read `/var/lib/systemd/pstore/` after the reboot. If not: repeat C a few times (freeze #1 came
+      right after DMA tests with the driver still loaded), then MRRS 256/128 (`misc/dma_debug/set_mrrs.sh`).
+
+**Stall root cause (probe counters, step C, 2026-11-23 12:34).**
+
+| Counter | Value | Meaning |
+|---|---|---|
+| `ctl_rd_reqs` = `rd_split_reqs` = `rd_port_reqs` | 137 | read requests issued (512 B each, `cmp_bytes` 70144 = 137 × 512) |
+| `cmp_ends` = `rd_port_cmp_done` | 137 | every request completed and retired: **no lost completions**, `cmp_errs` 0, `ctl_cmp_badtag` 0 |
+| `cmp_len64` (all others 0) | 274 | the host answers each 512 B read with **two 256 B completions** (its MPS 256) |
+| `cmp_beats` / `cmp_tlps` | 4658 / 274 = **17** | each 256 B completion arrives as **17** 128-bit beats (16 would be the payload size) |
+| `rd_split_words` (queued) vs `rd_fifo_out` (dequeued) | 4384 vs 4658 | the reader adds 32 beats per request but removes **34** |
+| `pending_min` = `snap_pending` | **−274** = −2 × 137 | shadow of `pending_words`: 2 beats lost per request |
+| `pending_max` | 256 | = 8 requests × 32 beats in flight |
+| snapshot levels at disable | data FIFO 0, metadata 0, tag queue 8, req queue 0 | controller clean, nothing outstanding; `splitter_valid` 1 (reader wanted to issue more) |
+
+- In `litepcie/frontend/dma.py` (`LitePCIeDMAReader`), `pending_words` += `request_words` = `ceil(length / 16)` =
+  32 per issued 512 B request, and −= 1 per beat leaving the data FIFO. The payload of each completion starts behind
+  the 3-DW header, so on the 128-bit path it comes as a partial first beat + 15 full + a partial last beat = 17 beats
+  (= `ceil((3 + 64) / 4)`). 2 completions per request → 34 beats out per 32 queued.
+- The real counter is `Signal(max=data_fifo_depth + 1)`, 11-bit unsigned. While ≤ 8 requests are in flight it stays
+  positive, but the deficit grows by 2 per request; after ~128 requests (deficit > 256 in-flight beats) it goes
+  "below zero", wraps to ~2046, and the gate `pending_words < data_fifo_depth - max_words_per_request` (= 992)
+  closes **for good**. The reader sits in IDLE with a descriptor waiting and everything empty, exactly as observed
+  (137 requests ≈ 8.5 descriptors of 8 KB; the earlier "reader at descriptor 7" fits).
+- It is a **LitePCIe 2026.08 regression**. The August rework taught the TLP controller that completions can take an
+  extra beat (`5b0133a` "account for completion packet rounding": per-tag buffer depth `request_beats + 1`, comment
+  "partial first/last Completion TLPs cannot share one"), and `ea77120` started carrying byte enables through the
+  completion path, but the reader's `request_words` was not updated. 2026.04 predates all of this.
+- **Possible second problem (to check):** when the PHY and DMA widths are equal (128 = 128 here), the reader drops
+  the byte enables (`data_fifo.source.connect(data_conv.sink, omit={"be"})`), so the partial beats may pass as full
+  beats and corrupt the DMA stream (`wr_beats` = 4658 = every completion beat reached the writer). `dma_test`
+  reported 0 errors on the 8 RX buffers it saw; still to be verified with a working reader.
+- **Possible tie to the freezes (open):** the counters show the PCIe side clean after the stall (all tags back, no
+  outstanding requests, no AER/DMAR), so the stall itself leaves nothing wedged. Whether the host freeze needs DMA
+  at all is what the step C watch and repeats decide.
+
+**Fix options for the stall** (to decide; none applied yet):
+1. Pin LitePCIe to **2026.04** (before the completion-path rework) in `setup.litex.du-pcb.py` and rebuild. Simplest;
+   loses the 2026.08 fixes.
+2. Keep 2026.08 and correct the reader accounting: count queued words as the beats the completions will really take
+   (per completion TLP `ceil((header_offset + len) / beat)`, i.e. +1 per completion here) or dequeue by valid
+   payload (`be`) instead of by beat; and keep `be` on the equal-width path. Needs a LitePCIe patch kept in this repo
+   (e.g. `patches/litepcie/*.patch` applied by the setup script) and reported upstream.
+3. Workaround without changing LitePCIe: none clean (the accounting is internal to the reader).
 
 **Probe SoC build (2026-11-23 11:45–11:50, `build/dma_probe/`).** Identifier `LiteX SoC on DU-PCB-001-003
 2026-11-23 11:45:08`. Timing met: WNS +0.033 ns, TNS 0, WHS +0.016 ns. 37 `dma_probe_*` CSRs. `pcie_dma0` moved
@@ -286,6 +336,8 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | base SoC, no driver | freeze bisection step A | no freeze in 17 min incl. a Vivado run |
 | 2026-11-23 | base / probe SoC | full Vivado build time | ~6 min / ~5 min |
 | 2026-11-23 | probe SoC | Vivado timing | WNS +0.033 ns, WHS +0.016 ns (met) |
+| 2026-11-23 | probe SoC, driver, MMIO only | freeze bisection step B | no freeze in 15.5 min, 0 IRQs |
+| 2026-11-23 | probe SoC, IOMMU on | DMA loopback + probes | 137 reqs × 512 B, 274 cpl × 256 B, **17 beats/cpl**, pending −2/req → stall |
 
 ## Open issues / decisions pending
 
@@ -300,6 +352,16 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 (phase 1, stall root cause found)
+- User armed crash capture and installed the udev fix (12:18).
+- Step B (probe build, driver loaded, MMIO only, 15.5 min): no freeze.
+- Step C test: one DMA run with probe counters. **Stall explained:** each 256 B completion arrives as 17 beats; the
+  LitePCIe 2026.08 reader queues 32 beats per 512 B request but dequeues 34, so its 11-bit `pending_words` wraps
+  after ~128 requests and the reader stops for good. A regression from the Aug 2026 completion-path rework. Fix
+  options written down (pin 2026.04, or patch the reader).
+- Fixed `watch_host.sh` (grep with no match under `pipefail` ended the script after one minute).
+- Step C 20-min watch running (driver unloaded since 12:34:59).
 
 ### 2026-11-23 (phase 1, bisection step A passed, probe SoC ready)
 - Step A: our design on the card for 17 min without the driver, through a Vivado run: no freeze. Trigger is most
