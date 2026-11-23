@@ -17,7 +17,48 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 5 | `gemm_runner` end to end, verified results and counters | ✅ 2026-11-23 17:06: sizes 256³–2048³ + non-multiples verified, 23.4 GFLOP/s (91.5 % of peak), counters = analytic traffic |
 | 6 | `gemm_build.py` complete (stages, caching, manifest) | ✅ stages + stamps (unchanged steps skipped, HLS IP shared across Vivado knobs); DSE builds now also write `reports/summary.json` |
 | 7 | `gemm_dse.py` + example campaigns | ✅ 11 campaigns run (PE, transposed A, tiles, memory maps, sizes, clocks, Vivado presets); best 98.6 GFLOP/s |
-| 8 | README usage + final notes | 🟡 README GEMM section + measured table done; final notes pending |
+| 8 | README usage + final notes | 🟡 README GEMM section + measured table, summary and lessons above; final clock numbers pending |
+
+## Summary and lessons (2026-11-23, 22:45)
+
+**Where it stands.** Every piece of the plan works end to end on the card, unattended: JSON config → HLS →
+LiteX/Vivado → JTAG load → PCIe rescan → driver → DDR calibration → host tools → GEMM runs with verification →
+JSONL/CSV. The DSE driver ran 11 campaigns (17 Vivado builds, 18 automatic bring-ups, 201 verified run rows) with no
+manual step and no host problem.
+
+| What | Result |
+|---|---|
+| Best kernel | PE 32×8, transposed A, tile 1024×512, 200 MHz: **98.59 GFLOP/s** at 8192³ (96.3 % of 102.4); 154k LUT (52 %), 1320 DSP (69 %), 654.5 BRAM tiles (69 %) |
+| Same, end to end | 8192³ in 12.15 s (kernel 11.15 s; the rest is DMA of 768 MB in, 256 MB out) |
+| Highest clock so far | PE 8×8 at 250 MHz: 29.02 GFLOP/s (90.7 %); PE 32×8 at 225/250 MHz: campaign `clock_pe32_ta` running |
+| Host ↔ DDR | H2C 0.82 GB/s, C2H 1.49 GB/s (PCIe Gen2 x4 slot; raw DMA loopback 1.68 GB/s) |
+| DDR3 | both channels calibrated by the host, 1 GB BIST clean, ~7.1–7.2 GB/s each |
+| Build times | HLS 0.5–4 min (shared across Vivado knobs); Vivado PE 8×8 12–14 min, PE 32×8 ~25 min |
+
+**Lessons (the non-obvious ones; details in the phase sections):**
+1. **Old hlslib vs Vitis HLS 2026.1:** arrays of `hlslib::Stream` fail (HLS 214-177); the kernel uses `hls::stream`
+   in synthesis and keeps hlslib for simulation and DataPack. `vitis-run` exits 0 even when csynth fails, so the log
+   is scanned for `ERROR:`.
+2. **LitePCIe 2026.08 + stock `S7PCIEPHY`:** RX byte enables taken from `tkeep` add a garbage beat to every read
+   completion, and DMA stalls after ~64 KB. Fixed PHY: `boards/dupcb/s7pciephy_rx_be.py`.
+3. **Order on the card:** the driver's probe resets the SoC, so DDR calibration must come after the driver load.
+4. **Vivado `Route 35-13`** on driverless LUTRAM nets in constant/unused AXI converter FIFOs: use single-direction
+   converters and our own `AxiWriteToNative` for C.
+5. **The A read path decides PE 32×8:** A is read with single-beat strided accesses unless the host sends Aᵀ
+   (`transposed_a`); then larger tiles, the N tile first (fewer passes over B). 82 → 98.6 GFLOP/s.
+6. **The kernel computes whole memory tiles and silently needs whole bus words:** small matrices run at a
+   fraction of the peak (pick the tile for the workload), and sizes that are not bus-word multiples gave wrong
+   results without an error until `gemm_runner --multiples` began rejecting them.
+7. **The HLS clock estimate is not a limit:** with a tighter target HLS pipelines deeper, and Vivado closed PE 8×8 at
+   250 MHz although HLS estimated 4.24 ns. Only a routed build decides.
+8. **The marginal path in every build is in the PCIe hard block** (Gen2 x8 core clock at 500 MHz, 0 logic levels,
+   −0.009 … +0.076 ns), not in the kernel. Open decision below.
+9. **DMA speed was the driver, not the link:** `udelay(1000)` in each DMA stop cost ~40 % of the time. C2H was fixed by
+   enabling the writer once per transfer (0.84 → 1.49 GB/s); H2C needs a driver/gateware decision.
+10. **Host freezes:** two hard freezes came early, when the DMA stalled (before the PHY fix). Since the fix and with the
+    IOMMU on: none in 11 h of builds, reloads and DMA (up since 11:27). A JTAG reload in the running PC always gives an
+    AER burst on root port `80:1c.4` (correctable errors plus one non-fatal completion timeout) while the link is down.
+    No AER at all during DMA or GEMM runs.
 
 ## DDR memory map: where the matrices are
 
@@ -825,7 +866,7 @@ in the plan). So the DSE can afford many builds.
 
 ### Phase 8: docs 🟡
 - [ ] README usage section
-- [ ] Final numbers and lessons below
+- [x] Final numbers and lessons: section "Summary and lessons" at the top (22:45)
 
 ## Measurements
 
