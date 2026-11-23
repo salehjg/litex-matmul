@@ -507,7 +507,7 @@ in the plan). So the DSE can afford many builds.
       LiteX `str.format()`s the hook commands). `project_settings`, `floorplan`, `reports_json`, `program` Tcl: later.
 - [x] `gemm_soc.py --gemm-config <json>`: accel clock from the config, kernel added (needs the HLS run of that config),
       output `build/gemm_soc_<build_id>/`. Fast check OK: 59 `gemm_*` CSRs, `gemm_kernel_ip` black box, hook in the Tcl.
-- [ ] First full build with the kernel: started 2026-11-23 ~14:12 in the background
+- [x] First full build with the kernel (OK at build 4, see below); history: started 2026-11-23 ~14:12 in the background
       (`python3 hw/gemm/gemm_soc.py --gemm-config configs/gemm/default.json --build --vivado-max-threads 8`, log
       `build/gemm_soc_kernel_build.log`, output `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/`). **Failed (14:15):**
       `ERROR: [Synth 8-11365] ... named port connection 'm_axi_gmemX_*USER' does not exist`: csynth.xml lists the AXI
@@ -523,7 +523,8 @@ in the plan). So the DSE can afford many builds.
       its payload is constant (AWID 0, resp OKAY), Vivado drops the LUTRAM read side but keeps the cell. **Fix:**
       `hw/gemm/axi_native.py` `AxiWriteToNative` (per-beat native commands, data+strobe FIFO, B responses from a
       counter); simulation `hw/gemm/tests/test_axi_native.py` PASS (5 bursts 1–256 beats with gaps, 340 words, 5 B).
-      Build 4 next.
+      **Build 4 (16:52–17:04): OK, timing met** (WNS +0.049 ns, WHS +0.015 ns, accel 200 MHz included): LUT 64563
+      (21.6 %), FF 87041 (14.6 %), BRAM 238.5 tiles (25.0 %). Output `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/`.
 - [ ] Full build of `default.json`: timing met, `reports/vivado.json` written
 
 ### Phase 5: end to end 🟡
@@ -586,6 +587,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | GemmSoC, no CPU | DDR3 calibration + 1 GB BIST, both channels | PASS, 0 bad words, 7.11 GB/s write / 7.20 GB/s read |
 | 2026-11-23 | HLS `default.json` (f32 PE 8×8, tile 128) | csynth estimate | 4.236 ns (target 5 ns), DSP 381, BRAM18 313, FF 78k, LUT 68k, 33 s |
 | 2026-11-23 | GemmSoC, DDR calibrated after driver load | **DMA ↔ DDR round trip** | **OK** CH0+CH1, 64 MB: H2C 0.82 GB/s, C2H 0.84 GB/s (2 MB chunks) |
+| 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | Vivado timing / size | WNS +0.049 ns; 64.6k LUT, 87k FF, 238.5 BRAM tiles |
 
 ## Open issues / decisions pending
 
