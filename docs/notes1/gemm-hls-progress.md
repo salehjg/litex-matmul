@@ -393,7 +393,12 @@ in the plan). So the DSE can afford many builds.
       the C2H converter is in reset while its reader is disabled. C2H transfers are at least 2 DMA buffers (after a
       table reset `loop_status` reads (0, 0) both before and after descriptor 0 retires).
 - [ ] Full build of `GemmSoC` (the first one, started 13:47, has the old bridge; rebuild after it)
-- [ ] `sw/gemm_host/ddr_dma_test`: CH0 and CH1 write/read-back clean, GB/s recorded
+- [x] `sw/gemm_host/` written and compiling cleanly (-Wall -Wextra, 2026-11-23 13:35): `src/card.{hpp,cpp}` (`Card`:
+      CSRs via the driver ioctl, zero-copy rings, DMA enable, hardware loop status), `src/ddr_dma.{hpp,cpp}`
+      (`DdrDma::write/read`, 2 MB chunks, the protocol from the design notes), `tools/ddr_dma_test.cpp` (random data,
+      write, read back, compare, GB/s, `--json`). `Makefile` builds per SoC build: `make -C sw/gemm_host
+      BUILD_DIR=build/gemm_soc` → `build/gemm_soc/sw/ddr_dma_test` (needs that build's `driver/user/liblitepcie.a`).
+- [ ] `ddr_dma_test` on hardware: CH0 and CH1 write/read-back clean, GB/s recorded
 - [ ] `ddr_init.py` passes without a CPU
 
 ### Phase 3: kernel port + HLS step ⬜
