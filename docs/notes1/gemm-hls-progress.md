@@ -12,12 +12,12 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 0 | Scaffolding: submodule, docs, `.gitignore`, README | ✅ 2026-11-23 |
 | 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ✅ DMA works (13.43 Gb/s, 0 errors) after the S7 PHY RX byte-enable fix · ⚠️ host freeze cause still open (capture armed) |
 | 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | ✅ 2026-11-23 14:09: round trips clean on both channels, 0.82/0.84 GB/s (optimisation pending) |
-| 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | 🟡 HLS csynth + IP export OK (est. 4.24 ns at 200 MHz); csim via Vitis and `HlsStep` integration pending |
+| 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | ✅ csynth + IP export through `HlsStep` in every build; g++ simulation passes (Vitis csim wired via `hls.run_csim`, not used) |
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ✅ 2026-11-23 17:04: builds, meets timing at 200 MHz |
 | 5 | `gemm_runner` end to end, verified results and counters | ✅ 2026-11-23 17:06: sizes 256³–2048³ + non-multiples verified, 23.4 GFLOP/s (91.5 % of peak), counters = analytic traffic |
-| 6 | `gemm_build.py` complete (stages, caching, manifest) | ⬜ |
-| 7 | `gemm_dse.py` + example campaigns | ⬜ |
-| 8 | README usage + final notes | ⬜ |
+| 6 | `gemm_build.py` complete (stages, caching, manifest) | ✅ stages + stamps (unchanged steps skipped, HLS IP shared across Vivado knobs); DSE builds now also write `reports/summary.json` |
+| 7 | `gemm_dse.py` + example campaigns | ✅ 11 campaigns run (PE, transposed A, tiles, memory maps, sizes, clocks, Vivado presets); best 98.6 GFLOP/s |
+| 8 | README usage + final notes | 🟡 README GEMM section + measured table done; final notes pending |
 
 ## DDR memory map: where the matrices are
 
@@ -492,7 +492,7 @@ in the plan). So the DSE can afford many builds.
       write 7.11 GB/s, read 7.20 GB/s. Result: CH0 PASS, CH1 PASS. (`scripts/ddr_init.sh` is fixed to `build/dupcb`;
       for other builds call `ddr_init.py` with `--build-dir`.)
 
-### Phase 3: kernel port + HLS step 🟡
+### Phase 3: kernel port + HLS step ✅
 - [x] Sources copied verbatim to `kernels/gemm/` (2026-11-23 13:45; `src/`, `include/`, `tb/test_gemm.cpp` from
       `test/TestSimulation.cpp`, `LICENSE.md`), `ORIGIN.md` written (upstream commits, file map, change list). The g++
       simulation needs `ap_int.h`/`ap_fixed.h`/`hls_stream.h` from `Vitis/common/technology/autopilot`.
@@ -575,7 +575,8 @@ in the plan). So the DSE can afford many builds.
       counter); simulation `hw/gemm/tests/test_axi_native.py` PASS (5 bursts 1–256 beats with gaps, 340 words, 5 B).
       **Build 4 (16:52–17:04): OK, timing met** (WNS +0.049 ns, WHS +0.015 ns, accel 200 MHz included): LUT 64563
       (21.6 %), FF 87041 (14.6 %), BRAM 238.5 tiles (25.0 %). Output `build/gemm_soc_f32_pe8x8_t128x128-4e52e7f5/`.
-- [ ] Full build of `default.json`: timing met, `reports/vivado.json` written
+- [x] Full build of `default.json`: timing met (build 4 above); the reports go to `reports/summary.json` (`VivadoReport`
+      parses LiteX's text reports, no separate `vivado.json`)
 
 ### Phase 5: end to end ✅
 - [x] `gemm_runner` written and compiling (2026-11-23 14:14, untested on hardware): `sw/gemm_host/src/gemm_kernel.{hpp,cpp}`
@@ -610,7 +611,7 @@ in the plan). So the DSE can afford many builds.
       bursts, avg latency 34 cycles; C: 120 k write-stall cycles. At PE 8×8 the kernel is compute-bound (91 % of peak);
       the A read path becomes relevant for larger PE arrays (`transposed_a` or a wider transpose width are DSE knobs).
 
-### Phase 6: build driver ⬜
+### Phase 6: build driver ✅
 - [x] Pieces for the run flow (2026-11-23 16:28): `tcl/vivado/program.tcl` (JTAG load, checks DONE),
       `flow/gemmflow/board.py` (`Board.bring_up()`: program → rescan → driver build/load → `ddr_init.sh` (after the
       driver) → host tools; logs in `<build>/logs/`), `scripts/gemm_run.py` (bring-up + `gemm_runner` per size with the
@@ -623,10 +624,11 @@ in the plan). So the DSE can afford many builds.
       `reports.py` (`VivadoReport`: WNS/TNS/WHS/THS, LUT/FF/BRAM/DSP, kernel hierarchy) parses LiteX's text reports
       instead of a separate `reports_json.tcl` (simpler, same data); `manifest.py`. Dry run OK (HLS reused).
       Not yet run end to end.
-- [ ] Stamps: a rerun with no change skips everything; a Vivado-only change reuses the HLS IP
+- [x] Stamps: a rerun with no change skips everything (the shared 200 MHz build in `vivado_preset_sweep`: all steps
+      up to date, 0 s); a Vivado-only change reuses the HLS IP (`explore`/`aggressive` points: `hls: up to date`)
 - [ ] `manifest.json`, `reports/summary.json`
 
-### Phase 7: DSE 🟡
+### Phase 7: DSE ✅
 - [x] `scripts/gemm_dse.py` + `flow/gemmflow/results.py` (`ResultStore`: JSONL source of truth + regenerated CSV,
       flattened keys, fixed leading columns, `schema_version` 1) (2026-11-23 17:15): grid expansion (dotted keys,
       cross product), validation (invalid points recorded with reason), stages hls (parallel, jobs = min(cores/4,
@@ -702,7 +704,7 @@ in the plan). So the DSE can afford many builds.
       | 512×1024 | 4.374 | 1142 |
       | 1024×512 | 4.209 | 1142 |
       | 1024×1024 | 4.374 | 2070 (> 1910 on the device: does not fit) |
-      **225 MHz is not worth a build:** HLS gives the same schedule as for 200 MHz, and the routed 200 MHz PE 32×8
+      **225 MHz is not worth a build** (⚠️ wrong, see the correction below): HLS gives the same schedule as for 200 MHz, and the routed 200 MHz PE 32×8
       builds already have accel paths of 4.3 ns + skew (512×256: `ProcessingElement_17 trunc_ln_reg` → the dataflow
       `ap_sync_reg_ProcessingElement_*_ap_ready` resets, 8 logic levels, slack +0.007 ns); PE 16×8: `cPipes` FIFO
       4.94 ns. Beating 200 MHz would need kernel changes (e.g. registering the dataflow control fan-out).
@@ -748,9 +750,44 @@ in the plan). So the DSE can afford many builds.
       M/512 (N = 256, M = 256: 11 GFLOP/s, an eighth of 88). K sets the per-tile fill/drain share (K = 256: 87.5,
       K = 4096: 98.2 GFLOP/s). So the best tile depends on the workload: for matrices ≤ 512 the 256×256 builds are
       faster. End to end, the DMA (H2C 0.82 GB/s) dominates below ~1024³.
-- [ ] **Campaigns `clock_sweep` (PE 8×8 t128 at 150/200/250 MHz) then `vivado_preset_sweep` (default/explore/
-      aggressive at 200 MHz)**: started 21:14, chained in one background job, logs in
-      `results/{clock_sweep,vivado_preset_sweep}/dse.log`. 5 builds (the 200 MHz default-preset build is shared).
+- [x] **Campaign `clock_sweep` complete** (21:14–21:54, `results/clock_sweep/`): PE 8×8 t128, accel clock 150/200/250
+      MHz, 1024³, 2 reps, sampled verification (all 4 runs OK). Measured accel clock 149.9998 / 249.9996 MHz.
+
+      | Accel | HLS FF est. | Build | WNS overall | WNS accel | WHS | LUT / FF | 1024³ GFLOP/s (% of peak) | Kernel cycles |
+      |---|---|---|---|---|---|---|---|---|
+      | 150 MHz | 68.7k | 728 s | +0.048 | +0.076 | +0.012 | 63.1k / 79.6k | 17.68 (92.1 % of 19.2) | 18.22 M |
+      | 200 MHz | 78.1k | 724 s | **−0.009** (PCIe, see below) | +0.053 | +0.016 | 64.6k / 87.1k | not run (`timing_failed`) | — |
+      | 250 MHz | 85.3k | 834 s | +0.045 | +0.049 | +0.016 | 67.1k / 92.4k | **29.02 (90.7 % of 32.0)** | 18.50 M |
+
+      **Findings:**
+      - **PE 8×8 closes timing at 250 MHz** although HLS estimates 4.236 ns (> 4 ns). With the tighter target HLS
+        pipelines deeper (+7.2k FF estimated, +5.4k after Vivado) and Vivado meets 4 ns. The HLS estimate is not a limit.
+      - Throughput follows the clock: 17.68 → 23.36 (200 MHz, preset builds below) → 29.02 GFLOP/s. Kernel cycles grow
+        only 1.5 % from 150 to 250 MHz: DDR runs on the fixed 125 MHz sys clock, so the kernel waits a little more per
+        cycle, but PE 8×8 is still compute-bound.
+      - **The one failure is not in the kernel.** The failing path is in the PCIe hard block: the 500 MHz core clock
+        `main_s7pciephyrxbe_clkout2` (Gen2 x8), from `PCIE_2_1` USERCLK to its own RX buffer (RAMB36, placed by the
+        Xilinx IP's LOC at RAMB36_X10Y44). It has 0 logic levels and a 1.375 ns data path in a 2 ns period. This path
+        has −0.009 … +0.076 ns of slack across all 16 GEMM builds, so whether a build passes on it comes down to tens
+        of picoseconds of routing, whatever the kernel is (open issue below).
+- [x] **Campaign `vivado_preset_sweep` complete** (21:54–22:22, `results/vivado_preset_sweep/`): PE 8×8 t128 at 200
+      MHz, Vivado presets (`config.py` `VIVADO_PRESETS`); the default-preset build is the one shared with `clock_sweep`.
+
+      | Preset | Build | WNS overall | WNS accel | WNS sys | LUT | 1024³ GFLOP/s |
+      |---|---|---|---|---|---|---|
+      | default | 724 s | −0.009 (PCIe 500 MHz path) | +0.053 | +0.165 | 64.6k | not run (`timing_failed`) |
+      | explore | 789 s | +0.017 | +0.049 | +0.051 | 64.6k | 23.36 (91.2 %) |
+      | aggressive | 793 s | +0.076 | +0.230 | +0.111 | 64.9k | 23.36 (91.2 %) |
+
+      Presets change only timing closure: same size, identical cycles. `aggressive` had the most margin on every
+      clock for +9 % build time. One build per preset, and the spread between near-identical builds (PCIe path
+      −0.009 … +0.050) is as large as the gaps between presets, so this is a hint, not a ranking.
+- [x] **Correction (22:25) to `pe32_ta_next_hls` above:** "HLS gives the same schedule for 225 MHz" was wrong. The
+      estimate is the same (4.209 ns), but HLS adds ~18.6k FF of pipelining at 225 MHz (258.5k → 277.1k for every tile).
+      That is the same kind of change that let PE 8×8 close at 250 MHz, so a 225 MHz build is worth trying.
+- [ ] **Campaign `clock_pe32_ta`** (best config PE 32×8 tA tile 1024×512 at 200 (reused build) / 225 / 250 MHz;
+      2048³/4096³/8192³ × 2 reps): started 22:27, log `results/clock_pe32_ta/dse.log`. 225 MHz HLS is reused from
+      `pe32_ta_next_hls`; two new Vivado builds (~26 min each).
 - [x] Phase 8 (docs), part 1 (20:16): README GEMM section has the measured-results table (best config later `pe32x8_ta_t1024x512.json`), the transposed-A knob and
       the DDR placement; `configs/gemm/pe32x8_ta_t512.json` is the best measured config (same build id as the
       campaign build, so `gemm_build.py` on it reuses `build/gemm/soc/f32_pe32x8_t512x512_200mhz_tA-dc42aa19`).
@@ -772,7 +809,7 @@ in the plan). So the DSE can afford many builds.
       rejected as invalid before any tool runs.
 - [ ] `--resume` after an interruption
 
-### Phase 8: docs ⬜
+### Phase 8: docs 🟡
 - [ ] README usage section
 - [ ] Final numbers and lessons below
 
@@ -810,6 +847,8 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | tiles_pe32_ta_1024, PE 32×8 tA, tile 1024×512 | **best GEMM** | **98.59 GFLOP/s** (8192³, 96.3 % of 102.4); 97.37 at 2048³ |
 | 2026-11-23 | memory_maps, PE 8×8 t128 | maps CH0/CH0/CH0, CH1/CH0/CH0 | all verified (full); 23.35 / 23.42 GFLOP/s at 2048³ |
 | 2026-11-23 | DDR DMA after C2H fix | 64 MB, both channels | H2C 0.82 GB/s, **C2H 1.49 GB/s** (was 0.84) |
+| 2026-11-23 | clock_sweep, PE 8×8 t128 | 150 / 200 / 250 MHz | 17.68 / timing failed by 9 ps (PCIe path) / **29.02 GFLOP/s** at 1024³; 250 MHz met (WNS +0.045) |
+| 2026-11-23 | vivado_preset_sweep, PE 8×8 t128, 200 MHz | default / explore / aggressive | WNS −0.009 / +0.017 / +0.076 ns, build 724 / 789 / 793 s, 23.36 GFLOP/s for both that met timing |
 
 ## Open issues / decisions pending
 
@@ -844,6 +883,17 @@ in the plan). So the DSE can afford many builds.
   after the reset could stall the PCIe path, the failure class behind the earlier host freezes. Not done unattended.
   Safer variant: the bridge back-pressures once `length` is reached (instead of dropping), so the reader stops
   issuing requests before the stop; needs a gateware change + rebuild as well as the driver patch.
+- **PCIe core path at 500 MHz (22:25, decision for the user).** With the PHY set to Gen2 x8, the PCIe hard block
+  runs its core at 500 MHz. The path `PCIE_2_1` USERCLK → RX buffer RAMB36 (placed by the Xilinx IP) has
+  0 logic levels and only −0.009 … +0.076 ns of slack across all 16 GEMM builds. One build so far (PE 8×8, 200 MHz,
+  default preset) failed timing on it alone. `gemm_dse.py` treats that as failed and never loads such a bitstream,
+  which is right: a PCIe-core timing error is the kind of fault behind the earlier host freezes. Options:
+  (a) build the PHY as Gen2 **x4**, the width this PC's slot trains to anyway. The core clock drops to 250 MHz and
+  this path stops mattering, but x8 bandwidth in an x8 slot is lost (C2H already runs at 1.49 GB/s of x4's
+  ~1.7). That needs a `boards/dupcb/target.py` option, so it touches the `--pack` question too.
+  (b) Keep x8 and rebuild with `explore`/`aggressive` when only this path fails (manual today; could be automated
+  in `gemm_dse.py`).
+  (c) Make `aggressive` the default preset (+9 % build time; the most margin in the one sample so far).
 - **Found while testing (fixed):** sizes the kernel cannot handle gave wrong results without an error:
   4096×512×3000 failed verification (12.26 M of 12.29 M elements wrong) with the old and the new DMA code alike;
   M must be a multiple of the M bus word (16 floats), as gemm_hls `RunHardware.cpp` checks. `BuildCfg.size_multiples()`
@@ -852,6 +902,12 @@ in the plan). So the DSE can afford many builds.
   `gemm_runner --multiples N,K,M`, which rejects other sizes before any transfer.
 
 ## Log
+
+### 2026-11-23 22:25 — clock and Vivado preset sweeps
+- PE 8×8 meets timing at 250 MHz: 29.0 GFLOP/s, up from 23.4 at 200. The only timing failure was a 9 ps miss on a
+  PCIe hard-block path at 500 MHz (Gen2 x8 core clock), not in the kernel; that path is marginal in every build. The
+  presets change only closure (aggressive: most margin, +9 % build time). The earlier "225 MHz is not worth a build"
+  for PE 32×8 was wrong (HLS does add pipelining). Campaign `clock_pe32_ta` started: best config at 200/225/250 MHz.
 
 ### 2026-11-23 21:13 — DMA read fix, size rules, memory maps
 - C2H 0.84 → 1.49 GB/s (writer enabled once per read); `gemm_runner` rejects sizes the kernel cannot handle;
