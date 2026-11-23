@@ -194,7 +194,8 @@ def main():
                        "--reps", str(rt.get("repetitions", 1)), "--warmup", str(rt.get("warmup", 0)),
                        "--verify", rt.get("verify", "sampled"), "--map", f"a={mm.a},b={mm.b},c={mm.c}",
                        "--expect-build-id", cfg.config_hash()[:8], "--json"] + \
-                      (["--transposed-a"] if cfg.kernel.transposed_a else [])
+                      (["--transposed-a"] if cfg.kernel.transposed_a else []) + \
+              ["--multiples", ",".join(map(str, cfg.size_multiples()))]
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
                 for line in proc.stdout.splitlines():
                     if line.startswith("{"):

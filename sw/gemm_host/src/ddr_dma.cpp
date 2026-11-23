@@ -60,11 +60,28 @@ TransferStats DdrDma::read(unsigned channel, uint64_t ddr_addr, void *dst, size_
     TransferStats st;
     const auto t0 = Clock::now();
     char *p = static_cast<char *>(dst);
-    for (size_t done = 0; done < length;) {
-        const size_t n = std::min(length - done, Card::kRingBytes);
-        read_chunk(channel, ddr_addr + done, p + done, n, st);
-        done += n;
+
+    // The PCIe DMA writer stays enabled for the whole call: it only moves data the bridge sends, and its loop status
+    // counts retired buffers since the enable, so each chunk waits for a cumulative count. Every chunk but the last
+    // is the whole ring (256 buffers), so each one starts at ring buffer 0.
+    auto tp = Clock::now();
+    card_.dma_writer_enable(true);
+    st.start_s += since(tp);
+    uint64_t retired = 0;
+    try {
+        for (size_t done = 0; done < length;) {
+            const size_t n = std::min(length - done, Card::kRingBytes);
+            read_chunk(channel, ddr_addr + done, p + done, n, retired, st);
+            done += n;
+        }
+    } catch (...) {
+        card_.dma_writer_enable(false);
+        throw;
     }
+    tp = Clock::now();
+    card_.dma_writer_enable(false);
+    st.stop_s += since(tp);
+
     st.bytes   = length;
     st.seconds = since(t0);
     return st;
@@ -105,19 +122,20 @@ void DdrDma::write_chunk(unsigned channel, uint64_t ddr_addr, const char *src, s
     st.stop_s += since(tp);
 }
 
-void DdrDma::read_chunk(unsigned channel, uint64_t ddr_addr, char *dst, size_t length, TransferStats &st) {
+void DdrDma::read_chunk(unsigned channel, uint64_t ddr_addr, char *dst, size_t length, uint64_t &retired,
+                        TransferStats &st) {
     const ChannelCsrs &c = kCsrs[channel];
     st.chunks++;
 
-    // Whole DMA buffers, at least 2 (the loop status is ambiguous for 1). Extra bytes are read and not copied.
+    // Whole DMA buffers, at least 2: the writer takes the next descriptor before its data arrives, so the count for
+    // a 1-buffer chunk would be reached early. Extra bytes are read and not copied.
     size_t buffers = (length + Card::kBufferBytes - 1) / Card::kBufferBytes;
     buffers        = std::max<size_t>(buffers, 2);
     const size_t dma_bytes = buffers * Card::kBufferBytes;
     if (ddr_addr + dma_bytes > kChannelBytes) throw CardError("C2H padding would read past the end of the channel");
 
-    // 1. PCIe DMA writer first (table reset, waits for data), then the bridge reader.
+    // 1. Start the bridge reader (the PCIe DMA writer is already enabled by read()).
     auto tp = Clock::now();
-    card_.dma_writer_enable(true);
     card_.csr_write(CSR_DDR_DMA_SEL_ADDR, channel);
     card_.csr_write(c.rd_enable, 0);
     card_.csr_write(c.rd_base, static_cast<uint32_t>(ddr_addr));
@@ -125,26 +143,22 @@ void DdrDma::read_chunk(unsigned channel, uint64_t ddr_addr, char *dst, size_t l
     card_.csr_write(c.rd_enable, 1);
     st.start_s += since(tp);
 
-    // 2. Wait until the bridge has sent everything and the last descriptor is retired.
+    // 2. Wait until the bridge has sent everything and this chunk's last descriptor is retired.
+    retired += buffers;
     const auto t0 = Clock::now();
-    while (!(card_.csr_read(c.rd_done) & 1) || card_.c2h_buffers_done_hint() < buffers) {
+    while (!(card_.csr_read(c.rd_done) & 1) || card_.c2h_buffers_done_hint() < retired) {
         if (since(t0) > timeout_s_) {
             card_.csr_write(c.rd_enable, 0);
-            card_.dma_writer_enable(false);
             throw CardError("C2H timeout: channel " + std::to_string(channel));
         }
     }
-
     st.wait_s += since(t0);
 
-    // 3. Copy out, stop.
+    // 3. Copy out, stop the bridge reader.
     tp = Clock::now();
     std::memcpy(dst, card_.c2h_ring(), length);
     st.copy_s += since(tp);
-    tp = Clock::now();
     card_.csr_write(c.rd_enable, 0);
-    card_.dma_writer_enable(false);
-    st.stop_s += since(tp);
 }
 
 }  // namespace gemm

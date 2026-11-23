@@ -35,11 +35,15 @@ struct Options {
     long expect_build_id = -1;
     bool json = false;
     bool transposed_a = false;  // build has kernel.transposed_a: send A^T (K x N)
+    // N, K, M must be multiples of these (bus words / transpose width of the build, BuildCfg.size_multiples()).
+    // 0 = not given: the 64-byte float defaults (N: 16 with transposed A, else 1; K: 16; M: 16).
+    uint32_t mult[3] = {0, 0, 0};
 };
 
 [[noreturn]] void usage(const char *argv0) {
     std::fprintf(stderr, "usage: %s --n N --k K --m M [--reps R] [--warmup W] [--seed S] [--verify full|sampled|off]\n"
-                         "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a] [--json]\n", argv0);
+                         "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a]\n"
+                         "          [--multiples N,K,M] [--json]\n", argv0);
     std::exit(2);
 }
 
@@ -67,8 +71,14 @@ Options parse(int argc, char **argv) {
         } else if (a == "--expect-build-id") o.expect_build_id = std::stol(next(), nullptr, 16);
         else if (a == "--json") o.json = true;
         else if (a == "--transposed-a") o.transposed_a = true;
-        else usage(argv[0]);
+        else if (a == "--multiples") {
+            if (std::sscanf(next().c_str(), "%u,%u,%u", &o.mult[0], &o.mult[1], &o.mult[2]) != 3) usage(argv[0]);
+            for (uint32_t x : o.mult) if (x == 0) usage(argv[0]);
+        } else usage(argv[0]);
     }
+    if (o.mult[0] == 0) o.mult[0] = o.transposed_a ? 16 : 1;
+    if (o.mult[1] == 0) o.mult[1] = 16;
+    if (o.mult[2] == 0) o.mult[2] = 16;
     return o;
 }
 
@@ -153,9 +163,15 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        if (o.transposed_a && o.n % 16) {
-            std::fprintf(stderr, "error: with transposed A, N must be a multiple of 16 (64-byte bus words along N)\n");
-            return 2;
+        // The kernel reads whole bus words: other sizes give wrong results, not an error (gemm_hls RunHardware.cpp).
+        {
+            const uint32_t size[3] = {o.n, o.k, o.m};
+            for (int x = 0; x < 3; x++)
+                if (size[x] % o.mult[x]) {
+                    std::fprintf(stderr, "error: %c = %u must be a multiple of %u for this build\n", "NKM"[x], size[x],
+                                 o.mult[x]);
+                    return 2;
+                }
         }
 
         std::mt19937_64 rng(o.seed);

@@ -7,6 +7,7 @@
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field, fields
@@ -159,6 +160,16 @@ class BuildCfg:
         v["max_threads"] = min(8, os.cpu_count() or 1) if mt == "auto" else int(mt)
         v["floorplan"] = self.vivado.floorplan
         return v
+
+    def size_multiples(self):
+        """(N, K, M) multiples the run-time sizes need: the kernel reads whole bus words, and K also whole transpose
+        words when A is not transposed (gemm_hls host/RunHardware.cpp, MatrixMultiplication.h). Passed to gemm_runner."""
+        k, e = self.kernel, self.elem_bytes
+        mult_k = k.bus_width_bytes.k // e
+        if not k.transposed_a:
+            mult_k = math.lcm(mult_k, k.transpose_width_bytes // e)
+        mult_n = k.bus_width_bytes.n // e if k.transposed_a else 1
+        return mult_n, mult_k, k.bus_width_bytes.m // e
 
     def peak_gflops(self):
         k = self.kernel

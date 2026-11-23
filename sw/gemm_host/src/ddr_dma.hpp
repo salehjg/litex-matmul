@@ -3,8 +3,9 @@
 // H2C (write): fill the whole zero-copy ring first, start the bridge writer, then enable the PCIe DMA reader. The
 //   driver runs the reader in loop mode, so the hardware streams the ring over and over; the bridge takes exactly
 //   `length` bytes and drops the rest. Done when the channel's `drained` bit is set.
-// C2H (read): enable the PCIe DMA writer, start the bridge reader, wait until the hardware loop status shows all
-//   buffers retired (that CSR read also flushes the card's posted writes ahead of it), copy out of the ring.
+// C2H (read): enable the PCIe DMA writer once per call; per chunk start the bridge reader, wait until the hardware
+//   loop status shows the chunk's buffers retired (that CSR read also flushes the card's posted writes ahead of it),
+//   copy out of the ring.
 // Addresses and lengths: multiples of 64 B (DDR word). C2H reads whole 8 KB buffers, at least 2 per chunk.
 #pragma once
 
@@ -38,7 +39,8 @@ public:
 
 private:
     void write_chunk(unsigned channel, uint64_t ddr_addr, const char *src, size_t length, TransferStats &st);
-    void read_chunk(unsigned channel, uint64_t ddr_addr, char *dst, size_t length, TransferStats &st);
+    void read_chunk(unsigned channel, uint64_t ddr_addr, char *dst, size_t length, uint64_t &retired,
+                    TransferStats &st);
     void check(unsigned channel, uint64_t ddr_addr, size_t length) const;
 
     Card  &card_;

@@ -796,6 +796,18 @@ in the plan). So the DSE can afford many builds.
   the bridge sends, and its loop status counts buffers since the enable), written and parked until the running
   campaign has built its host tools; (3) H2C cannot stay enabled (the reader loops over the ring without flow
   control), so the options there are a shorter stop delay in the generated driver copy, or a larger ring.
+  **Measured (20:47, 64 MB, both channels, per 2 MB chunk):** H2C copy 0.15, start 0.12, wait 1.29, **stop 1.003**
+  ms; C2H start 0.12, wait 1.16, copy 0.20, **stop 1.007** ms. Confirmed: the driver's 1 ms wait is ~40 % of the
+  time. Data moves at 1.63 GB/s (H2C) and 1.80 GB/s (C2H) while running.
+  **C2H fixed (20:50):** writer enabled once per `read()`: C2H 0.84 → **1.49 GB/s** (per chunk start 0.005, stop
+  0.031 ms), verified with random and counter patterns at 1/3/37/64 MB on both channels, and GEMM with full
+  verification (1008×1008×1040, 2048³, 4096×512×3008).
+- **Found while testing (fixed):** sizes the kernel cannot handle gave wrong results without an error:
+  4096×512×3000 failed verification (12.26 M of 12.29 M elements wrong) with the old and the new DMA code alike;
+  M must be a multiple of the M bus word (16 floats), as gemm_hls `RunHardware.cpp` checks. `BuildCfg.size_multiples()`
+  gives the (N, K, M) multiples of a build: K a multiple of the K bus word and, without transposed A, of the transpose
+  width; M of the M bus word; N of the N bus word with transposed A. `gemm_run.py` / `gemm_dse.py` pass them as
+  `gemm_runner --multiples N,K,M`, which rejects other sizes before any transfer.
 
 ## Log
 
