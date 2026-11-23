@@ -709,6 +709,9 @@ in the plan). So the DSE can afford many builds.
       (In the 512×512 build the overall WNS +0.031 ns is in the PCIe user clock domain, not the kernel.)
 - [ ] **Campaign `tiles_pe32_ta_1024`** (PE 32×8 tA, tiles 512×512 (reused build) and 1024×512, sizes
       2048³/4096³/8192³): started 20:15. 1024×512 est. ~655 BRAM tiles of 955 (kernel 571 + SoC ~84).
+- [x] Phase 8 (docs), part 1 (20:16): README GEMM section has the measured-results table, the transposed-A knob and
+      the DDR placement; `configs/gemm/pe32x8_ta_t512.json` is the best measured config (same build id as the
+      campaign build, so `gemm_build.py` on it reuses `build/gemm/soc/f32_pe32x8_t512x512_200mhz_tA-dc42aa19`).
 - [x] `gemm_runner` capacity check (was open): each matrix (C plus its C2H read slack) must end before the next
       region on its channel; e.g. B of 1.25 GB is rejected (`does not fit before 0x40000000`). Regression on PE 32×8:
       1024³ unchanged (86.53 GFLOP/s, full verification OK).
