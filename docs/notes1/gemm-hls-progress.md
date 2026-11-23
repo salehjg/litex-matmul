@@ -220,7 +220,12 @@ a non-system user is deprecated (still works on systemd 262).
       (`0.00 Gbps, TX 135, RX 8, 0 errors`, 1 IRQ), no DMAR/AER. Counters explained below. Log:
       `misc/dma_debug/logs/20261123-123459_stepC_mrrs512.json`.
 - [x] **C (wait part): 20 min watch after the test, driver unloaded → no freeze** (freeze #2's conditions did not
-      reproduce: still fine at 12:53:49, 19 min after the test). Running from 12:35,
+      reproduce: watch completed 12:55, 20 min after the test, through a Vivado run).
+- **Bisection result so far:** A, B and C did not reproduce a freeze. The freezes remain **unexplained**. The stall's
+  garbage DW only went into the driver's own DMA buffers (valid addresses), so it is not an obvious way to corrupt
+  kernel memory. Not yet repeated: freeze #1's conditions (several stalled DMA tests in a row, CSR polling via ioctl
+  *during* a stalled test, driver left loaded). Crash capture stays armed for all further work, so a new freeze
+  leaves a pstore log. Running from 12:35,
       log `misc/crash_debug/logs/*_stepC_after_dma_unloaded.log`. Includes a Vivado run 12:39:51–12:45:18 (the fixed
       probe build), like freeze #2. **No freeze at 12:45 (10 min after the DMA test)**; freeze #2 came at 13 min.
 - [ ] If C freezes: read `/var/lib/systemd/pstore/` after the reboot. If not: repeat C a few times (freeze #1 came
@@ -300,8 +305,15 @@ retry fix works).
 - Controller clean afterwards (8 tags free, queues empty). No DMAR/AER.
 - Kernel log: "Reading too late / Writing too late, N buffers lost" from the driver: user space did not keep up
   with the free-running loopback ring. A software pacing message, not a hardware fault.
-- **Next:** use `S7PCIEPHYRXBE` in `boards/dupcb/target.py` (and `--pack`), rebuild the base SoC, repeat; then
-  the freeze question (see the bisection). Expected: 16 beats per completion,
+- **Applied to production (2026-11-23 13:00):** `boards/dupcb/target.py` now builds the PHY with `S7PCIEPHYRXBE`
+  (import from `boards/dupcb/s7pciephy_rx_be.py`, comment at the PCIe section). The probe SoC follows `target.py` by
+  default; `--stock-phy` swaps LitePCIe's `S7PCIEPHY` back in (`build/dma_probe_stock/`, reproduces the stall).
+  Existing build dirs: `build/dma_probe/` was built with the stock PHY (11:45), `build/dma_probe_fix/` with the fix
+  (12:39); a new default probe build will overwrite `build/dma_probe/` with the fixed PHY.
+  Not packed yet: `setup.litex.du-pcb.py --pack` would need `boards/dupcb/s7pciephy_rx_be.py` added to `FILES`
+  (open decision, see "Open issues").
+- **Next:** rebuild the base SoC (`scripts/build.sh`), load it, run `scripts/driver.sh dma-test` long enough to pass
+  the 128-loop skip; then keep watching for freezes (capture armed). Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
 
 **Fix options for the stall** (option 1 is built and waiting for its hardware test):

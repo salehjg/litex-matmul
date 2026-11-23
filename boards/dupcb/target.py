@@ -37,6 +37,7 @@ from litepcie.software import generate_litepcie_software
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dupcb_platform  # noqa: E402  (boards/dupcb/dupcb_platform.py)
 from wl7ddrphy import DDRClocks, WL7DDRPHY  # noqa: E402
+from s7pciephy_rx_be import S7PCIEPHYRXBE  # noqa: E402  (S7PCIEPHY with correct 128-bit RX byte enables)
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -137,7 +138,10 @@ class BaseSoC(SoCCore):
 
         # PCIe Gen2 x8 -----------------------------------------------------------------------------
         if with_pcie:
-            self.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x8"),
+            # S7PCIEPHYRXBE, not LitePCIe's S7PCIEPHY: the stock PHY takes the 128-bit RX byte enables from tkeep,
+            # and with LitePCIe 2026.08 that adds a garbage beat to completions and stalls the DMA reader
+            # (s7pciephy_rx_be.py; docs/notes1/gemm-hls-progress.md, phase 1).
+            self.pcie_phy = S7PCIEPHYRXBE(platform, platform.request("pcie_x8"),
                 data_width = 128,
                 bar0_size  = 0x20000)
             self.pcie_phy.update_config({"PCIe_Blk_Locn": "X0Y0"})

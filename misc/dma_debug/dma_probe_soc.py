@@ -6,8 +6,9 @@
 #   source scripts/env.sh
 #   python3 misc/dma_debug/dma_probe_soc.py --build                          # bitstream + driver into build/dma_probe/
 #   python3 misc/dma_debug/dma_probe_soc.py --build --no-compile-gateware    # fast check: Verilog/XDC/driver only
-#   python3 misc/dma_debug/dma_probe_soc.py --build --rx-be-fix              # with boards/dupcb/s7pciephy_rx_be.py,
-#                                                                            # into build/dma_probe_fix/
+#   python3 misc/dma_debug/dma_probe_soc.py --build --stock-phy              # LitePCIe's S7PCIEPHY instead of
+#                                                                            # S7PCIEPHYRXBE (reproduces the DMA
+#                                                                            # stall), into build/dma_probe_stock/
 #   python3 misc/dma_debug/dma_probe_soc.py --load                           # JTAG load, then scripts/pcie_rescan.sh
 #
 
@@ -44,16 +45,15 @@ class DMAProbeSoC(base.BaseSoC):
 def main():
     parser = LiteXArgumentParser(platform=dupcb_platform.Platform, description="DU-PCB SoC + LitePCIe DMA probes.")
     parser.add_target_argument("--sys-clk-freq", default=125e6, type=float, help="System clock frequency.")
-    parser.add_target_argument("--rx-be-fix", action="store_true",
-        help="Use S7PCIEPHYRXBE (RX byte enables from rx_is_eof) instead of S7PCIEPHY; output in build/dma_probe_fix.")
+    parser.add_target_argument("--stock-phy", action="store_true",
+        help="Use LitePCIe's S7PCIEPHY instead of S7PCIEPHYRXBE (reproduces the DMA stall); output in build/dma_probe_stock.")
     args = parser.parse_args()
     if args.output_dir is None:
-        args.output_dir = os.path.join(ROOT, "build", "dma_probe_fix" if args.rx_be_fix else "dma_probe")
+        args.output_dir = os.path.join(ROOT, "build", "dma_probe_stock" if args.stock_phy else "dma_probe")
 
-    if args.rx_be_fix:
-        # target.py does "from litepcie.phy.s7pciephy import S7PCIEPHY" and calls it by that name in BaseSoC.
-        from s7pciephy_rx_be import S7PCIEPHYRXBE
-        base.S7PCIEPHY = S7PCIEPHYRXBE
+    if args.stock_phy:
+        # BaseSoC (target.py) builds the PHY by the module-level name S7PCIEPHYRXBE.
+        base.S7PCIEPHYRXBE = base.S7PCIEPHY
 
     soc = DMAProbeSoC(sys_clk_freq=args.sys_clk_freq, **parser.soc_argdict)
 
