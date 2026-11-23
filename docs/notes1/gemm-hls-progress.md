@@ -312,8 +312,9 @@ retry fix works).
   (12:39); a new default probe build will overwrite `build/dma_probe/` with the fixed PHY.
   Not packed yet: `setup.litex.du-pcb.py --pack` would need `boards/dupcb/s7pciephy_rx_be.py` added to `FILES`
   (open decision, see "Open issues").
-- **Next:** rebuild the base SoC (`scripts/build.sh`), load it, run `scripts/driver.sh dma-test` long enough to pass
-  the 128-loop skip; then keep watching for freezes (capture armed). Expected: 16 beats per completion,
+- Base SoC rebuild with the fix started 12:56 (`scripts/build.sh`, log `build/base_rxbe_build.log`).
+- **Next:** load it, run `scripts/driver.sh dma-test` long enough to pass the 128-loop skip; then keep watching for
+  freezes (capture armed). Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
 
 **Fix options for the stall** (option 1 is built and waiting for its hardware test):
