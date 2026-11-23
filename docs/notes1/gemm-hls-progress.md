@@ -405,7 +405,10 @@ in the plan). So the DSE can afford many builds.
 - [x] Sources copied verbatim to `kernels/gemm/` (2026-11-23 13:45; `src/`, `include/`, `tb/test_gemm.cpp` from
       `test/TestSimulation.cpp`, `LICENSE.md`), `ORIGIN.md` written (upstream commits, file map, change list). The g++
       simulation needs `ap_int.h`/`ap_fixed.h`/`hls_stream.h` from `Vitis/common/technology/autopilot`.
-- [ ] Interface pragmas changed (offset=direct, ap_none, ap_ctrl_hs, 32-bit addresses, m_axi knobs)
+- [x] Interface pragmas changed (2026-11-23 13:46): `ap_ctrl_hs`, `m_axi offset=direct` A/B/C with burst/outstanding/
+      latency from the config (`MM_PRAGMA` two-level stringify), `ap_none` sizes; stream depths (pipe, aSplit, bMemory,
+      cMemory) from the config (0 = upstream default). g++ simulation still passes for the same 4 sizes (warnings only
+      inside Xilinx headers). 32-bit addresses: set in the HLS Tcl (`config_interface -m_axi_addr64=false`), next step.
 - [x] `flow/gemmflow/config.py` (2026-11-23 13:50): dataclasses `KernelCfg`/`MemoryMap`/`ClockCfg`/`HlsCfg`/
       `VivadoCfg`/`SocCfg`/`BuildCfg`; unknown keys rejected; every gemm_hls CMake/`static_assert` rule checked
       (plus the transpose warning and a rough DSP budget); Vivado presets resolved (`max_threads` auto = min(8, nproc));

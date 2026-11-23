@@ -245,6 +245,9 @@ class BuildCfg:
             "MM_A_SPLIT_DEPTH":      k.fifo_depths.a_split or 0,
             "MM_B_MEMORY_DEPTH":     k.fifo_depths.b_memory or 0,
             "MM_C_MEMORY_DEPTH":     k.fifo_depths.c_memory or 0,
+            "MM_AXI_MAX_BURST":      k.m_axi.max_burst_len,
+            "MM_AXI_OUTSTANDING":    k.m_axi.num_outstanding,
+            "MM_AXI_LATENCY":        k.m_axi.latency,
         }
         for t, info in DATA_TYPES.items():
             v[f"MM_DATA_WIDTH_{t}"] = info["bytes"]

@@ -12,7 +12,7 @@
 using hlslib::Stream;
 
 constexpr int kSeed = 5; // For initializing matrices for testing
-constexpr unsigned kPipeDepth = 4;
+constexpr unsigned kPipeDepth = kPipeDepthCfg;  // litex-matmul: from the config (upstream: 4)
 
 // Memory bus in K-dimension
 constexpr int kMemoryWidthK = kMemoryWidthBytesK / sizeof(Data_t);
@@ -66,6 +66,19 @@ inline unsigned SizeNMemory(unsigned n) {
 #endif // MM_TRANSPOSED_A
 
 constexpr unsigned long kOuterTileSizeMMemory = kOuterTileSizeM / kMemoryWidthM;
+
+// litex-matmul: stream depths from the config, 0 = upstream default.
+constexpr unsigned long kASplitDepth =
+    (kASplitDepthCfg > 0) ? kASplitDepthCfg : 2 * kOuterTileSizeN;
+constexpr unsigned long kBMemoryDepth =
+    (kBMemoryDepthCfg > 0) ? kBMemoryDepthCfg : 2 * kOuterTileSizeMMemory;
+constexpr unsigned long kCMemoryDepth =
+    (kCMemoryDepthCfg > 0) ? kCMemoryDepthCfg : 2 * kOuterTileSizeMMemory;
+
+// litex-matmul: HLS pragmas built from macros (two-level stringify so the macros expand first).
+#define MM_STR(x) #x
+#define MM_XSTR(x) MM_STR(x)
+#define MM_PRAGMA(x) _Pragma(MM_XSTR(x))
 static_assert(
     kOuterTileSizeM % kMemoryWidthM == 0,
     "Outer memory tile size in M must be divisable by memory port width.");

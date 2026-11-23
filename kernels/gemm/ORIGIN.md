@@ -22,5 +22,10 @@ see `LICENSE.md`). The upstream repository is kept unmodified in `submodules/gem
 The first commit of this directory is a verbatim copy. Every later change is listed here (newest first) and is a
 separate commit, so `git log -p kernels/gemm` shows the full diff against upstream.
 
+- Interface and knobs (plan §4.1): `src/Top.cpp` uses `ap_ctrl_hs`, `m_axi offset=direct` for A/B/C (burst length,
+  outstanding requests and latency from the config through `MM_PRAGMA`) and `ap_none` sizes, no AXI-Lite. Stream
+  depths `kPipeDepth`, `aSplit`, `bMemory`, `cMemory` come from the config (`include/Config.h.in`: `kPipeDepthCfg`,
+  `k*DepthCfg`, 0 = upstream default; `include/MatrixMultiplication.h`: `kASplitDepth`, `kBMemoryDepth`,
+  `kCMemoryDepth`, `MM_PRAGMA`).
 - `include/Utility.h`: no `hlslib/xilinx/OpenCL.h` (needs `CL/cl2.hpp`; there is no OpenCL host here); `Pack()` uses
   `std::vector` with the default allocator instead of hlslib's 4 KB `AlignedAllocator`.

@@ -17,9 +17,17 @@ void MatrixMultiplicationKernel(MemoryPackK_t const a[],
 #endif
 ) {
 
-  #pragma HLS INTERFACE m_axi port=a offset=slave bundle=gmem0
-  #pragma HLS INTERFACE m_axi port=b offset=slave bundle=gmem1
-  #pragma HLS INTERFACE m_axi port=c offset=slave bundle=gmem2
+  // litex-matmul: no AXI-Lite. Block control is ap_ctrl_hs, the three addresses are plain input ports
+  // (offset=direct) and the sizes are ap_none; the SoC drives them from CSRs (hw/gemm/hls_kernel.py).
+  #pragma HLS INTERFACE mode=ap_ctrl_hs port=return
+  MM_PRAGMA(HLS INTERFACE mode=m_axi port=a offset=direct bundle=gmem0 max_read_burst_length=MM_AXI_MAX_BURST num_read_outstanding=MM_AXI_OUTSTANDING latency=MM_AXI_LATENCY)
+  MM_PRAGMA(HLS INTERFACE mode=m_axi port=b offset=direct bundle=gmem1 max_read_burst_length=MM_AXI_MAX_BURST num_read_outstanding=MM_AXI_OUTSTANDING latency=MM_AXI_LATENCY)
+  MM_PRAGMA(HLS INTERFACE mode=m_axi port=c offset=direct bundle=gmem2 max_write_burst_length=MM_AXI_MAX_BURST num_write_outstanding=MM_AXI_OUTSTANDING latency=MM_AXI_LATENCY)
+#ifdef MM_DYNAMIC_SIZES
+  #pragma HLS INTERFACE mode=ap_none port=size_n
+  #pragma HLS INTERFACE mode=ap_none port=size_k
+  #pragma HLS INTERFACE mode=ap_none port=size_m
+#endif
 
   #pragma HLS DATAFLOW
 
@@ -31,8 +39,8 @@ void MatrixMultiplicationKernel(MemoryPackK_t const a[],
 
   // Memory accesses and pipes for A 
 #ifndef MM_TRANSPOSED_A
-  Stream<Data_t, 2 * kOuterTileSizeN> aSplit[kTransposeWidth];
-  #pragma HLS STREAM variable=aSplit depth=2*kOuterTileSizeN
+  Stream<Data_t, kASplitDepth> aSplit[kTransposeWidth];
+  #pragma HLS STREAM variable=aSplit depth=kASplitDepth
   Stream<Data_t> aConvert("aConvert");
 #else
   Stream<MemoryPackN_t, 2 * kOuterTileSizeNMemory> aMemory("aMemory");
@@ -40,7 +48,7 @@ void MatrixMultiplicationKernel(MemoryPackK_t const a[],
   Stream<ComputePackN_t, kPipeDepth> aPipes[kComputeTilesN + 1];
 
   // Memory accesses and pipes for B 
-  Stream<MemoryPackM_t, 2 * kOuterTileSizeMMemory> bMemory("bMemory");
+  Stream<MemoryPackM_t, kBMemoryDepth> bMemory("bMemory");
   Stream<ComputePackM_t, kPipeDepth> bPipes[kComputeTilesN + 1];
 
   // Pipes for C
@@ -108,7 +116,7 @@ void MatrixMultiplicationKernel(MemoryPackK_t const a[],
                              pe, size_n, size_k, size_m);
   }
 
-  Stream<MemoryPackM_t, 2 * kOuterTileSizeMMemory> cMemory("cMemory");
+  Stream<MemoryPackM_t, kCMemoryDepth> cMemory("cMemory");
   HLSLIB_DATAFLOW_FUNCTION(ConvertWidthC, cPipes[0], cMemory, size_n, size_k,
                            size_m);
   HLSLIB_DATAFLOW_FUNCTION(WriteC, cMemory, c, size_n, size_k, size_m);

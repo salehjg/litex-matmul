@@ -46,3 +46,13 @@ using OperatorReduce = hlslib::op::${MM_REDUCE_OP}<Data_t>;
      (${MM_DATA_WIDTH_${MM_DATA_TYPE}} != ${MM_MEMORY_BUS_WIDTH_N}))
 #define MM_CONVERT_A
 #endif
+
+// litex-matmul: knobs from the JSON build config (flow/gemmflow/config.py). Stream depths: 0 = upstream default.
+constexpr unsigned kPipeDepthCfg = ${MM_PIPE_DEPTH};
+constexpr unsigned long kASplitDepthCfg = ${MM_A_SPLIT_DEPTH};
+constexpr unsigned long kBMemoryDepthCfg = ${MM_B_MEMORY_DEPTH};
+constexpr unsigned long kCMemoryDepthCfg = ${MM_C_MEMORY_DEPTH};
+// m_axi interface parameters (used in HLS pragmas, hence macros).
+#define MM_AXI_MAX_BURST ${MM_AXI_MAX_BURST}
+#define MM_AXI_OUTSTANDING ${MM_AXI_OUTSTANDING}
+#define MM_AXI_LATENCY ${MM_AXI_LATENCY}
