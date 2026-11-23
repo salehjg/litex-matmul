@@ -75,7 +75,8 @@ def main():
         n, k, m = (int(x) for x in size.lower().split("x"))
         cmd = [runner, "--n", str(n), "--k", str(k), "--m", str(m), "--reps", str(a.reps), "--warmup", str(a.warmup),
                "--seed", str(a.seed), "--verify", a.verify, "--map", f"a={mm.a},b={mm.b},c={mm.c}",
-               "--expect-build-id", info["config_hash"][:8], "--json"]
+               "--expect-build-id", info["config_hash"][:8], "--json"] + \
+              (["--transposed-a"] if cfg.kernel.transposed_a else [])
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         for line in proc.stdout.splitlines():
             if line.startswith("{"):

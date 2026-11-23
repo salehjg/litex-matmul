@@ -63,7 +63,9 @@ Details that matter:
   data in the first 1 GB of either channel is destroyed. Calibrate first, then load matrices (the bring-up does this
   order; every run re-sends A and B anyway).
 - **Capacity limits with the default map:** A ≤ 2 GB (N·K ≤ 512 M floats), B ≤ 1 GB (K·M ≤ 256 M floats),
-  C ≤ 1 GB (N·M ≤ 256 M floats). `gemm_runner` does not check these yet (open item).
+  C ≤ 1 GB (N·M ≤ 256 M floats). `gemm_runner` checks them before any transfer.
+- **Transposed-A builds** (`kernel.transposed_a = true`): the A region holds Aᵀ (K × N, row-major, same size), and
+  N must be a multiple of 16.
 - The DMA bridge (`hw/gemm/ddr_dma.py`, `sw/gemm_host/src/ddr_dma.cpp`) uses the same per-channel byte addresses; the
   host picks the channel with `ddr_dma_sel`.
 
@@ -658,8 +660,13 @@ in the plan). So the DSE can afford many builds.
       latency grows with K (62 → 85 → 130 cycles for K = 512 → 1024 → 2048, more DRAM page misses for the K-strided
       accesses). B (8-beat bursts) waits 4.5–15 %, C writes stall ≤ 3 %.
       **Next knob:** `kernel.transposed_a = true` (host sends Aᵀ, the kernel reads it with bursts, no on-chip
-      transpose); needs `gemm_runner` to transpose A when the build has it (to do), then rerun PE 32×8.
-- [ ] Open: `gemm_runner` should reject sizes that do not fit the memory map (see "DDR memory map" above).
+      transpose). Done (18:20): g++ simulation of the transposed path with PE 32×8 passes (256³, 512×256×512,
+      272×512×256); `gemm_runner --transposed-a` sends Aᵀ (K × N; reference still uses A; N must be a multiple of
+      16), passed automatically by `gemm_run.py` / `gemm_dse.py` from the config. Campaign `transposed_a`
+      (PE 16×8 and 32×8, tile 256) started 18:21.
+- [x] `gemm_runner` capacity check (was open): each matrix (C plus its C2H read slack) must end before the next
+      region on its channel; e.g. B of 1.25 GB is rejected (`does not fit before 0x40000000`). Regression on PE 32×8:
+      1024³ unchanged (86.53 GFLOP/s, full verification OK).
 - [x] **Campaign `hls_pe_tile` run (17:08–17:10, 4 HLS jobs in parallel, 2.7 min for 12 points)**,
       `results/hls_pe_tile/builds.{jsonl,csv}`. All OK points estimate 4.20–4.24 ns at the 5 ns target. Resources:
 

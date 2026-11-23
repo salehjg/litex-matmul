@@ -34,11 +34,12 @@ struct Options {
     unsigned ch[3] = {0, 1, 1};  // DDR channel of A, B, C
     long expect_build_id = -1;
     bool json = false;
+    bool transposed_a = false;  // build has kernel.transposed_a: send A^T (K x N)
 };
 
 [[noreturn]] void usage(const char *argv0) {
     std::fprintf(stderr, "usage: %s --n N --k K --m M [--reps R] [--warmup W] [--seed S] [--verify full|sampled|off]\n"
-                         "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--json]\n", argv0);
+                         "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a] [--json]\n", argv0);
     std::exit(2);
 }
 
@@ -65,6 +66,7 @@ Options parse(int argc, char **argv) {
             }
         } else if (a == "--expect-build-id") o.expect_build_id = std::stol(next(), nullptr, 16);
         else if (a == "--json") o.json = true;
+        else if (a == "--transposed-a") o.transposed_a = true;
         else usage(argv[0]);
     }
     return o;
@@ -132,10 +134,29 @@ int main(int argc, char **argv) {
         }
         const size_t bytes_a = size_t(o.n) * o.k * 4, bytes_b = size_t(o.k) * o.m * 4, bytes_c = size_t(o.n) * o.m * 4;
         auto round64 = [](size_t x) { return (x + 63) & ~size_t(63); };
-        // DDR layout: each matrix at the start of its channel; if A/B/C share a channel, they are placed one after
-        // the other with 1 GB / 512 MB offsets (enough for any size these channels can hold).
+        // DDR layout (docs/notes1/gemm-hls-progress.md, "DDR memory map"): each matrix at the start of its channel;
+        // B at 512 MB if it shares the channel with A, C at 1 GB if it shares it with A or B.
         const uint32_t addr[3] = {0, (o.ch[1] == o.ch[0]) ? 0x20000000u : 0u,
                                   (o.ch[2] == o.ch[0] || o.ch[2] == o.ch[1]) ? 0x40000000u : 0u};
+        // Capacity: each matrix (plus the C2H read slack for C) must end before the next region on its channel.
+        {
+            const size_t bytes[3] = {round64(bytes_a), round64(bytes_b), round64(bytes_c) + 2 * Card::kBufferBytes};
+            const char *names = "ABC";
+            for (int x = 0; x < 3; x++) {
+                uint64_t limit = DdrDma::kChannelBytes;
+                for (int y = 0; y < 3; y++)
+                    if (y != x && o.ch[y] == o.ch[x] && addr[y] > addr[x]) limit = std::min<uint64_t>(limit, addr[y]);
+                if (addr[x] + bytes[x] > limit) {
+                    std::fprintf(stderr, "error: %c (%zu bytes at 0x%08x on CH%u) does not fit before 0x%08" PRIx64 "\n",
+                                 names[x], bytes[x], addr[x], o.ch[x], limit);
+                    return 2;
+                }
+            }
+        }
+        if (o.transposed_a && o.n % 16) {
+            std::fprintf(stderr, "error: with transposed A, N must be a multiple of 16 (64-byte bus words along N)\n");
+            return 2;
+        }
 
         std::mt19937_64 rng(o.seed);
         std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
@@ -144,14 +165,23 @@ int main(int argc, char **argv) {
         for (auto &x : b) x = dist(rng);
         for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bt[size_t(col) * o.k + r] = b[size_t(r) * o.m + col];
         std::vector<float> c(size_t(o.n) * o.m);
-        a.resize(round64(bytes_a) / 4, 0.0f);  // DMA lengths in 64-byte words
+        // What goes to the card for A: A (N x K) or, for transposed-A builds, A^T (K x N). The reference uses A.
+        std::vector<float> a_dev;
+        if (o.transposed_a) {
+            a_dev.resize(size_t(o.k) * o.n);
+            for (uint32_t r = 0; r < o.n; r++)
+                for (uint32_t col = 0; col < o.k; col++) a_dev[size_t(col) * o.n + r] = a[size_t(r) * o.k + col];
+        } else {
+            a_dev = a;
+        }
+        a_dev.resize(round64(bytes_a) / 4, 0.0f);  // DMA lengths in 64-byte words
         b.resize(round64(bytes_b) / 4, 0.0f);
 
         int rc = 0;
         for (unsigned rep = 0; rep < o.warmup + o.reps; rep++) {
             const bool warm = rep < o.warmup;
             const auto t0 = std::chrono::steady_clock::now();
-            const TransferStats ta = ddr.write(o.ch[0], addr[0], a.data(), round64(bytes_a));
+            const TransferStats ta = ddr.write(o.ch[0], addr[0], a_dev.data(), round64(bytes_a));
             const TransferStats tb = ddr.write(o.ch[1], addr[1], b.data(), round64(bytes_b));
             const KernelRun kr = kern.run(addr[0], addr[1], addr[2], o.n, o.k, o.m);
             std::vector<float> cbuf(round64(bytes_c) / 4);
