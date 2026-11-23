@@ -9,7 +9,15 @@
 #include "hlslib/xilinx/Resource.h"
 #include "hlslib/xilinx/Stream.h"
 
+#ifdef HLSLIB_SYNTHESIS
+// litex-matmul: Vitis HLS 2026.1 cannot disaggregate arrays of hlslib::Stream objects (HLS 214-177 "unresolved Phi
+// node" on aSplit/aPipes/bPipes), so synthesis uses the native hls::stream (hls::stream<T, N> derives from
+// hls::stream<T>, so Stream<T>& parameters still bind). Simulation keeps hlslib's threaded stream.
+template <typename T, size_t depth = 0>
+using Stream = hls::stream<T, int(depth)>;
+#else
 using hlslib::Stream;
+#endif
 
 constexpr int kSeed = 5; // For initializing matrices for testing
 constexpr unsigned kPipeDepth = kPipeDepthCfg;  // litex-matmul: from the config (upstream: 4)

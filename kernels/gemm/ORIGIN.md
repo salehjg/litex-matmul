@@ -22,6 +22,11 @@ see `LICENSE.md`). The upstream repository is kept unmodified in `submodules/gem
 The first commit of this directory is a verbatim copy. Every later change is listed here (newest first) and is a
 separate commit, so `git log -p kernels/gemm` shows the full diff against upstream.
 
+- Streams for Vitis HLS 2026.1: in synthesis (`HLSLIB_SYNTHESIS`) `Stream` is an alias of `hls::stream<T, depth>`
+  (`include/MatrixMultiplication.h`), because 2026.1 fails on arrays of `hlslib::Stream` objects (HLS 214-177,
+  unresolved Phi node on aSplit/aPipes/bPipes). Simulation still uses `hlslib::Stream`. Call sites use `write()` /
+  `read()` (both types have them) instead of hlslib's `Push()` / `Pop()`; `src/Memory.cpp` no longer has its own
+  `using hlslib::Stream`.
 - Interface and knobs (plan §4.1): `src/Top.cpp` uses `ap_ctrl_hs`, `m_axi offset=direct` for A/B/C (burst length,
   outstanding requests and latency from the config through `MM_PRAGMA`) and `ap_none` sizes, no AXI-Lite. Stream
   depths `kPipeDepth`, `aSplit`, `bMemory`, `cMemory` come from the config (`include/Config.h.in`: `kPipeDepthCfg`,

@@ -35,18 +35,18 @@ InitializeABuffer_Inner:
       for (unsigned n1 = 0; n1 < kComputeTilesN - locationN; ++n1) {
         #pragma HLS PIPELINE II=1
         #pragma HLS LOOP_FLATTEN
-        const auto read = aIn.Pop();
+        const auto read = aIn.read();
         if (n1 == 0) {
           aBuffer[n2] = read;
         } else {
-          aOut.Push(read);
+          aOut.write(read);
         }
       }
     } else {
       // Last processing element gets a special case, because Vivado HLS
       // refuses to flatten and pipeline loops with trip count 1
       #pragma HLS PIPELINE II=1
-      aBuffer[n2] = aIn.Pop();
+      aBuffer[n2] = aIn.read();
     }
   }
 
@@ -81,7 +81,7 @@ OuterTile_N:
                  k < size_k - 1) &&
                 m1 >= locationN            // Start at own index.
                 && m1 < kComputeTilesN) {  // Number of PEs in front.
-              const auto read = aIn.Pop();
+              const auto read = aIn.read();
               if (m1 == locationN) {
                 // Double buffering
                 aBuffer[n1 + (k % 2 == 0 ? kInnerTilesN : 0)] = read;
@@ -91,7 +91,7 @@ OuterTile_N:
                 // from the last processing element and fails dataflow
                 // checking.
                 if (locationN < kComputeTilesN - 1) {
-                  aOut.Push(read);
+                  aOut.write(read);
                 }
               }
             }
@@ -100,9 +100,9 @@ OuterTile_N:
             // is being written
             const auto aVal = aBuffer[n1 + (k % 2 == 0 ? 0 : kInnerTilesN)];
             #pragma HLS DEPENDENCE variable=aBuffer false
-            const auto bVal = bIn.Pop();
+            const auto bVal = bIn.read();
             if (locationN < kComputeTilesN - 1) {
-              bOut.Push(bVal);
+              bOut.write(bVal);
             }
 
           Unroll_N:
@@ -168,7 +168,7 @@ OuterTile_N:
       for (unsigned i = 0; i < writeFlattened; ++i) {
         #pragma HLS PIPELINE II=1
         if (inner < kComputeTileSizeN * kInnerTilesM) {
-          cOut.Push(cBuffer[n1 * kInnerTilesM + m1][n2]);
+          cOut.write(cBuffer[n1 * kInnerTilesM + m1][n2]);
           if (m1 == kInnerTilesM - 1) {
             m1 = 0;
             if (n2 == kComputeTileSizeN - 1) {
@@ -181,7 +181,7 @@ OuterTile_N:
           }
         } else {
           if (locationN < kComputeTilesN - 1) {
-            cOut.Push(cIn.Pop());
+            cOut.write(cIn.read());
           }
         }
         if (inner == writeFlattenedInner - 1) {
@@ -201,7 +201,7 @@ OuterTile_N:
     //       for (unsigned m1 = 0; m1 < kInnerTilesM; ++m1) {
     //         #pragma HLS PIPELINE II=1
     //         #pragma HLS LOOP_FLATTEN
-    //         cOut.Push(cBuffer[n1 * kInnerTilesM + m1][n2]);
+    //         cOut.write(cBuffer[n1 * kInnerTilesM + m1][n2]);
     //       }
     //     }
     //
@@ -218,7 +218,7 @@ OuterTile_N:
     //           for (unsigned m1 = 0; m1 < kInnerTilesM; ++m1) {
     //             #pragma HLS PIPELINE II=1
     //             #pragma HLS LOOP_FLATTEN
-    //             cOut.Push(cIn.Pop());
+    //             cOut.write(cIn.read());
     //           }
     //         }
     //       }

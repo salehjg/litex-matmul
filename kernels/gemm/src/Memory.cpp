@@ -4,7 +4,7 @@
 #include "Memory.h"
 #include <cassert>
 
-using hlslib::Stream;
+// litex-matmul: Stream comes from MatrixMultiplication.h (hls::stream in synthesis, hlslib::Stream in simulation).
 
 #ifndef MM_TRANSPOSED_A
 
@@ -65,7 +65,7 @@ void _ReadAInner(MemoryPackK_t const a[],
 ReadA_Unroll:
   for (unsigned w = 0; w < kMemoryWidthK; ++w) {
     #pragma HLS UNROLL
-    aSplit[k1 * kMemoryWidthK + w].Push(pack[w]);
+    aSplit[k1 * kMemoryWidthK + w].write(pack[w]);
   }
 }
 
@@ -137,10 +137,10 @@ void _TransposeAInner(Stream<Data_t> aSplit[kTransposeWidth],
     for (unsigned n2 = 0; n2 < kComputeTileSizeN; ++n2) {
       #pragma HLS PIPELINE II=1
       #pragma HLS LOOP_FLATTEN
-      pack[n2] = aSplit[k % kTransposeWidth].Pop();
+      pack[n2] = aSplit[k % kTransposeWidth].read();
       // Pop from each stream kOuterTileSizeN times in a row
       if (n2 == kComputeTileSizeN - 1) {
-        toKernel.Push(pack);
+        toKernel.write(pack);
       }
     }
   }
@@ -154,8 +154,8 @@ void _TransposeAInner<1>(Stream<Data_t> aSplit[kTransposeWidth],
     #pragma HLS PIPELINE II=1
     #pragma HLS LOOP_FLATTEN
     ComputePackN_t pack;
-    pack[0] = aSplit[k % kTransposeWidth].Pop();
-    toKernel.Push(pack);
+    pack[0] = aSplit[k % kTransposeWidth].read();
+    toKernel.write(pack);
   }
 }
 
@@ -193,9 +193,9 @@ ConvertWidthA_Outer:
     for (unsigned w = 0; w < ComputePackN_t::kWidth; ++w) {
       #pragma HLS PIPELINE II=1
       #pragma HLS LOOP_FLATTEN
-      pack[w] = narrow.Pop();
+      pack[w] = narrow.read();
     }
-    wide.Push(pack);
+    wide.write(pack);
   }
 }
 #endif
@@ -219,7 +219,7 @@ ReadA_OuterTile_N:
         for (unsigned n1m = 0; n1m < kOuterTileSizeNMemory; ++n1m) {
           #pragma HLS PIPELINE II=1
           #pragma HLS LOOP_FLATTEN
-          pipe.Push(
+          pipe.write(
               memory[IndexATransposed(k, n0, n1m, size_n, size_k, size_m)]);
         }
       }
@@ -244,7 +244,7 @@ ConvertWidthA_Outer:
       #pragma HLS PIPELINE II=1
       #pragma HLS LOOP_FLATTEN
       if (j == 0) {
-        memoryPack = wide.Pop();
+        memoryPack = wide.read();
       }
       ComputePackN_t computePack;
     ConvertWidthA_Compute:
@@ -252,10 +252,10 @@ ConvertWidthA_Outer:
         #pragma HLS UNROLL
         computePack[w] = memoryPack[j * kComputeTileSizeN + w];
       }
-      narrow.Push(computePack);
+      narrow.write(computePack);
     }
 #else
-  narrow.Push(wide.Pop());
+  narrow.write(wide.read());
 #endif
   }
 }
@@ -279,7 +279,7 @@ ReadB_OuterTile_N:
         for (unsigned m1m = 0; m1m < kOuterTileSizeMMemory; ++m1m) {
           #pragma HLS PIPELINE II=1
           #pragma HLS LOOP_FLATTEN
-          pipe.Push(memory[IndexB(k, m0, m1m, size_n, size_k, size_m)]);
+          pipe.write(memory[IndexB(k, m0, m1m, size_n, size_k, size_m)]);
         }
       }
     }
@@ -307,7 +307,7 @@ ConvertWidthB_Outer:
       #pragma HLS PIPELINE II=1
       #pragma HLS LOOP_FLATTEN
       if (j == 0) {
-        memoryPack = wide.Pop();
+        memoryPack = wide.read();
       }
       ComputePackM_t computePack;
     ConvertWidthB_Compute:
@@ -315,7 +315,7 @@ ConvertWidthB_Outer:
         #pragma HLS UNROLL
         computePack[w] = memoryPack[j * kComputeTileSizeM + w];
       }
-      narrow.Push(computePack);
+      narrow.write(computePack);
     }
   }
 }
@@ -339,20 +339,20 @@ ConvertWidthC_N:
       for (unsigned j = 0; j < kMemoryWidthM / ComputePackM_t::kWidth; ++j) {
         #pragma HLS PIPELINE II=1
         #pragma HLS LOOP_FLATTEN
-        const auto computePack = narrow.Pop();
+        const auto computePack = narrow.read();
       ConvertWidthB_Compute:
         for (unsigned w = 0; w < ComputePackM_t::kWidth; ++w) {
           #pragma HLS UNROLL
           memoryPack[j * ComputePackM_t::kWidth + w] = computePack[w];
         }
         if (j == kMemoryWidthM / ComputePackM_t::kWidth - 1) {
-          wide.Push(memoryPack);
+          wide.write(memoryPack);
         }
       }
 #else
       #pragma HLS PIPELINE II=1
       #pragma HLS LOOP_FLATTEN
-      wide.Push(narrow.Pop());
+      wide.write(narrow.read());
 #endif
     }
   }
@@ -374,7 +374,7 @@ WriteC_OuterTile_N:
         for (unsigned m1m = 0; m1m < kOuterTileSizeMMemory; ++m1m) {
           #pragma HLS PIPELINE II=1
           #pragma HLS LOOP_FLATTEN
-          const auto val = pipe.Pop();
+          const auto val = pipe.read();
           if ((n0 * kOuterTileSizeN + n1 < size_n) &&
               (m0 * kOuterTileSizeMMemory + m1m < SizeMMemory(size_m))) {
             memory[IndexC(n0, n1, m0, m1m, size_n, size_k, size_m)] = val;
@@ -424,12 +424,12 @@ FeedB_OuterTile_N:
             #pragma HLS LOOP_FLATTEN
             ComputePackM_t val;
             if (n1 == 0) {
-              val = fromMemory.Pop();
+              val = fromMemory.read();
               buffer[m1] = val;
             } else {
               val = buffer[m1];
             }
-            toKernel.Push(val);
+            toKernel.write(val);
           }
         }
       }
