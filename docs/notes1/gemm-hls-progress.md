@@ -12,7 +12,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 0 | Scaffolding: submodule, docs, `.gitignore`, README | ✅ 2026-11-23 |
 | 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ✅ DMA works (13.43 Gb/s, 0 errors) after the S7 PHY RX byte-enable fix · ⚠️ host freeze cause still open (capture armed) |
 | 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | 🟡 started 2026-11-23 13:25 |
-| 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | 🟡 started (sources copied) |
+| 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | 🟡 HLS csynth + IP export OK (est. 4.24 ns at 200 MHz); csim via Vitis and `HlsStep` integration pending |
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ⬜ |
 | 5 | `gemm_runner` end to end, verified results and counters | ⬜ |
 | 6 | `gemm_build.py` complete (stages, caching, manifest) | ⬜ |
@@ -449,7 +449,7 @@ in the plan). So the DSE can afford many builds.
       `Config.h` + `params.tcl` into `build/gemm/hls/<hls_hash[:12]>/`, stamp file, up-to-date check; `HlsReport`:
       csynth.xml summary + RTL ports). Synthesis cflags as upstream: `-O3 -DMM_SYNTHESIS -DHLSLIB_SYNTHESIS
       -DMM_DYNAMIC_SIZES -DHLSLIB_STREAM_TIMEOUT=16 -DHLSLIB_LEGACY_SDX=0` (2026-11-23 13:46)
-- [ ] First HLS run of `default.json` (csynth + IP export). **Attempt 1 (13:46) failed in 19 s:**
+- [x] First HLS run of `default.json` (csynth + IP export): working since attempt 3 (details below). **Attempt 1 (13:46) failed in 19 s:**
       `vitis-run --mode hls --tcl` accepts the legacy Tcl (`open_project`/`open_solution`, warns it won't show in the IDE),
       but csynth stops with `ERROR: [HLS 214-177] ... Cannot apply disaggregate pragma/directive on object 'aSplit' /
       'aPipes' / 'bPipes' as there is an unresolved Phi node on it (Top.cpp:125)`. That is the hlslib-vs-2026.1 risk
@@ -465,8 +465,12 @@ in the plan). So the DSE can afford many builds.
       vs 5 ns**: all modules are at 4.0–4.2 ns (> 3.65 ns budget with 27 % uncertainty, < 5 ns) except
       `ConvertWidthC` (Memory.cpp:335): a 512-bit dynamic index between the stream read and a conditional write in an
       II=1 loop. **Fix (14:06):** read the packs of one memory word in one unrolled iteration (II = packs per word);
-      simulation passes. Attempt 3 started.
-- [ ] hlslib compatibility with Vitis HLS 2026.1 *synthesis* checked (simulation: OK unmodified)
+      simulation passes.
+      **Attempt 3 (14:04, 33 s): estimated clock 4.236 ns ≤ 5 ns target** (all modules 4.1–4.2 ns; above the 3.65 ns
+      budget that includes the 27 % uncertainty, so Vivado timing is the real check). DSP 381, BRAM18 313, FF 78062,
+      LUT 67795. IP in `build/gemm/hls/bc6119de37db/prj/sol/impl/ip`.
+- [x] hlslib with Vitis HLS 2026.1 synthesis: hlslib headers stay unmodified, but the kernel uses `hls::stream`
+      instead of `hlslib::Stream` in synthesis (arrays of hlslib streams fail, HLS 214-177); DataPack etc. still hlslib
 
 ### Phase 4: SoC integration ⬜
 - [ ] `hw/gemm/hls_kernel.py` (Instance from `csynth.xml`)
@@ -517,6 +521,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | base SoC + RX be fix, IOMMU on | **DMA loopback 10 s** | **13.42–13.44 Gb/s, 0 errors**, ~2.0 M buffers each way |
 | 2026-11-23 | GemmSoC (no CPU, DDR bridge) | Vivado timing / size | WNS +0.080 ns; 25.5k LUT, 19.5k FF, 73.5 BRAM |
 | 2026-11-23 | GemmSoC, no CPU | DDR3 calibration + 1 GB BIST, both channels | PASS, 0 bad words, 7.11 GB/s write / 7.20 GB/s read |
+| 2026-11-23 | HLS `default.json` (f32 PE 8×8, tile 128) | csynth estimate | 4.236 ns (target 5 ns), DSP 381, BRAM18 313, FF 78k, LUT 68k, 33 s |
 
 ## Open issues / decisions pending
 
