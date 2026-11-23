@@ -316,8 +316,9 @@ retry fix works).
   `LiteX SoC on DU-PCB-001-003 2026-11-23 12:56:22`, timing met (WNS +0.049 ns, WHS +0.015 ns),
   `m_axis_rx_tkeep` → unused `main_tkeep` net (fix present).
 - Loaded 13:01:57 (`scripts/load.sh` + `scripts/pcie_rescan.sh`): Gen2 x4, BAR0 128 KB, `enable` = 1.
-- **Next:** driver build/load/info, then `scripts/driver.sh dma-test -w 32 -t 10` (past the 128-loop skip); then keep
-  watching for freezes (capture armed). Expected: 16 beats per completion,
+- Driver rebuilt for this build (13:02), loaded, `info`: identifier `... 12:56:22`, scratch register OK.
+- **Next:** `scripts/driver.sh dma-test -w 32 -t 10` (past the 128-loop skip); then keep watching for freezes
+  (capture armed). Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
 
 **Fix options for the stall** (option 1 is built and waiting for its hardware test):
