@@ -677,6 +677,9 @@ in the plan). So the DSE can afford many builds.
       the other points are unchanged (they were compute-bound already). Traffic is far below the DDR bandwidth
       (~0.7 GB/s per matrix at 87 GFLOP/s), so the remaining ~15 % at PE 32×8 is most likely per-tile fill/drain
       (A and B wait equally); next experiment: larger memory tiles (512) for PE 32×8 tA.
+- [ ] **Campaign `tiles_pe32_ta`** (PE 32×8, transposed A, tiles N×M ∈ {256, 512}², sizes 1024³/2048³/4096³):
+      HLS (19:07, all 4 OK, est 4.14–4.21 ns, DSP ~1321, BRAM18 662–694, LUT 214–223k: larger tiles cost almost no
+      BRAM); builds + runs started 19:08 with `--resume` (the 256×256 build is reused from `transposed_a`).
 - [x] `gemm_runner` capacity check (was open): each matrix (C plus its C2H read slack) must end before the next
       region on its channel; e.g. B of 1.25 GB is rejected (`does not fit before 0x40000000`). Regression on PE 32×8:
       1024³ unchanged (86.53 GFLOP/s, full verification OK).
