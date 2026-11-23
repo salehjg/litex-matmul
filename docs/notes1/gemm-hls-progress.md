@@ -400,6 +400,8 @@ in the plan). So the DSE can afford many builds.
       (`DdrDma::write/read`, 2 MB chunks, the protocol from the design notes), `tools/ddr_dma_test.cpp` (random data,
       write, read back, compare, GB/s, `--json`). `Makefile` builds per SoC build: `make -C sw/gemm_host
       BUILD_DIR=build/gemm_soc` → `build/gemm_soc/sw/ddr_dma_test` (needs that build's `driver/user/liblitepcie.a`).
+- GemmSoC driver built + loaded (13:48), `info` OK (identifier `... 13:39:51`, scratch OK); `ddr_dma_test` rebuilt
+  against this build's final headers.
 - [ ] `ddr_dma_test` on hardware: CH0 and CH1 write/read-back clean, GB/s recorded
 - [x] **`ddr_init.py` passes without a CPU** (2026-11-23 13:47:57–13:48:10, 13 s; `python3 boards/dupcb/ddr_init.py
       --bar .../resource0 --build-dir build/gemm_soc`, log `build/gemm_soc/logs/ddr_init.log`): CH0 window 50 steps (893 ps), CK at +56 (6 s), CH1 window
