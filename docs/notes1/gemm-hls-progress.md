@@ -733,6 +733,21 @@ in the plan). So the DSE can afford many builds.
 
       At PE 8×8 the kernel moves well under 1 GB/s, so sharing one channel costs only ~0.3 % (B waits 18 % instead
       of 15 %, read latency 46 instead of 39 cycles). The map matters more for PE 32×8 (not measured).
+- [x] **Campaign `size_sweep`** (21:13–21:14, `results/size_sweep/`), on the best build (PE 32×8 tA, tile 1024×512):
+      N ∈ {256…4096}, K, M ∈ {256, 1024, 4096}, 45 sizes × 2 reps + warmup, all 90 rows verified. Kernel GFLOP/s
+      [end to end incl. DMA]:
+
+      | N \ (K, M) | K 256, M 256 | K 256, M 4096 | K 1024, M 1024 | K 4096, M 1024 | K 4096, M 4096 |
+      |---|---|---|---|---|---|
+      | 256 | 11.0 [4.7] | 22.0 [15.0] | 24.0 [17.0] | 24.6 [18.6] | 24.6 [19.4] |
+      | 512 | 22.0 [8.9] | 43.9 [27.8] | 48.0 [32.1] | 49.1 [35.2] | 49.1 [38.2] |
+      | 1024 | 43.9 [16.1] | 87.1 [48.0] | 95.9 [57.6] | 98.2 [64.5] | 98.2 [73.7] |
+      | 4096 | 44.1 [23.2] | 87.1 [53.8] | 95.9 [66.6] | 98.2 [73.7] | 98.2 [85.1] |
+
+      **The kernel computes whole memory tiles:** N below the 1024 tile gives N/1024 of the speed, M below the 512 tile
+      M/512 (N = 256, M = 256: 11 GFLOP/s, an eighth of 88). K sets the per-tile fill/drain share (K = 256: 87.5,
+      K = 4096: 98.2 GFLOP/s). So the best tile depends on the workload: for matrices ≤ 512 the 256×256 builds are
+      faster. End to end, the DMA (H2C 0.82 GB/s) dominates below ~1024³.
 - [x] Phase 8 (docs), part 1 (20:16): README GEMM section has the measured-results table (best config later `pe32x8_ta_t1024x512.json`), the transposed-A knob and
       the DDR placement; `configs/gemm/pe32x8_ta_t512.json` is the best measured config (same build id as the
       campaign build, so `gemm_build.py` on it reuses `build/gemm/soc/f32_pe32x8_t512x512_200mhz_tA-dc42aa19`).
