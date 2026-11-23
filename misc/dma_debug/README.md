@@ -16,7 +16,7 @@ the probe SoC and the tools work for any LitePCIe DMA problem on this card.
 
 ```
 source scripts/env.sh
-python3 misc/dma_debug/dma_probe_soc.py --build                    # ~45 min, build/dma_probe/
+python3 misc/dma_debug/dma_probe_soc.py --build                    # ~5 min, build/dma_probe/
 python3 misc/dma_debug/dma_probe_soc.py --load                     # JTAG (scripts/load.sh is for build/dupcb)
 scripts/pcie_rescan.sh
 BUILD_DIR=build/dma_probe scripts/driver.sh build

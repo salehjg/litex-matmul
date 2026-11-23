@@ -34,7 +34,7 @@ and traceability. No framework building.
 | Clocks | `sys` 125 MHz (clk200 #0), `accel` 200 MHz (S7PLL on clk200 #1), domains false-pathed | `target.py` `_CRG` |
 | Free resources | CH1 crossbar, `accel` domain, `pcie_dma0` streams (only loopback today) | `target.py` |
 | Tools | Vivado/Vitis 2026.1. HLS via `vitis-run --mode hls --tcl` (no `vitis_hls` on PATH). LiteX 2026.08 in `.venv` | `config.sh` |
-| Host | 18 cores, **15 GB RAM**, so one 480T Vivado run at a time (a full LiteX build takes about 50 min) | `nproc`, `free` |
+| Host | 18 cores, **15 GB RAM**, so one 480T Vivado run at a time (a full build of the base SoC takes ~5–6 min, measured 2026-11-23) | `nproc`, `free` |
 | Not yet verified | LitePCIe DMA through the generated kernel driver; reloading a bitstream in a running PC is fragile | README |
 
 Keep-alive (AC24 high, unused pins pulled up) lives in `dupcb_platform.py`/`target.py`. **The GEMM SoC must inherit

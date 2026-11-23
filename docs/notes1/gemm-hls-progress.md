@@ -32,7 +32,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 - [x] README: section pointing to the plan
 
 ### Phase 1: host DMA bring-up ⛔ (DMA stalls, host locked up once)
-- [x] Base SoC full build (`scripts/build.sh`, 2026-11-23, ~44 min): WNS +0.059 ns, WHS +0.012 ns, 0 failing
+- [x] Base SoC full build (`scripts/build.sh`, 2026-11-23, **~6 min**: synth 1:31, place 0:47, route 0:47, bitstream 0:43): WNS +0.059 ns, WHS +0.012 ns, 0 failing
       endpoints; `build/dupcb/gateware/dupcb.bit`, `csr.csv`, `driver/` generated
 - [x] User tools built against the generated headers (`driver/user/litepcie_util`, `litepcie_test`)
 - [x] JTAG reachable without root (Vivado hw_server, cable `Xilinx/26SI291A`, `xc7k480t`, DONE=1)
@@ -48,8 +48,11 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 - [x] **User:** `scripts/iommu/step1_iommu_on.sh`, reboot, `scripts/iommu/step2_after_reboot.sh` (2026-11-23).
       Checked: `intel_iommu=on` in `/proc/cmdline`, 26 IOMMU groups, card alone in group 24, sysctls 1/1/10
 - [x] Retest DMA with the IOMMU on: **still stalls, but no DMAR fault, no AER error, host stayed up** (details below)
-- [ ] Root cause of the stall (next: debug build with reader probes, see below), fix
-- [ ] **User:** re-run `sudo scripts/setup_permissions.sh` once more (enable-after-rescan race fix, see below)
+- [x] Probe SoC (`misc/dma_debug/`) built and loaded (2026-11-23 11:51), its driver built (not loaded)
+- [ ] Root cause of the stall (probe counters, step C below), fix
+- [ ] **User:** re-run `sudo scripts/setup_permissions.sh` once more (enable-after-rescan race fix, see below);
+      still pending at 11:51 (`enable` = 0 after the rescan)
+- [ ] **User:** `misc/crash_debug/arm_crash_capture.sh` (once per boot) before steps B/C; not yet run this boot
 - [ ] `scripts/status.sh` (needs the updated udev rule)
 
 **DMA stall: what was measured.** CSRs were read through the driver, because mmap of `resource0` returns EINVAL
@@ -198,13 +201,35 @@ a non-system user is deprecated (still works on systemd 262).
   9 min** after a JTAG load + rescan with no driver; VCCINT 0.957 V, VCCAUX 1.80 V, VCCBRAM 0.957 V, all steady.
   No freeze in those 9 min.
 
-**Bisection of the freeze (in progress).** Each step runs with crash capture armed:
-- [ ] **A: our design loaded, no driver, heavy load.** The probe SoC Vivado build (~45 min) runs from 11:47 with the
-      base SoC on the card since 11:34. Survives → the driver/DMA path is implicated. Freezes → it is the design or
-      link itself.
-- [ ] **B: driver loaded, MMIO only** (`driver.sh load`, `info`), then wait 20 min.
-- [ ] **C: one DMA test, driver unloaded, wait 20 min** (repeats freeze #2's conditions).
-- [ ] Then the probe SoC: same DMA test with counters, to explain the stall.
+**Bisection of the freeze (in progress).** Steps B and C should run with crash capture armed:
+- [x] **A: our design loaded, no driver, Vivado load → no freeze.** Base SoC JTAG-loaded + rescan at 11:34:36,
+      XADC watch for 9 min (39 °C, flat), then the probe SoC Vivado build 11:45:08–11:49:58 on top. Still fine at
+      11:51 (**17 min** after the load, past both freeze windows of 9 and 14 min). The only kernel messages are the
+      expected AER lines from the JTAG reload (11:34:41: root-port RxErr + CmpltTO when the link drops). Together with
+      the clean 12 h MMIO-only session on 2026-11-20, this points at the **LitePCIe driver/DMA path** as the trigger.
+      Caveat: the Vivado load lasted ~5 min, not the ~45 min assumed.
+- [ ] **B: driver loaded, MMIO only.** Probe build: `BUILD_DIR=build/dma_probe scripts/driver.sh load`,
+      `driver.sh info`, read the (cleared) probe counters with `misc/dma_debug/csr_peek.py`, then wait ~15 min.
+- [ ] **C: one DMA test with probe counters, driver unloaded, wait ~20 min** (repeats freeze #2's conditions):
+      `misc/dma_debug/run_probe_test.py --build-dir build/dma_probe --seconds 2`, then `driver.sh unload`. The JSON log
+      in `misc/dma_debug/logs/` has the counters that explain the stall (pending_words shadow, completion sizes and
+      errors, beats in/out, FIFO/queue levels at the moment the reader was disabled).
+- [ ] If C freezes: read `/var/lib/systemd/pstore/` after the reboot. If it doesn't: repeat C a few times, then
+      MRRS 256/128 (`misc/dma_debug/set_mrrs.sh`).
+
+**Probe SoC build (2026-11-23 11:45–11:50, `build/dma_probe/`).** Identifier `LiteX SoC on DU-PCB-001-003
+2026-11-23 11:45:08`. Timing met: WNS +0.033 ns, TNS 0, WHS +0.016 ns. 37 `dma_probe_*` CSRs. `pcie_dma0` moved
+from 0xf0004800 to 0xf0005000 (CSR regions are allocated by name), so the probe build has its own driver; never use
+`build/dupcb/driver` with it. The TLP controller only exists after the PCIe crossbar's finalize, so
+`DMAProbeSoC.finalize()` finalizes the endpoint first and then adds the probe. Fast check and full build print
+the same LiteX warning as the base build (`Combinatorial cycle detected: ...accel_freq_gray_decoder...`, a false
+positive in FreqMeter).
+Loaded at 11:51:37 (`python3 misc/dma_debug/dma_probe_soc.py --load` + `scripts/pcie_rescan.sh`): Gen2 x4, BAR0
+128 KB. Driver built against this build (`BUILD_DIR=build/dma_probe scripts/driver.sh build`), not loaded.
+
+**Build time correction.** A full build of this SoC takes **~5–6 min** of Vivado here (base and probe alike), not
+the 30–60 min in the README or the ~45 min I assumed (the plan's "about 50 min" came from the board notes; corrected
+in the plan). So the DSE can afford many builds.
 
 ### Phase 2: DMA ↔ DDR ⬜
 - [ ] `hw/gemm/gemm_soc.py` without CPU; `csr.csv` DDR names unchanged versus the base SoC
@@ -256,6 +281,11 @@ a non-system user is deprecated (still works on systemd 262).
 | 2026-11-23 | base SoC | MMIO (identifier, scratch) | OK |
 | 2026-11-23 | base SoC | DMA loopback (`dma_test -w 32`) | **0 Gbps**, reader stuck at descriptor 7, writer at 8 |
 | 2026-11-23 | base SoC, IOMMU on | DMA loopback (`dma_test -w 32 -t 2`) | **0 Gbps**, TX 135 / RX 8 buffers, 0 errors, no DMAR/AER, no crash |
+| 2026-11-23 | flash image | XADC (JTAG) | 47 °C, VCCINT 0.957 V, VCCAUX 1.814 V, VCCBRAM 0.958 V |
+| 2026-11-23 | base SoC, no driver | XADC over 9 min | 38.6–40.5 °C (flat), VCCINT 0.956–0.957 V, VCCAUX 1.800–1.802 V |
+| 2026-11-23 | base SoC, no driver | freeze bisection step A | no freeze in 17 min incl. a Vivado run |
+| 2026-11-23 | base / probe SoC | full Vivado build time | ~6 min / ~5 min |
+| 2026-11-23 | probe SoC | Vivado timing | WNS +0.033 ns, WHS +0.016 ns (met) |
 
 ## Open issues / decisions pending
 
@@ -270,6 +300,13 @@ a non-system user is deprecated (still works on systemd 262).
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 (phase 1, bisection step A passed, probe SoC ready)
+- Step A: our design on the card for 17 min without the driver, through a Vivado run: no freeze. Trigger is most
+  likely the driver/DMA path.
+- Probe SoC built (timing met) and loaded; its driver built. Waiting for the user to arm crash capture
+  (`misc/crash_debug/arm_crash_capture.sh`) and re-run `sudo scripts/setup_permissions.sh` before steps B and C.
+- Corrected the build-time figure: ~5–6 min per full build, not ~45 min.
 
 ### 2026-11-23 (phase 1, freeze #2, bisection)
 - Host froze again (~03:59), this time with no DMA running (Vivado synthesis, driver unloaded for 13 min). No trace.
