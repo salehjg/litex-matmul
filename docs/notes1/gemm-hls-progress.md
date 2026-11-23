@@ -662,8 +662,21 @@ in the plan). So the DSE can afford many builds.
       **Next knob:** `kernel.transposed_a = true` (host sends Aᵀ, the kernel reads it with bursts, no on-chip
       transpose). Done (18:20): g++ simulation of the transposed path with PE 32×8 passes (256³, 512×256×512,
       272×512×256); `gemm_runner --transposed-a` sends Aᵀ (K × N; reference still uses A; N must be a multiple of
-      16), passed automatically by `gemm_run.py` / `gemm_dse.py` from the config. Campaign `transposed_a`
-      (PE 16×8 and 32×8, tile 256) started 18:21.
+      16), passed automatically by `gemm_run.py` / `gemm_dse.py` from the config.
+- [x] **Campaign `transposed_a` complete** (18:21–~19:05, `results/transposed_a/`): both builds met timing (PE 16×8
+      tA: 943 s, WNS +0.033, LUT 93.8k, DSP 701; PE 32×8 tA: 1485 s, WNS +0.038, LUT 153.5k, BRAM 414, DSP 1341),
+      all 16 runs verified.
+
+      | PE, transposed A (peak) | 512³ | 1024³ | 2048³ | 1008×1008×1040 | A / B r_wait at 2048³ |
+      |---|---|---|---|---|---|
+      | 16×8 (51.2) | 46.21 (90.3 %) | 46.91 (91.6 %) | 47.19 (92.2 %) | 37.52 | 8.6 % / 8.6 % |
+      | 32×8 (102.4) | 84.25 (82.3 %) | 86.57 (84.5 %) | **87.54 (85.5 %)** | 69.25 | 15.9 % / 15.9 % |
+
+      Effect: A is now read in 16-beat bursts (beats/bursts = 16 instead of 1), avg read latency 32–39 cycles (was up
+      to 130), and the kernel waits on A no more than on B. PE 32×8 at 2048³ goes from 82.30 to **87.54 GFLOP/s**;
+      the other points are unchanged (they were compute-bound already). Traffic is far below the DDR bandwidth
+      (~0.7 GB/s per matrix at 87 GFLOP/s), so the remaining ~15 % at PE 32×8 is most likely per-tile fill/drain
+      (A and B wait equally); next experiment: larger memory tiles (512) for PE 32×8 tA.
 - [x] `gemm_runner` capacity check (was open): each matrix (C plus its C2H read slack) must end before the next
       region on its channel; e.g. B of 1.25 GB is rejected (`does not fit before 0x40000000`). Regression on PE 32×8:
       1024³ unchanged (86.53 GFLOP/s, full verification OK).
@@ -715,6 +728,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | **GEMM 256³** | **verified, 1.469 ms, 22.85 GFLOP/s (89 % of peak)** |
 | 2026-11-23 | GemmSoC + kernel (f32 PE 8×8, 200 MHz) | **GEMM 2048³** | **verified (sampled), 733.5 ms, 23.42 GFLOP/s (91.5 %)** |
 | 2026-11-23 | pe_sweep, tile 256, 200 MHz | **best GEMM** | PE 8×8 24.56, PE 16×8 47.19, **PE 32×8 86.54 GFLOP/s** (1024³, 84.5 % of 102.4) |
+| 2026-11-23 | transposed_a, PE 32×8, tile 256 | **best GEMM** | **87.54 GFLOP/s** (2048³, 85.5 % of 102.4), A in 16-beat bursts |
 
 ## Open issues / decisions pending
 
@@ -729,6 +743,9 @@ in the plan). So the DSE can afford many builds.
 - Risks are listed in plan §11.
 
 ## Log
+
+### 2026-11-23 ~19:05 — transposed A
+- Transposed-A builds (PE 16×8, 32×8) benchmarked: PE 32×8 2048³ 82.3 → 87.5 GFLOP/s; A and B now wait equally.
 
 ### 2026-11-23 ~18:15 — PE sweep done
 - Three kernels (PE 8×8, 16×8, 32×8, tile 256) built, loaded and benchmarked unattended by `gemm_dse.py`; all
