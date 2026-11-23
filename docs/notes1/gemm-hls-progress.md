@@ -392,7 +392,9 @@ in the plan). So the DSE can afford many builds.
       partial DDR word for the next one, and stale data must never wait in front of a writer that starts later);
       the C2H converter is in reset while its reader is disabled. C2H transfers are at least 2 DMA buffers (after a
       table reset `loop_status` reads (0, 0) both before and after descriptor 0 retires).
-- [ ] Full build of `GemmSoC` (the first one, started 13:47, has the old bridge; rebuild after it)
+- [x] Full build of `GemmSoC` with the fixed bridge (2026-11-23 13:39:51–13:47:03, `build/gemm_soc/`): timing met
+      (WNS +0.080 ns, WHS +0.012 ns); LUT 25522 (8.6 %), FF 19484 (3.3 %), BRAM 73.5 tiles (7.7 %), DSP 0. Identifier
+      `LiteX SoC on DU-PCB-001-003 2026-11-23 13:39:51`.
 - [x] `sw/gemm_host/` written and compiling cleanly (-Wall -Wextra, 2026-11-23 13:35): `src/card.{hpp,cpp}` (`Card`:
       CSRs via the driver ioctl, zero-copy rings, DMA enable, hardware loop status), `src/ddr_dma.{hpp,cpp}`
       (`DdrDma::write/read`, 2 MB chunks, the protocol from the design notes), `tools/ddr_dma_test.cpp` (random data,
@@ -483,6 +485,7 @@ in the plan). So the DSE can afford many builds.
 | 2026-11-23 | probe SoC + RX be fix, IOMMU on | **DMA loopback 2 s** | **13.43 Gb/s, 0 errors** (370k buffers), queued == dequeued |
 | 2026-11-23 | base SoC + RX be fix | Vivado timing | WNS +0.049 ns, WHS +0.015 ns (met) |
 | 2026-11-23 | base SoC + RX be fix, IOMMU on | **DMA loopback 10 s** | **13.42–13.44 Gb/s, 0 errors**, ~2.0 M buffers each way |
+| 2026-11-23 | GemmSoC (no CPU, DDR bridge) | Vivado timing / size | WNS +0.080 ns; 25.5k LUT, 19.5k FF, 73.5 BRAM |
 
 ## Open issues / decisions pending
 
