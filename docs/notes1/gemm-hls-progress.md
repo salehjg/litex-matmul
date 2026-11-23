@@ -56,7 +56,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 - [x] **User:** re-ran `sudo scripts/setup_permissions.sh` (12:18): `enable` = 1 after udev trigger, rule has the retry
 - [x] **User:** `misc/crash_debug/arm_crash_capture.sh` (12:18): `efi_pstore` backend registered, lockup/hung/RCU
       panics on, `kernel.panic=10`, SysRq 1
-- [ ] `scripts/status.sh` (needs the updated udev rule)
+- [x] `scripts/status.sh` works without a password (udev rule + exact sudoers lines): 200.000 MHz accel, 50.000 MHz
 
 **DMA stall: what was measured.** CSRs were read through the driver, because mmap of `resource0` returns EINVAL
 while the driver owns the BAR. The helper script lived in the session scratchpad and was lost with the reboot.
@@ -321,7 +321,10 @@ retry fix works).
 - **✅ DMA on the production base SoC (13:02:34, IOMMU on):** `scripts/driver.sh dma-test -w 32 -t 10`: steady
   **13.42–13.44 Gb/s** loopback, ~2.0 M buffers of 8 KB each way (~16.5 GB per direction), **0 errors**, 72928
   IRQs. Kernel: only the AER lines of the JTAG reload (13:02:01) and 42 driver "too late" pacing notices.
-- **Next:** `scripts/status.sh` (BAR0 path without the driver), then keep watching for freezes (capture armed). Expected: 16 beats per completion,
+- `scripts/status.sh` (13:03, driver unloaded, BAR0 via `litex_server`, no password): identifier `... 12:56:22`,
+  `accel_freq` 200000288 Hz, `clk50_freq` 50000158 Hz, `leds_out` 0.
+- Freeze watch after the working DMA run: `misc/crash_debug/watch_host.sh 20 60 after_fixed_dma` from 13:04 (crash
+  capture armed). Expected: 16 beats per completion,
 `pending_min` ≥ 0, DMA running at speed, then a test longer than the 128-loop skip to check data.
 
 **Fix options for the stall** (option 1 is built and waiting for its hardware test):
