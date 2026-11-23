@@ -1,0 +1,10 @@
+{
+  "campaign": "tiles_pe32_ta_1024",
+  "base": "configs/gemm/default.json",
+  "build_grid": {"kernel.transposed_a": [true], "kernel.parallelism_n": [32],
+                 "kernel.memory_tile_size_n": [512, 1024], "kernel.memory_tile_size_m": [512]},
+  "runtime_grid": {"triples": [[2048, 2048, 2048], [4096, 4096, 4096], [8192, 8192, 8192]],
+                   "repetitions": 2, "warmup": 0, "verify": "sampled"},
+  "stages": ["hls", "build", "run"],
+  "jobs": {"hls": "auto"}
+}

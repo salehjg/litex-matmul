@@ -695,8 +695,20 @@ in the plan). So the DSE can afford many builds.
       the time the kernel waits for A and B. The N tile matters more than the M tile (512×256 beats 256×512 by ~5
       GFLOP/s): a larger N tile means fewer passes over B. **Best: 95.07 GFLOP/s** (512×512, 4096³). The 512×256
       build closed with only +0.007 ns, so this region is near the edge at 200 MHz.
-      Possible next steps: tile 1024 (BRAM for the A/B buffers grows with the tile; HLS estimate first), or a
-      clock campaign on the 512×512 build (HLS est 4.21 ns, so ~220 MHz may be reachable).
+- [x] **HLS-only campaign `pe32_ta_next_hls`** (20:11–20:15, 8 points: PE 32×8 tA, tiles {512, 1024}², 200/225 MHz):
+      | Tile N×M | est ns (200 and 225 MHz targets) | BRAM18 (HLS) |
+      |---|---|---|
+      | 512×512 | 4.209 | 694 |
+      | 512×1024 | 4.374 | 1142 |
+      | 1024×512 | 4.209 | 1142 |
+      | 1024×1024 | 4.374 | 2070 (> 1910 on the device: does not fit) |
+      **225 MHz is not worth a build:** HLS gives the same schedule as for 200 MHz, and the routed 200 MHz PE 32×8
+      builds already have accel paths of 4.3 ns + skew (512×256: `ProcessingElement_17 trunc_ln_reg` → the dataflow
+      `ap_sync_reg_ProcessingElement_*_ap_ready` resets, 8 logic levels, slack +0.007 ns); PE 16×8: `cPipes` FIFO
+      4.94 ns. Beating 200 MHz would need kernel changes (e.g. registering the dataflow control fan-out).
+      (In the 512×512 build the overall WNS +0.031 ns is in the PCIe user clock domain, not the kernel.)
+- [ ] **Campaign `tiles_pe32_ta_1024`** (PE 32×8 tA, tiles 512×512 (reused build) and 1024×512, sizes
+      2048³/4096³/8192³): started 20:15. 1024×512 est. ~655 BRAM tiles of 955 (kernel 571 + SoC ~84).
 - [x] `gemm_runner` capacity check (was open): each matrix (C plus its C2H read slack) must end before the next
       region on its channel; e.g. B of 1.25 GB is rejected (`does not fit before 0x40000000`). Regression on PE 32×8:
       1024³ unchanged (86.53 GFLOP/s, full verification OK).
