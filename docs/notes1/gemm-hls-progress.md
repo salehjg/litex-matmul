@@ -871,7 +871,7 @@ in the plan). So the DSE can afford many builds.
       One point failed in HLS: `f32_pe8x8_t256x128` hits `static_assert(kInnerTilesM >= kInnerTilesN)` in Compute.cpp
       (tile_m/PM ≥ tile_n/PN for double buffering), which `config.py` did not check: **rule added**; the point is now
       rejected as invalid before any tool runs.
-- [ ] `--resume` after an interruption. Tested (22:29) on a copy of the finished `vivado_preset_sweep`: no Vivado,
+- [x] `--resume` after an interruption. Tested (22:29) on a copy of the finished `vivado_preset_sweep`: no Vivado,
       no card access, the timing-failed point is re-checked from its stamps and skipped. **Two bugs fixed on the way:**
       (1) run rows took `build_id` from `gemm_runner`'s JSON, i.e. the 8-hex id read from the bitstream, so
       `--resume` never matched a recorded size and would have rerun everything; rows now carry the full build id
@@ -879,7 +879,10 @@ in the plan). So the DSE can afford many builds.
       `build_id`). (2) Resume counted failed rows as done; now only `ok` rows. Also: a point with nothing left skips
       its bring-up (it used to reprogram the card first), `--dry-run` writes nothing, and every invocation is
       appended to `results/<campaign>/invocations.jsonl` (`campaign.json` only holds the latest one).
-      Still to do: a partial resume on the card (after `clock_pe32_ta`).
+      **Partial resume on the card (23:32):** a copy of `clock_pe32_ta` with the 4096³ rows deleted, `--resume --stages
+      run`: only the 200 MHz build was brought up, only 4096³ ran (98.18 GFLOP/s ×2, verified, during the Vivado build
+      of the next campaign). 2048³/8192³ and the timing-failed points were skipped, and the new rows have the full
+      `build_id` plus `hw_build_id` = `a88777ec`.
 
 ### Phase 8: docs 🟡
 - [ ] README usage section
