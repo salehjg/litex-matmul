@@ -12,7 +12,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 0 | Scaffolding: submodule, docs, `.gitignore`, README | ✅ 2026-11-23 |
 | 1 | Host DMA bring-up (LitePCIe driver, `litepcie_util dma_test`) | ✅ DMA works (13.43 Gb/s, 0 errors) after the S7 PHY RX byte-enable fix · ⚠️ host freeze cause still open (capture armed) |
 | 2 | `GemmSoC` (no CPU) + PCIe-DMA ↔ DDR bridge + `ddr_dma_test` | 🟡 started 2026-11-23 13:25 |
-| 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | ⬜ |
+| 3 | Kernel port to `kernels/gemm/`, config rendering/validation, HLS step | 🟡 started (sources copied) |
 | 4 | SoC integration: `HlsKernel`, perf counters, Vivado Tcl hooks, first full build | ⬜ |
 | 5 | `gemm_runner` end to end, verified results and counters | ⬜ |
 | 6 | `gemm_build.py` complete (stages, caching, manifest) | ⬜ |
@@ -401,8 +401,10 @@ in the plan). So the DSE can afford many builds.
 - [ ] `ddr_dma_test` on hardware: CH0 and CH1 write/read-back clean, GB/s recorded
 - [ ] `ddr_init.py` passes without a CPU
 
-### Phase 3: kernel port + HLS step ⬜
-- [ ] Sources copied to `kernels/gemm/`, `ORIGIN.md` written
+### Phase 3: kernel port + HLS step 🟡
+- [x] Sources copied verbatim to `kernels/gemm/` (2026-11-23 13:45; `src/`, `include/`, `tb/test_gemm.cpp` from
+      `test/TestSimulation.cpp`, `LICENSE.md`), `ORIGIN.md` written (upstream commits, file map, change list). The g++
+      simulation needs `ap_int.h`/`ap_fixed.h`/`hls_stream.h` from `Vitis/common/technology/autopilot`.
 - [ ] Interface pragmas changed (offset=direct, ap_none, ap_ctrl_hs, 32-bit addresses, m_axi knobs)
 - [ ] `gemmflow/config.py`: dataclasses, validation, `Config.h` rendering, hashes
 - [ ] g++ simulation test passes (including non-tile-multiple sizes)
