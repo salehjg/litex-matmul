@@ -22,4 +22,5 @@ see `LICENSE.md`). The upstream repository is kept unmodified in `submodules/gem
 The first commit of this directory is a verbatim copy. Every later change is listed here (newest first) and is a
 separate commit, so `git log -p kernels/gemm` shows the full diff against upstream.
 
-- (none yet)
+- `include/Utility.h`: no `hlslib/xilinx/OpenCL.h` (needs `CL/cl2.hpp`; there is no OpenCL host here); `Pack()` uses
+  `std::vector` with the default allocator instead of hlslib's 4 KB `AlignedAllocator`.

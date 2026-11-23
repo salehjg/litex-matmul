@@ -412,9 +412,15 @@ in the plan). So the DSE can afford many builds.
       `render_config_h()` fills `Config.h.in` incl. nested placeholders; `config_hash`, `hls_hash` (kernel + clocks +
       hls + kernel source tree), `build_id` = `<name>-<hash8>`. `configs/gemm/default.json` (f32, PE 8×8, tile 128,
       peak 25.6 GFLOP/s at 200 MHz) loads clean; negative cases (PM=3, tile_m=100, unknown key, bad type) rejected.
-- [ ] g++ simulation test passes (including non-tile-multiple sizes)
+- [x] **Baseline g++ simulation of the (almost verbatim) upstream kernel passes** (2026-11-23 13:43): g++ 16.2.1,
+      `-std=c++17 -O2 -DMM_DYNAMIC_SIZES -DHLSLIB_STREAM_TIMEOUT=16 -DHLSLIB_LEGACY_SDX=0`, includes: rendered
+      `Config.h` (default config), `kernels/gemm/include`, `submodules/gemm_hls/hlslib/include`, and
+      **`Vitis/include`** (not `Vitis/common/technology/autopilot`: that one lacks `etc/ap_private.h`). Builds in 3 s.
+      N K M = 256 256 256, 257 256 272 (upstream's non-multiple case), 64 32 16, 300 512 128: all verified, each
+      < 1 s. One change needed: `Utility.h` without hlslib's OpenCL header (see `kernels/gemm/ORIGIN.md`).
+      hlslib `a67e02f` works unmodified with g++ 16 + Vitis 2026.1 headers in simulation.
 - [ ] `tcl/hls/run_hls.tcl` + `HlsStep` + `HlsReport`; csynth + IP export of `default.json`
-- [ ] hlslib compatibility with Vitis HLS 2026.1 checked (fallback used? yes/no)
+- [ ] hlslib compatibility with Vitis HLS 2026.1 *synthesis* checked (simulation: OK unmodified)
 
 ### Phase 4: SoC integration ⬜
 - [ ] `hw/gemm/hls_kernel.py` (Instance from `csynth.xml`)

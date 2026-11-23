@@ -10,7 +10,7 @@
 #include <sstream>
 #include <vector>
 #include "MatrixMultiplication.h"
-#include "hlslib/xilinx/OpenCL.h"
+// litex-matmul: no OpenCL host here, so no hlslib/xilinx/OpenCL.h (it was only used for AlignedAllocator).
 #ifdef MM_HAS_BLAS
 #include "cblas.h"
 #endif
@@ -43,10 +43,7 @@ void Naive(IteratorRead aBegin, IteratorRead bBegin, IteratorWrite cBegin,
 
 template <int width, class Container>
 inline auto Pack(Container const &in) {
-  std::vector<
-      hlslib::DataPack<Data_t, width>,
-      hlslib::ocl::AlignedAllocator<hlslib::DataPack<Data_t, width>, 4096>>
-      result(in.size() / width);
+  std::vector<hlslib::DataPack<Data_t, width>> result(in.size() / width);
   for (int i = 0, iMax = in.size() / width; i < iMax; ++i) {
     result[i].Pack(&in[i * width]);
   }
