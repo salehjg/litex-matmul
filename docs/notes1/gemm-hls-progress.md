@@ -537,7 +537,13 @@ in the plan). So the DSE can afford many builds.
       driver) → host tools; logs in `<build>/logs/`), `scripts/gemm_run.py` (bring-up + `gemm_runner` per size with the
       build's memory map and build id → `results/<build_id>/runs.jsonl` with metadata). `gemm_soc.py --gemm-config`
       now writes `<build>/config.resolved.json`.
-- [ ] `scripts/gemm_build.py`: stages, `--force`, `--dry-run`
+- [x] `scripts/gemm_build.py` (2026-11-23 16:40): stages `hls,soc,host`, `--force`, `--dry-run`; output
+      `build/gemm/soc/<build_id>/` (config.json, manifest.json, reports/summary.json, logs/, stamps/). `flow/gemmflow/
+      steps.py`: `Step` base (inputs hash → stamp, skip if up to date) → `HlsStep` (shares `build/gemm/hls/<hash>`),
+      `SocStep` (runs `gemm_soc.py` with the resolved Vivado directives/threads), `HostStep` (liblitepcie + host tools).
+      `reports.py` (`VivadoReport`: WNS/TNS/WHS/THS, LUT/FF/BRAM/DSP, kernel hierarchy) parses LiteX's text reports
+      instead of a separate `reports_json.tcl` (simpler, same data); `manifest.py`. Dry run OK (HLS reused).
+      Not yet run end to end.
 - [ ] Stamps: a rerun with no change skips everything; a Vivado-only change reuses the HLS IP
 - [ ] `manifest.json`, `reports/summary.json`
 
