@@ -78,8 +78,38 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
       combinations recorded), `dtype_same_array` (5; float32 = existing build `a88777ec`), `int8_scale` (8),
       `int16_scale` (6), `int4_probe` (4), `fixed_point` (3), `dtype_clock` (6), `dtype_size_sweep` (run only).
       All dry-run clean.
-- [ ] HLS-only probe `dtype_hls` (stages sim, hls): started 2026-11-24 03:25 (an earlier note said ~03:50; the
-      record says 03:25), log `results/dtype_hls/dse.log`; at 04:01 the sims were done and 56 of 70 HLS runs finished.
+- [x] **HLS-only probe `dtype_hls` complete** (2026-11-24 03:25–04:45, `results/dtype_hls/`): 70 points (11 formats ×
+      PE 16×{8…128} × mult {default, fabric}), stages sim + hls. **sim:** 32 ok (all float32/native-int points),
+      38 skipped (ap_* types). **hls:** 62 ok, 8 failed (all fixed8.4). Every successful point has 512-bit m_axi ports,
+      **including the packed 4-bit types** (tier T3 works through HLS: 128 lanes per 64-byte word).
+      Default binding, PE 16×8 (128 MACs), HLS estimates:
+
+      | Format | est. ns | DSP | LUT | FF | BRAM18 |
+      |---|---|---|---|---|---|
+      | float32 | 4.209 | 681 | 119.3k | 139.2k | 438 |
+      | int32 | 4.209 | 425 | 67.1k | 88.9k | 438 |
+      | fixed32.16 | 4.209 | 553 | 67.1k | 88.9k | 438 |
+      | int16 / fixed16.8 | 4.144 | 167 | 61.8k / 64.0k | 55.1k / 63.8k | 306 |
+      | int8 / uint8 | 4.048 | 167 | 59.5k | 50.1k | 240 |
+      | int4 / uint4 | 4.048 | 36 | 56.1k | 36.3k | 207 |
+      | int64 | 4.374 | 1316 | 109.6k | 139.4k | 1149 |
+
+      Wider arrays (HLS): int8 PE 16×64 (1024 MACs) DSP 897, LUT 115k, BRAM18 1117; int4 PE 16×128 (2048 MACs) DSP 29,
+      LUT 199k, BRAM18 1117 (43 min of HLS); int16 PE 16×32 DSP 545, BRAM18 1117; float PE 16×16 DSP 1315.
+      **Findings:**
+      - Narrow integers need far less of everything: int8 uses 1/4 of float's DSPs and half its LUTs at equal MACs;
+        4-bit multiplies go to LUTs by themselves (DSP count stays at the ~30 of the address logic).
+      - **`mult_resource: fabric` is useless:** the HLS estimate jumps to 7.6 ns for every format (even int4, whose
+        multipliers are in LUTs anyway), so `config_op mul -impl fabric` also binds the kernel's 32-bit address
+        multiplies. A per-variable binding would need a kernel change; the fabric variants are dropped.
+      - **8-bit fixed point crashes Vitis HLS 2026.1:** `clang-3.9-csynth` (reflow pass) exits 254 for every
+        `ap_fixed<8,*>`/`ap_ufixed<8,*>` tried (fixed8.0, 8.2, 8.4, ufixed8.4 — three extra probes at 04:55);
+        fixed16/32 are fine. `numeric.py` now rejects 8-bit fixed point with this reason.
+      - BRAM (the C tile, partitioned by lane width) limits the widest arrays before DSPs do for int8/int16.
+- [x] Campaign changes from the probe: `int8_scale` 3 arrays (32×16, 32×32, 16×64; no fabric, no 32×64),
+      `int16_scale` 3 arrays (no fabric), `fixed_point` = fixed32.16 only. **New DSE resource gate:** after HLS, a
+      point whose estimate exceeds the device (BRAM18 + 150 for the SoC > 1910, or DSP > 1920) is recorded as
+      `over_budget` and gets no Vivado run (HLS BRAM estimates were within ~5 % of Vivado's for the float builds).
 
 ## Phase 6: FPGA campaigns 🟡
 User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, unattended overnight).

@@ -10,7 +10,7 @@
 # at the element width. Tiers that need no kernel edit (plan section 3):
 #   T0 float32 (and half)            float, half
 #   T1 int/uint x 8, 16, 32, 64      int8_t ... uint64_t (native)
-#   T2 fixed/ufixed x 8, 16, 32      ap_fixed<W, W-F> / ap_ufixed<W, W-F> (AP_TRN, AP_WRAP)
+#   T2 fixed/ufixed x 16, 32         ap_fixed<W, W-F> / ap_ufixed<W, W-F> (AP_TRN, AP_WRAP); 8-bit crashes Vitis HLS
 #   T3 int/uint x 2, 4 (probe)       ap_int<W> / ap_uint<W>, packed densely: the kernel gets a logical bus width
 #
 
@@ -23,7 +23,9 @@ BUS_BITS = 512                      # physical memory word (LiteDRAM native port
 FAMILIES = ("float", "half", "int", "uint", "fixed", "ufixed", "pow2")
 NATIVE_INT_BITS = (8, 16, 32, 64)
 PACKED_INT_BITS = (2, 4)            # T3: divide 512, sizeof(ap_int<W>) = 1
-FIXED_BITS = (8, 16, 32)
+FIXED_BITS = (16, 32)              # 8-bit ap_fixed crashes Vitis HLS 2026.1 csynth (see FIXED8_NOTE)
+FIXED8_NOTE = ("Vitis HLS 2026.1 csynth crashes (clang-3.9-csynth reflow, exit 254) on every ap_fixed<8,*> / "
+               "ap_ufixed<8,*> tried (docs/notes2/int-dtype-progress.md, dtype_hls)")
 PLAN = "docs/notes2/int-dtype-plan.md section 3"
 
 
@@ -151,6 +153,8 @@ def resolve(data_type, data_bits=None, frac_bits=None, accum_bits=None):
                                f"instead of sizeof ({PLAN})")
     else:  # fixed, ufixed
         signed = fam == "fixed"
+        if data_bits == 8:
+            raise NumericError(f"{fam}8: {FIXED8_NOTE}")
         if data_bits not in FIXED_BITS:
             raise NumericError(f"{fam}: data_bits must be one of {FIXED_BITS} ({PLAN})")
         if frac_bits is None:

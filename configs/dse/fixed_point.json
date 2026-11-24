@@ -1,19 +1,9 @@
 {
   "campaign": "fixed_point",
-  "comment": "docs/notes2 tier T2: ap_fixed<W, W-F> (AP_TRN, AP_WRAP) against integers of the same width. Move to the best array after int8/int16_scale.",
+  "comment": "docs/notes2 tier T2: fixed32.16 at PE 32x8 (fixed16.8 is in dtype_same_array; 8-bit fixed crashes Vitis HLS csynth).",
   "base": "configs/gemm/pe32x8_ta_t1024x512.json",
   "build_grid": {
     "@format": [
-      {
-        "kernel.data_type": "fixed",
-        "kernel.data_bits": 8,
-        "kernel.frac_bits": 4
-      },
-      {
-        "kernel.data_type": "fixed",
-        "kernel.data_bits": 16,
-        "kernel.frac_bits": 8
-      },
       {
         "kernel.data_type": "fixed",
         "kernel.data_bits": 32,

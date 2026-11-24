@@ -36,7 +36,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(ROOT, "flow"))
 
 from gemmflow.board import Board                       # noqa: E402
-from gemmflow.config import BuildCfg, ConfigError      # noqa: E402
+from gemmflow.config import DEVICE, BuildCfg, ConfigError  # noqa: E402
 from gemmflow.manifest import manifest                 # noqa: E402
 from gemmflow.results import ResultStore               # noqa: E402
 from gemmflow.steps import HlsStep, SimStep, SocStep, HostStep, write_build_reports  # noqa: E402
@@ -82,6 +82,21 @@ def sizes_of(rt):
     if rt.get("triples"):
         return [tuple(t) for t in rt["triples"]]
     return list(itertools.product(rt.get("n", [256]), rt.get("k", [256]), rt.get("m", [256])))
+
+
+SOC_BRAM18 = 150  # GemmSoC without the kernel: 73.5 BRAM36 tiles (docs/notes1 measurements)
+
+
+def over_budget(h):
+    """Reason string if the HLS estimate already exceeds the device (BRAM18 incl. the SoC, or DSP), else None. HLS
+    LUT estimates run ~45 % above Vivado's for this kernel, so LUTs are not gated."""
+    bram, dsp = h.get("bram_18k") or 0, h.get("dsp") or 0
+    why = []
+    if bram + SOC_BRAM18 > 2 * DEVICE["bram36"]:
+        why.append(f"BRAM18 {bram} + {SOC_BRAM18} (SoC) > {2 * DEVICE['bram36']}")
+    if dsp > DEVICE["dsp"]:
+        why.append(f"DSP {dsp} > {DEVICE['dsp']}")
+    return "; ".join(why) or None
 
 
 def hls_jobs(spec):
@@ -197,12 +212,19 @@ def main():
         if "build" in stages and (cfg.build_id(), "build") not in done:
             print(f"build {cfg.build_id()}:", flush=True)
             try:
-                summary = {}
+                summary, over = {}, None
                 for Step in (HlsStep, SocStep, HostStep):
                     st = Step(cfg, bdir)
                     seconds, skipped = st.run()
                     summary[Step.name] = {"seconds": round(seconds, 1), "skipped": skipped, **st.summary()}
                     print(f"  {Step.name}: {'up to date' if skipped else f'{seconds:.0f} s'}", flush=True)
+                    if Step is HlsStep and (over := over_budget(summary["hls"])):
+                        break  # does not fit: no Vivado run
+                if over:
+                    record(cfg, "build", "over_budget", {"reason": over, **summary})
+                    print(f"  over budget (HLS estimate): {over}")
+                    builds.write_csv()
+                    continue
                 write_build_reports(cfg, bdir, summary)
                 soc = summary["soc"]
                 status = "ok" if soc.get("timing_met") else "timing_failed"

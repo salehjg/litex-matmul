@@ -1,6 +1,6 @@
 {
   "campaign": "int16_scale",
-  "comment": "docs/notes2: highest int16 GOP/s. Prune with dtype_hls before running.",
+  "comment": "docs/notes2: highest int16 GOP/s. Pruned by dtype_hls: no mult fabric (HLS est. 7.6 ns). Over-budget points are skipped after HLS.",
   "base": "configs/gemm/pe32x8_ta_t1024x512.json",
   "build_grid": {
     "@format": [
@@ -28,10 +28,6 @@
         "kernel.memory_tile_size_n": 256,
         "kernel.memory_tile_size_m": 512
       }
-    ],
-    "kernel.mult_resource": [
-      null,
-      "fabric"
     ]
   },
   "runtime_grid": {

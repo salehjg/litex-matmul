@@ -162,7 +162,7 @@ class TestNumeric(unittest.TestCase):
             (("uint", 16, None), ("uint16", "uint16_t", 2, 32, "u16", "T1")),
             (("int", 64, None), ("int64", "int64_t", 8, 8, "i64", "T1")),
             (("fixed", 16, 8), ("fixed16.8", "ap_fixed<16, 8>", 2, 32, "fx16f8", "T2")),
-            (("ufixed", 8, 8), ("ufixed8.8", "ap_ufixed<8, 0>", 1, 64, "ufx8f8", "T2")),
+            (("ufixed", 16, 16), ("ufixed16.16", "ap_ufixed<16, 0>", 2, 32, "ufx16f16", "T2")),
             (("int", 4, None), ("int4", "ap_int<4>", 1, 128, "i4", "T3")),
             (("uint", 2, None), ("uint2", "ap_uint<2>", 1, 256, "u2", "T3")),
         ]
@@ -178,7 +178,7 @@ class TestNumeric(unittest.TestCase):
                           (("int32_t",), r"use data_type 'int' with data_bits 32"), (("fixed", 16), r"needs frac_bits"),
                           (("fixed", 16, 16), r"frac_bits must be in 0..15"), (("int",), r"needs data_bits"),
                           (("int", 8, None, 32), r"wider accumulator"), (("float", 16), r"is 32 bits"),
-                          (("int", 8, 3), r"only for fixed")):
+                          (("int", 8, 3), r"only for fixed"), (("fixed", 8, 4), r"csynth crashes")):
             with self.subTest(args):
                 with self.assertRaisesRegex(NumericError, msg):
                     resolve(*args)
