@@ -44,20 +44,33 @@ class VivadoReport:
                 out[key] = float(m.group(1))
         return out
 
+    # Hierarchical report column -> summary key (columns are matched by header name, not position).
+    KERNEL_COLUMNS = {"Total LUTs": "kernel_lut", "Logic LUTs": "kernel_logic_lut", "LUTRAMs": "kernel_lutram",
+                      "SRLs": "kernel_srl", "FFs": "kernel_ff", "RAMB36": "kernel_ramb36", "RAMB18": "kernel_ramb18",
+                      "DSP Blocks": "kernel_dsp"}
+
     def kernel_utilization(self, instance="gemm_kernel_ip"):
-        """Total LUTs/FFs/RAMB36/RAMB18/DSPs of the kernel instance from the hierarchical report, if present."""
+        """LUTs/LUTRAMs/SRLs/FFs/RAMB36/RAMB18/DSPs of the kernel instance from the hierarchical report, if present.
+        (Before 2026-11-24 the columns were taken by position and shifted by one after Total LUTs.)"""
         text = self._read("utilization_hierarchical_place.rpt")
         if not text:
             return {}
+        header = None
         for line in text.splitlines():
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
-            if cells and cells[0] == instance:
-                try:
-                    nums = [float(c) for c in cells[2:8]]
-                except ValueError:
-                    return {}
-                return dict(zip(["kernel_lut", "kernel_lutram", "kernel_srl", "kernel_ff", "kernel_ramb36",
-                                 "kernel_ramb18"], nums))
+            if not cells:
+                continue
+            if cells[0] == "Instance":
+                header = cells
+            elif header and cells[0] == instance:
+                out = {}
+                for name, value in zip(header, cells):
+                    if name in self.KERNEL_COLUMNS:
+                        try:
+                            out[self.KERNEL_COLUMNS[name]] = float(value)
+                        except ValueError:
+                            pass
+                return out
         return {}
 
     def summary(self):

@@ -903,6 +903,12 @@ in the plan). So the DSE can afford many builds.
 ### Phase 8: docs 🟡
 - [ ] README usage section
 - [x] Final numbers and lessons: section "Summary and lessons" at the top (22:45)
+- [x] **Bug fixed (2026-11-24):** `VivadoReport.kernel_utilization()` took the hierarchical report's columns by
+      position and skipped "Logic LUTs", so every `kernel_*` field after `kernel_lut` was shifted by one (e.g.
+      `kernel_ramb36` held the kernel's FFs) and `kernel_dsp` was missing. This affects all `builds.jsonl` rows
+      recorded so far (whole-design LUT/FF/BRAM/DSP and timing were right). Columns are now matched by header name,
+      with a unit test, and all build summaries were regenerated (`gemm_build.py --report-only`). The campaign
+      `builds.jsonl` files are append-only and keep the wrong kernel_* values: use the build dirs' `reports/summary.json`.
 - [x] Unit tests for the Python flow (2026-11-24 00:55): `flow/tests/test_gemmflow.py`, stdlib `unittest`, 20 tests in
       < 0.1 s, no tools or card. Covered: golden build ids of every `configs/gemm/*.json` (each matches a build dir on
       disk; a hashing or default change would silently stop all reuse), Vivado knobs leave the HLS hash alone, auto

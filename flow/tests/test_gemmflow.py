@@ -197,6 +197,25 @@ class TestDse(unittest.TestCase):
                 self.assertGreater(len(points), 0)
 
 
+class TestVivadoReport(unittest.TestCase):
+    HIER = """\
+| Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP Blocks |
++----------+--------+------------+------------+---------+------+-----+--------+--------+------------+
+| dupcb | (top) | 151282 | 136505 | 3734 | 11043 | 235872 | 580 | 149 | 1320 |
+|   gemm_kernel_ip | gemm_kernel_ip | 122535 | 111556 | 6 | 10973 | 206873 | 509 | 69 | 1320 |
+"""
+
+    def test_kernel_columns_by_name(self):
+        from gemmflow.reports import VivadoReport
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "dupcb_utilization_hierarchical_place.rpt"), "w") as f:
+                f.write(self.HIER)
+            k = VivadoReport(d).kernel_utilization()
+        self.assertEqual((k["kernel_lut"], k["kernel_lutram"], k["kernel_srl"], k["kernel_ff"]),
+                         (122535, 6, 10973, 206873))
+        self.assertEqual((k["kernel_ramb36"], k["kernel_ramb18"], k["kernel_dsp"]), (509, 69, 1320))
+
+
 class TestBuildReports(unittest.TestCase):
     def test_manifest_only_when_a_step_ran(self):
         cfg = load("default.json")
