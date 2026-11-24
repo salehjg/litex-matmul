@@ -236,6 +236,19 @@ class BuildCfg:
             # src/Compute.cpp static_assert(kInnerTilesM >= kInnerTilesN): double buffering of A.
             errors.append(f"tile_m/PM = {k.memory_tile_size_m // k.parallelism_m} must be >= tile_n/PN = "
                           f"{k.memory_tile_size_n // k.parallelism_n} (double buffering of A, Compute.cpp)")
+        if k.memory_tile_size_m % k.parallelism_m == 0 and k.memory_tile_size_m // k.parallelism_m < k.parallelism_n:
+            # src/Compute.cpp forwards the next outer product's A values in the slots m1 = locationN .. PN-1 of the
+            # m1 loop (kInnerTilesM long). Shorter, the PEs at the end get none: wrong C, then a hung kernel (int4 PE
+            # 48x64 tile 768x2048 on the card, 2026-11-24). Upstream has no check for it.
+            errors.append(f"tile_m/PM = {k.memory_tile_size_m // k.parallelism_m} must be >= parallelism_n = "
+                          f"{k.parallelism_n} (A forwarding along the PE chain, Compute.cpp)")
+        # src/Compute.cpp WriteC_Flattened counts n1 and m1 in ap_uint<hlslib::ConstLog2(x)> (floor): they only reach
+        # x - 1 for powers of two. Otherwise C comes out wrong (misc/pe_forwarding/sim.py). Upstream has no check.
+        for what, size, par in (("tile_n/PN", k.memory_tile_size_n, k.parallelism_n),
+                                ("tile_m/PM", k.memory_tile_size_m, k.parallelism_m)):
+            q = size // par if size % par == 0 else 0
+            if q and q & (q - 1):
+                errors.append(f"{what} = {q} must be a power of two (C write-back counters, Compute.cpp)")
         if k.transposed_a:
             if k.memory_tile_size_n % width_n:
                 errors.append(f"transposed A: memory_tile_size_n must be a multiple of the elements per N bus word = {width_n}")

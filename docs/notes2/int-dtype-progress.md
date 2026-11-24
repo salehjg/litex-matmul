@@ -354,7 +354,7 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         it needs a kernel or HLS-directive change, not a flow setting. The HLS estimate (4.144 ns) does not see it.
 - [ ] Queued `int4_clock` (11:35, now after `int4_pe64`): int4 PE 32×64 at 225 MHz × default/explore preset (peak
       921.6 GOP/s). Same 32-PE dataflow control as int8 PE 32×32, which met 225 MHz with the default preset.
-- [ ] 🟡 `int4_wide` (started 11:45 (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
+- [x] `int4_wide` (started 11:45, stopped 15:45 (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
       and PE 48×64 (3072 MACs); at most 2 HLS jobs at once (RAM); DDR tuning on.
       - HLS done 13:02 (all ports 512 bits):
 
@@ -373,7 +373,23 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         154.9k FF, 654.5 BRAM tiles, 40 DSP; kernel 170.5k LUT (HLS said 446k). The path is the same as
         in `dtype_clock`: `ProcessingElement_38_U0/n0_fu_92_reg` → `ap_sync_reg_ProcessingElement_*_U0_ap_ready_reg/R`,
         6 levels, 85 % routing, now fanning out to 64 PEs.
-- [ ] Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
+- [x] **`int4_wide` PE 48×64 (tile 768×2048): wrong results, then a hung kernel. Cause: two tile rules the
+      upstream kernel does not check** ([misc/pe_forwarding](../../misc/pe_forwarding/README.md)).
+      - Build: WNS 0.000 ns (met), so it ran. The first exact check (1024³, DDR tuning) gave 983 555 of 1 048 576
+        entries wrong. After that every kernel run hit the 60 s timeout. The tuning sweep would have spent ~5 h on
+        timeouts, so `int4_wide` was stopped (15:45, EXIT=143). No run rows for PE 48×64.
+      - Rule 1, **tile_m/PM ≥ PN:** the PEs forward the next A values in the slots `m1 = locationN … PN−1` of a loop
+        that is tile_m/PM long. PE 48×64: 2048/64 = 32 < 48, so PEs 32–47 starve, the A stream falls out of step and
+        the leftover values block the feeder. PE 64×64 at 1024×2048 (32 < 64) has the same fault.
+      - Rule 2, **tile_m/PM and tile_n/PN powers of two:** the C write-back counters are
+        `ap_uint<ConstLog2(x)>` (floor).
+      - Both confirmed in g++ simulation (`misc/pe_forwarding/sim.py`: 10 small cases, wrong exactly when a rule
+        is broken; PN 12 is fine when both hold). Every earlier board build met both rules.
+      - Fix: both rules are errors in `config.py` `validate` (+3 cases in `test_rejected`; 37 tests pass). No existing campaign point
+        other than the two `int4_wide` ones is affected.
+- [ ] 🟡 `int4_pe64` (started 15:46, HLS running): PE 64×64 now with **tile 512×4096** (tile_n/PN 8, tile_m/PM 64 = PN,
+      same per-PE C buffer as 1024×2048).
+- [x] (superseded: the tile broke rule 1) Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
       and explore presets (one HLS run), and at 180 MHz default (peak 1475 GOP/s, 0.56 ns more period). It goes first:
       4096 MACs at any of these clocks beats int4 PE 32×64 at 225 MHz (921.6 GOP/s peak).
 - [x] (stale queue notes, kept for the record) Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` →

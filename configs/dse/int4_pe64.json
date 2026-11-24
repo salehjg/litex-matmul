@@ -1,6 +1,6 @@
 {
   "campaign": "int4_pe64",
-  "comment": "docs/notes2: int4 PE 64x64 (4096 MACs) missed 200 MHz by 0.215 ns in int4_wide (default preset; 10 endpoints, the dataflow ap_sync control fanout from a PE loop counter, 85 % routing). Retry: 200 MHz aggressive and explore (same HLS run) and 180 MHz default (peak 1475 GOP/s). DDR read taps tuned under load.",
+  "comment": "docs/notes2: int4 PE 64x64 (4096 MACs). int4_wide's tile 1024x2048 breaks the A double buffering (tile_m/PM = 32 < 64 PEs: PEs 32-63 never get the next A values; PE 48x64 with the same tile gave wrong results and then hung), and missed 200 MHz by 0.215 ns. Tile 512x4096: tile_m/PM = 64 = PN, same per-PE C buffer (8x64 = 512 entries). 200 MHz aggressive and explore (one HLS run), 180 MHz default. DDR read taps tuned under load.",
   "base": "configs/gemm/pe32x8_ta_t1024x512.json",
   "build_grid": {
     "@format": [
@@ -13,8 +13,8 @@
       {
         "kernel.parallelism_n": 64,
         "kernel.parallelism_m": 64,
-        "kernel.memory_tile_size_n": 1024,
-        "kernel.memory_tile_size_m": 2048
+        "kernel.memory_tile_size_n": 512,
+        "kernel.memory_tile_size_m": 4096
       }
     ],
     "@impl": [

@@ -97,6 +97,10 @@ class TestRules(unittest.TestCase):
             "tile_m not whole M bus words": (dict(memory_tile_size_m=100), r"memory_tile_size_m = 100 must be a multiple of the elements"),
             "tile_n not a multiple of PN": (dict(memory_tile_size_n=132), r"memory_tile_size_n = 132 must be a multiple of par"),
             "tile_m/PM < tile_n/PN": (dict(memory_tile_size_n=256, memory_tile_size_m=128), r"double buffering of A"),
+            "tile_m/PM < PN": (dict(parallelism_n=32), r"tile_m/PM = 16 must be >= parallelism_n = 32"),
+            "tile_m/PM not a power of two": (dict(memory_tile_size_m=96), r"tile_m/PM = 12 must be a power of two"),
+            "tile_n/PN not a power of two": (dict(memory_tile_size_n=96, memory_tile_size_m=256),
+                                             r"tile_n/PN = 12 must be a power of two"),
             "transposed A, tile_n not whole N bus words":
                 (dict(transposed_a=True, parallelism_n=4, memory_tile_size_n=36), r"transposed A: memory_tile_size_n"),
             "bus width not a multiple of the element": (dict(bus_width_bytes={"k": 62}), r"bus_width_bytes.k=62"),
