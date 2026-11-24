@@ -115,8 +115,9 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, unattended overnight).
 - [ ] `dtype_same_array` (int8, int16, int32, fixed16.8 at PE 32×8, tile 1024×512, 200 MHz; float32 reused):
       queued behind `dtype_hls` (Vivado needs the RAM the HLS jobs use), log `results/dtype_same_array/dse.log`.
-- Order after that, decided from the HLS probe and the first results: `int8_scale` / `int16_scale` (pruned),
-  `int4_probe` (only if the HLS ports are 512 bits), `fixed_point`, `dtype_clock`, `dtype_size_sweep`.
+- [ ] Queued behind it (05:05): `dtype_size_sweep` (runs on the int8 build), `int8_scale`, `int16_scale`.
+- Then: `int4_probe` (HLS ports are 512 bits, so it is worth building), `fixed_point` (fixed32.16), `dtype_clock`
+  (on the best int8 array).
 
 ## Log
 
