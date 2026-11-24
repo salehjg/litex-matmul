@@ -396,8 +396,8 @@ def formats(B, runs, runs_any):
     # Best verified build per format.
     bests = [("float32", "PE 32x8 225 MHz", "db5adf1c"), ("fixed32.16", "PE 32x8 200 MHz", "73030689"),
              ("int32", "PE 32x8 200 MHz", "9b529c7a"), ("int16", "PE 32x16 200 MHz", "66db0239"),
-             ("int8", "PE 32x32 225 MHz", "56e626ae"), ("int4", "PE 32x64 225 MHz", "9fd9e3a8"),
-             ("int4", "PE 64x64 180 MHz", "2b2028f3")]
+             ("int8", "PE 32x32 225 MHz", "56e626ae"), ("int4", "PE 32x64 225 MHz", "dd1f6ac2"),
+             ("int4", "PE 64x64 180 MHz", "4276467f")]
     rows = []
     for i, (fmt_, arr, h) in enumerate(bests):
         b = B[h]

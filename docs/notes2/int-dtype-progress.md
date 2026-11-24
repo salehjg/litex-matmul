@@ -480,9 +480,11 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       keeps `builds.csv` float-only (the float plots index it by position) and writes `formats_*.csv`.
       `export_figures.sh` now uses `build/export/` (its wrappers in `build/figures/` shadowed `figures/*.tex` in the
       report build).
-      - Pending: the int4 8192³ numbers in the text (1290.1, 854.1) come from the screen runs above; 8192³ was added to
-        `int4_pe64`/`int4_clock`, to be recorded with a run-only `--resume` after `int4_tile` (JTAG programming
-        starts Vivado), then `extract_data.py` and a rebuild.
+      - Done (23:54–00:05): the 8192³ rows of `int4_pe64`/`int4_clock` recorded with a run-only `--resume`
+        (1290.12 GOP/s on both 180 MHz builds, 854.09 on both 225 MHz builds, verified). Report updated with
+        `int4_tile` (new int4 best 1370.9 GOP/s, loss-per-k-step confirmation), data regenerated, 28 pages, 0 warnings.
+      - **Full exact screens of both `int4_tile` builds** (23:54–23:56, bring-up with DDR tuning: 0 bad before and
+        after; 1024³ full, then `screen.sh` 2×2048³ full): 0 bad of 4 194 304 in every run.
 - [x] (superseded: the tile broke rule 1) Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
       and explore presets (one HLS run), and at 180 MHz default (peak 1475 GOP/s, 0.56 ns more period). It goes first:
       4096 MACs at any of these clocks beats int4 PE 32×64 at 225 MHz (921.6 GOP/s peak).

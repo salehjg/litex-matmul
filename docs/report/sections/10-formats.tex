@@ -4,7 +4,7 @@
 The float32 exploration ended with the DSPs nearly used up: each float multiply-add takes five DSP48E1 slices
 (\cref{sec:eval}). Narrower element formats need fewer of them, so the same device can hold far larger arrays. This
 section describes how the flow was extended to integer and fixed-point formats \emph{without rewriting the kernel},
-and what twelve more campaigns measured on the card (24 November 2026, \cref{tab:fmt-campaigns}). The dated record
+and what thirteen more campaigns measured on the card (24 November 2026, \cref{tab:fmt-campaigns}). The dated record
 is in \file{docs/notes2/}.
 
 \subsection{One element type, no kernel change}
@@ -107,10 +107,11 @@ With the DSPs freed, the arrays could grow until BRAM, LUTs or timing stopped th
         225\,MHz}, 3.8 times the best float result, with 40 DSPs and \SI{44}{\percent} of the LUTs.
   \item \textbf{int16:} PE 32\x16 (\SI{190.9}{GOP/s}). PE 32\x32 needs 2045 BRAM18 by the HLS estimate, because the
         C tile is twice as wide per element as int8's. The resource gate stopped it before Vivado.
-  \item \textbf{int4:} PE 32\x64 (2048 MACs) reaches \SI{756.7}{GOP/s} at 200\,MHz and \SI{854.1}{GOP/s} at 225\,MHz.
-        PE 32\x128 is over the BRAM budget (2045 BRAM18). \textbf{PE 64\x64 (4096 MACs) reaches \SI{1290.1}{GOP/s}
-        at 180\,MHz}, 11.6 times the best float result, with 38 DSPs, \SI{67}{\percent} of the LUTs and
-        \SI{68}{\percent} of the BRAM. HLS overestimates LUTs for the 4-bit arrays by 2--3\x{} (PE 32\x64: 240\,k
+  \item \textbf{int4:} PE 32\x64 (2048 MACs) reaches \SI{756.7}{GOP/s} at 200\,MHz and \SI{854.1}{GOP/s} at 225\,MHz
+        with tile 512\x2048, \SI{884.5}{GOP/s} with tile 1024\x2048 (\cref{sec:formats:kstep}). PE 32\x128 is over
+        the BRAM budget (2045 BRAM18). \textbf{PE 64\x64 (4096 MACs) reaches \SI{1290.1}{GOP/s} at 180\,MHz with
+        tile 512\x4096 and \SI{1370.9}{GOP/s} with tile 1024\x4096}, 12.4 times the best float result, with 38 DSPs,
+        \SI{67}{\percent} of the LUTs and \SI{68}{\percent} of the BRAM. HLS overestimates LUTs for the 4-bit arrays by 2--3\x{} (PE 32\x64: 240\,k
         estimated, 117\,k placed).
 \end{itemize}
 
@@ -121,13 +122,14 @@ a PE's loop counter drives the reset of the \code{ap\_sync\_reg\_*\_ap\_ready} f
 builds at 200\,MHz missed by 0.215, 0.051 and 0.336\,ns on this path. At 180\,MHz the default preset met the accel
 clock but failed the PCIe \SI{250}{MHz} user clock by 0.447\,ns: the path from a LitePCIe FIFO in block RAM into the
 PCIe block's transmit throttle, displaced by the congested design. The \code{aggressive} and \code{explore} presets
-close both, with +0.045 and +0.018\,ns. Going faster with 64 PEs needs a kernel or directive change in the
+close both, with +0.045 and +0.018\,ns, and \code{aggressive} also closes the 1024\x4096 tile
+(+0.019\,ns). Going faster with 64 PEs needs a kernel or directive change in the
 dataflow control (\cref{sec:lessons}).
 
 \begin{table}[ht]
 \centering\small
 \caption{Best verified build per format (kernel time). Peak = \(2 P_N P_M f\). Every run is checked exactly
-  (float32: bit for bit). The int32, fixed32.16 and both int4 builds also passed a full screen (\(2\times2048^3\), every
+  (float32: bit for bit). The int32, fixed32.16 and int4 builds also passed a full screen (\(2\times2048^3\), every
   entry), the int8 build a full \(1024^3\) check.}
 \label{tab:formats}
 \begin{tabular}{@{}lllrrrl@{}}
@@ -139,8 +141,8 @@ fixed32.16 & PE 32\x8, 1024\x512 & 200\,MHz, aggr. & 102.4 & 98.6 (\(8192^3\)) &
 int32 & PE 32\x8, 1024\x512 & 200\,MHz, aggr. & 102.4 & 98.2 (\(4096^3\)) & 95.9 & 81.3\,k / 808 / 654.5 \\
 int16 & PE 32\x16, 512\x1024 & 200\,MHz & 204.8 & 190.9 (\(8192^3\)) & 93.2 & 85.7\,k / 552 / 414.5 \\
 int8 & PE 32\x32, 512\x1024 & 225\,MHz & 460.8 & 426.6 (\(8192^3\)) & 92.6 & 131.3\,k / 40 / 414.5 \\
-int4 & PE 32\x64, 512\x2048 & 225\,MHz & 921.6 & 854.1 (\(8192^3\)) & 92.7 & 117.5\,k / 39 / 414.5 \\
-\textbf{int4} & \textbf{PE 64\x64, 512\x4096} & \textbf{180\,MHz, aggr.} & 1474.6 & \textbf{1290.1} (\(8192^3\)) & 87.5 & 200.3\,k / 38 / 652.5 \\
+int4 & PE 32\x64, 1024\x2048 & 225\,MHz & 921.6 & 884.5 (\(8192^3\)) & 96.0 & 118.3\,k / 40 / 414.5 \\
+\textbf{int4} & \textbf{PE 64\x64, 1024\x4096} & \textbf{180\,MHz, aggr.} & 1474.6 & \textbf{1370.9} (\(8192^3\)) & 93.0 & 201.2\,k / 38 / 652.5 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -201,13 +203,20 @@ Every earlier board build met both. PE 64\x64 then used tile 512\x4096 (\(T_M/P_
 
 \subsection{A fixed loss per k step}
 \label{sec:formats:kstep}
-PE 64\x64 reaches only \SI{87.5}{\percent} of its peak, against \SI{92}{\percent} for the 32-PE arrays, and the gap
+PE 64\x64 with tile 512\x4096 reaches only \SI{87.5}{\percent} of its peak, against \SI{92}{\percent} for the 32-PE arrays, and the gap
 does not shrink from \(4096^3\) to \(8192^3\). So it is a cost per step of the k loop, not per tile. From the measured
 cycle counts, each build loses a roughly fixed number of cycles per k step and memory tile
 (\cref{tab:kstep}), where the ideal is \((T_N/P_N)(T_M/P_M)\) cycles. The float PE 32\x8 already showed this: doubling
 its tile raised it from 93.2 to \SI{96.3}{\percent} with about the same loss per step. Where those cycles go in the
-kernel is not yet known: pipeline fill of the PE loop or a restart of the A/B feed. Tiles with twice the work per
-k step are the next experiment for the int4 arrays.
+kernel is not yet known: pipeline fill of the PE loop or a restart of the A/B feed.
+
+The model predicted what tiles with twice the work per k step would give, and the \code{int4\_tile} campaign
+confirmed it (last two rows of \cref{tab:kstep}). PE 64\x64 with tile 1024\x4096 reaches \SI{93.0}{\percent}
+(\SI{1370.9}{GOP/s}, predicted \(\sim\)1375), and PE 32\x64 with tile 1024\x2048 \SI{96.0}{\percent}
+(\SI{884.5}{GOP/s}, predicted \(\sim\)886). The loss per step barely moves (41 \(\to\) 43 and 73 \(\to\) 77
+cycles), so its share halves. The deeper tiles cost no BRAM: HLS and Vivado used the same blocks as for the
+half-size tiles (kernel 509 RAMB36 and 69 RAMB18 for PE 64\x64). The price is the whole-tile effect, since
+matrices should now be multiples of 1024 in \(N\).
 
 \begin{table}[ht]
 \centering\small
@@ -222,6 +231,9 @@ float32 / int8 PE 32\x8, tile 1024\x512 & 2048 & 79 & 96.3 \\
 int8 PE 32\x32, tile 512\x1024 & 512 & 41 & 92.6 \\
 int4 PE 32\x64, tile 512\x2048 & 512 & 41 & 92.7 \\
 int4 PE 64\x64, tile 512\x4096 & 512 & 73 & 87.5 \\
+\midrule
+int4 PE 32\x64, tile 1024\x2048 & 1024 & 43 & 96.0 \\
+int4 PE 64\x64, tile 1024\x4096 & 1024 & 77 & 93.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -234,7 +246,8 @@ packing (\SI{20}{\percent} of the end-to-end time), against 15.5\,ms (\SI{41}{\p
 \begin{table}[ht]
 \centering\small
 \caption{Integer and fixed-point campaigns, 24 November 2026 (\file{data/campaigns.csv}). Builds: new Vivado runs;
-  runs: result rows (15 of them with the DDR read errors of \cref{sec:formats:ddr}).}
+  runs: result rows (15 of them with the DDR read errors of \cref{sec:formats:ddr}). The \(8192^3\) rows of
+  \code{int4\_pe64} and \code{int4\_clock} were added at 23:56--23:59 with a run-only \code{--resume}.}
 \label{tab:fmt-campaigns}
 \begin{tabular}{@{}lllrrrl@{}}
 \toprule
@@ -250,10 +263,11 @@ Campaign & Time & Stages & Points & Builds & Runs & Question \\
 \code{fixed\_point} & 09:07--11:38 & all & 2 & 2 & 6 & fixed32.16 \\
 \code{dtype\_clock} & 09:26--11:20 & all & 6 & 5 & 12 & int8 PE 32\x32 at 200/225/250\,MHz \\
 \code{int4\_wide} & 11:38--13:47 & all & 3 & 2 & 0 & 4096-MAC int4 arrays (stopped, \cref{sec:formats:tiles}) \\
-\code{int4\_pe64} & 15:33--21:12 & all & 5 & 5 & 8 & PE 64\x64 with a legal tile \\
-\code{int4\_clock} & 18:36--21:48 & all & 2 & 2 & 8 & int4 PE 32\x64 at 225\,MHz \\
+\code{int4\_pe64} & 15:33--21:12 & all & 5 & 5 & 12 & PE 64\x64 with a legal tile \\
+\code{int4\_clock} & 18:36--21:48 & all & 2 & 2 & 12 & int4 PE 32\x64 at 225\,MHz \\
+\code{int4\_tile} & 21:54--23:53 & all & 2 & 2 & 8 & twice the work per k step (\cref{sec:formats:kstep}) \\
 \midrule
-\multicolumn{3}{@{}l}{total} & & 31 & 208 & \\
+\multicolumn{3}{@{}l}{total} & & 33 & 224 & \\
 \bottomrule
 \end{tabular}
 \end{table}
