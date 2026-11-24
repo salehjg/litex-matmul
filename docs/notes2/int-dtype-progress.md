@@ -196,6 +196,20 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         | int8 PE 32×32 | 1024, LUT | 0.038 | passes |
         | int8 PE 32×8 | 256, LUT | 0.005 | passes |
         | float32 PE 32×8 | 256 | 0.050 | passes |
+- [x] **`int16_scale` done** (06:43–07:13, `results/int16_scale/`; 200 MHz, tA, default preset):
+
+      | Array (tile) | MACs | DSP | SoC LUT | SoC FF | BRAM tiles | WNS ns | 2048³ / 4096³ / 8192³ GOP/s (% of peak) | Verify |
+      |---|---|---|---|---|---|---|---|---|
+      | 32×16 (512×1024) | 512 | 552 | 85.7k | 102.3k | 414.5 | 0.061 | 188.7 / 190.2 / **190.9** (93 %) | ok |
+      | 16×32 (256×512) | 512 | 557 | 69.6k | 90.9k | 530.0 | 0.071 | 185.7 / 186.8 / 187.7 (92 %) | ok |
+      | 32×32 (512×1024) | 1024 | — | — | — | — | — | not built | `over_budget` |
+
+      - **The resource gate worked:** int16 PE 32×32 needs 2045 BRAM18 by the HLS estimate (+150 for the SoC >
+        1910) and got no Vivado run. int16 doubles the C-tile width per lane against int8, whose PE 32×32 needed
+        only 662.
+      - int16 uses one DSP per MAC (16×16 multiplies fit a DSP48E1), so 1024 int16 MACs would also take ~1060 of
+        the 1920 DSPs: BRAM runs out first.
+      - At equal MACs int16 matches int8 (190.9 vs 191.0 GOP/s at PE 32×16) for 14× the DSPs and fewer LUTs.
 - [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.
       `dtype_clock` now uses the best verified int8 array, PE 32×32 tile 512×1024 (06:50); its 200 MHz default
       point reuses that build.
