@@ -3,7 +3,7 @@
 # All inputs come from params.tcl in the current directory (written by flow/gemmflow, decision D7):
 #   ::P(project) ::P(top) ::P(part) ::P(clock_period_ns) ::P(clock_uncertainty) ::P(cflags) ::P(sources)
 #   ::P(testbench) ::P(run_csim) ::P(csim_argv) ::P(export_flow) ::P(ip_vendor) ::P(ip_library) ::P(ip_name)
-#   ::P(ip_version)
+#   ::P(ip_version) ::P(op_bindings) (list of "op impl", e.g. "mul fabric"; may be absent or empty)
 
 source [file join [pwd] params.tcl]
 
@@ -22,6 +22,14 @@ set_clock_uncertainty $::P(clock_uncertainty)
 # 32-bit m_axi addresses (each DDR3 channel is 2 GB), dataflow checks as in upstream gemm_hls.
 config_interface -m_axi_addr64=false
 config_dataflow -strict_mode warning
+
+# Operator binding from kernel.mult_resource / add_resource (docs/notes2/int-dtype-plan.md 4.1).
+if {[info exists ::P(op_bindings)]} {
+    foreach b $::P(op_bindings) {
+        lassign $b op impl
+        config_op $op -impl $impl
+    }
+}
 
 if {$::P(run_csim)} {
     csim_design -argv $::P(csim_argv)

@@ -58,11 +58,13 @@ class HlsRun:
             flags.append("-DMM_TRANSPOSED_A")
         if k.data_type == "half":
             flags.append("-DMM_HALF_PRECISION")
-        if k.add_resource:
-            flags.append(f"-DMM_ADD_RESOURCE={k.add_resource}")
-        if k.mult_resource:
-            flags.append(f"-DMM_MULT_RESOURCE={k.mult_resource}")
         return " ".join(flags)
+
+    def op_bindings(self):
+        """Vitis config_op pairs (op, impl) from kernel.mult_resource / add_resource (notes2 plan 4.1); empty when
+        both are null, so earlier HLS runs see the same commands."""
+        k, ops = self.cfg.kernel, self.cfg.numeric().hls_ops
+        return [(ops[name], impl) for name, impl in (("mult", k.mult_resource), ("add", k.add_resource)) if impl]
 
     def prepare(self):
         os.makedirs(self.dir, exist_ok=True)
@@ -77,6 +79,7 @@ class HlsRun:
             "clock_period_ns":   f"{period:.4f}",
             "clock_uncertainty": f"{self.cfg.clocks.hls_uncertainty_pct:g}%",
             "cflags":            "{" + self.cflags() + "}",
+            "op_bindings":       _tcl_list(f"{op} {impl}" for op, impl in self.op_bindings()),
             "sources":           _tcl_list(sources),
             "testbench":         "{" + os.path.join(KERNEL_DIR, "tb", "test_gemm.cpp") + "}",
             "run_csim":          int(self.cfg.hls.run_csim),

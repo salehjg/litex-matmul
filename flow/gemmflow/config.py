@@ -13,17 +13,11 @@ import re
 from dataclasses import dataclass, field, fields
 from typing import Optional
 
+from .numeric import NumericError, resolve as resolve_numeric
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 KERNEL_DIR = os.path.join(ROOT, "kernels", "gemm")
 
-# Element types the kernel supports: size in bytes, DSP48E1 per multiply-accumulate (rough, for the budget hint).
-DATA_TYPES = {
-    "float":    {"bytes": 4, "dsp_per_mac": 5},  # fmul 3 + fadd 2 (full DSP)
-    "half":     {"bytes": 2, "dsp_per_mac": 3},
-    "int32_t":  {"bytes": 4, "dsp_per_mac": 4},
-    "int16_t":  {"bytes": 2, "dsp_per_mac": 1},
-    "uint8_t":  {"bytes": 1, "dsp_per_mac": 1},
-}
 DEVICE = {"part": "xc7k480tiffg1156-2L", "dsp": 1920, "bram36": 955}
 
 VIVADO_PRESETS = {
@@ -39,6 +33,20 @@ VIVADO_PRESETS = {
 
 class ConfigError(ValueError):
     pass
+
+
+# Fields added after 2026-11-24 are hashed only when they are not None, so the build ids (and HLS hashes) of earlier
+# configs stay the same (flow/tests pins them). Section -> field names.
+LATE_FIELDS = {"kernel": ("data_bits", "frac_bits", "accum_bits")}
+
+
+def _hash_dict(d):
+    d = json.loads(json.dumps(d))
+    for section, names in LATE_FIELDS.items():
+        for n in names:
+            if d.get(section, {}).get(n, "absent") is None:
+                del d[section][n]
+    return d
 
 
 # Dataclasses ------------------------------------------------------------------------------------------------------
@@ -67,7 +75,10 @@ class MAxi:
 
 @dataclass
 class KernelCfg:
-    data_type:             str = "float"
+    data_type:             str = "float"   # float | half | int | uint | fixed | ufixed (flow/gemmflow/numeric.py)
+    data_bits:             Optional[int] = None   # None: 32 for float, 16 for half; required otherwise
+    frac_bits:             Optional[int] = None   # fixed/ufixed: fractional bits
+    accum_bits:            Optional[int] = None   # reserved: None or == data_bits (wider needs a kernel change)
     parallelism_n:         int = 8
     parallelism_m:         int = 8
     memory_tile_size_n:    int = 128
@@ -146,9 +157,22 @@ class BuildCfg:
 
     # Derived values -----------------------------------------------------------------------------------------------
 
+    def numeric(self):
+        """The element format (flow/gemmflow/numeric.py); raises ConfigError if unsupported."""
+        k = self.kernel
+        try:
+            return resolve_numeric(k.data_type, k.data_bits, k.frac_bits, k.accum_bits)
+        except NumericError as e:
+            raise ConfigError(str(e)) from None
+
     @property
     def elem_bytes(self):
-        return DATA_TYPES[self.kernel.data_type]["bytes"]
+        """sizeof(Data_t): container bytes of one element (several packed elements share one for 2/4-bit types)."""
+        return self.numeric().container_bytes
+
+    def elems(self, nbytes):
+        """Number of elements in nbytes of memory (512-bit words hold 512 / bits elements)."""
+        return nbytes * 8 // self.numeric().bits
 
     def resolved_vivado(self):
         """Directives after the preset, explicit fields win. max_threads resolved (Vivado caps it at 8 on Linux)."""
@@ -164,42 +188,45 @@ class BuildCfg:
     def size_multiples(self):
         """(N, K, M) multiples the run-time sizes need: the kernel reads whole bus words, and K also whole transpose
         words when A is not transposed (gemm_hls host/RunHardware.cpp, MatrixMultiplication.h). Passed to gemm_runner."""
-        k, e = self.kernel, self.elem_bytes
-        mult_k = k.bus_width_bytes.k // e
+        k = self.kernel
+        mult_k = self.elems(k.bus_width_bytes.k)
         if not k.transposed_a:
-            mult_k = math.lcm(mult_k, k.transpose_width_bytes // e)
-        mult_n = k.bus_width_bytes.n // e if k.transposed_a else 1
-        return mult_n, mult_k, k.bus_width_bytes.m // e
+            mult_k = math.lcm(mult_k, self.elems(k.transpose_width_bytes))
+        mult_n = self.elems(k.bus_width_bytes.n) if k.transposed_a else 1
+        return mult_n, mult_k, self.elems(k.bus_width_bytes.m)
 
-    def peak_gflops(self):
+    def peak_gops(self):
+        """2 operations per multiply-add, P_N x P_M multiply-adds per cycle (GFLOP/s for float types)."""
         k = self.kernel
         return 2 * k.parallelism_n * k.parallelism_m * self.clocks.accel_mhz * 1e6 / 1e9
+
+    peak_gflops = peak_gops  # name used by earlier scripts and records
 
     # Validation ---------------------------------------------------------------------------------------------------
 
     def validate(self):
-        """Raise ConfigError on any rule gemm_hls enforces (CMake FATAL_ERROR or static_assert); return warnings."""
-        k, e = self.kernel, None
+        """Raise ConfigError on any rule gemm_hls enforces (CMake FATAL_ERROR or static_assert) or the element format
+        does not support; return warnings. Widths are counted in elements per bus word (512 / bits for 512-bit words)."""
+        k = self.kernel
         errors, warnings = [], []
-        if k.data_type not in DATA_TYPES:
-            raise ConfigError(f"kernel.data_type {k.data_type!r} not in {sorted(DATA_TYPES)}")
-        e = self.elem_bytes
+        nf = self.numeric()
         bw = k.bus_width_bytes
         for name in ("n", "k", "m"):
             w = getattr(bw, name)
-            if w <= 0 or w % e:
-                errors.append(f"bus_width_bytes.{name}={w} must be a positive multiple of sizeof({k.data_type})={e}")
+            if w <= 0 or (w * 8) % nf.bits:
+                errors.append(f"bus_width_bytes.{name}={w} must be a positive multiple of the {nf.bits}-bit element")
         for name in ("parallelism_n", "parallelism_m", "memory_tile_size_n", "memory_tile_size_m"):
             if getattr(k, name) <= 0:
                 errors.append(f"kernel.{name} must be positive")
         if errors:
             raise ConfigError("; ".join(errors))
 
-        width_m = bw.m // e
+        width_m, width_n = self.elems(bw.m), self.elems(bw.n)
         if width_m % k.parallelism_m:
-            errors.append(f"(bus_width_bytes.m / sizeof) = {width_m} must be a multiple of parallelism_m = {k.parallelism_m}")
+            errors.append(f"elements per M bus word = {width_m} must be a multiple of parallelism_m = {k.parallelism_m}")
         if k.memory_tile_size_m % width_m:
-            errors.append(f"memory_tile_size_m = {k.memory_tile_size_m} must be a multiple of bus_width_bytes.m / sizeof = {width_m}")
+            errors.append(f"memory_tile_size_m = {k.memory_tile_size_m} must be a multiple of the elements per M bus "
+                          f"word = {width_m}")
         if k.memory_tile_size_n % k.parallelism_n:
             errors.append(f"memory_tile_size_n = {k.memory_tile_size_n} must be a multiple of parallelism_n = {k.parallelism_n}")
         if k.memory_tile_size_m % k.parallelism_m:
@@ -210,17 +237,21 @@ class BuildCfg:
             errors.append(f"tile_m/PM = {k.memory_tile_size_m // k.parallelism_m} must be >= tile_n/PN = "
                           f"{k.memory_tile_size_n // k.parallelism_n} (double buffering of A, Compute.cpp)")
         if k.transposed_a:
-            if k.memory_tile_size_n % (bw.n // e):
-                errors.append(f"transposed A: memory_tile_size_n must be a multiple of bus_width_bytes.n / sizeof = {bw.n // e}")
+            if k.memory_tile_size_n % width_n:
+                errors.append(f"transposed A: memory_tile_size_n must be a multiple of the elements per N bus word = {width_n}")
         else:
-            if k.transpose_width_bytes % e:
-                errors.append(f"transpose_width_bytes = {k.transpose_width_bytes} must be a multiple of sizeof = {e}")
+            if (k.transpose_width_bytes * 8) % nf.bits:
+                errors.append(f"transpose_width_bytes = {k.transpose_width_bytes} must hold whole {nf.bits}-bit elements")
             if k.transpose_width_bytes % bw.k:
                 errors.append(f"transpose_width_bytes = {k.transpose_width_bytes} must be a multiple of bus_width_bytes.k = {bw.k}")
             limit = (k.memory_tile_size_n // k.parallelism_n) * (k.memory_tile_size_m // k.parallelism_m)
             if k.memory_tile_size_n > limit:
                 warnings.append(f"memory_tile_size_n = {k.memory_tile_size_n} > (tile_n/PN)*(tile_m/PM) = {limit}: "
                                 "the on-chip transpose of A cannot keep up (upstream CMake warning)")
+        for res_name in ("mult_resource", "add_resource"):
+            v = getattr(k, res_name)
+            if v is not None and v not in nf.valid_impls():
+                errors.append(f"kernel.{res_name} = {v!r} must be one of {list(nf.valid_impls())} for {nf.spec}")
         for ch in (self.memory_map.a, self.memory_map.b, self.memory_map.c):
             if ch not in ("ch0", "ch1"):
                 errors.append(f"memory_map entries must be ch0 or ch1, got {ch!r}")
@@ -231,7 +262,7 @@ class BuildCfg:
         if errors:
             raise ConfigError("; ".join(errors))
 
-        dsp = k.parallelism_n * k.parallelism_m * DATA_TYPES[k.data_type]["dsp_per_mac"]
+        dsp = k.parallelism_n * k.parallelism_m * nf.dsp_per_mac(k.mult_resource, k.add_resource)
         if dsp > DEVICE["dsp"]:
             warnings.append(f"rough DSP estimate {dsp} > {DEVICE['dsp']} on the {DEVICE['part']}")
         return warnings
@@ -239,19 +270,22 @@ class BuildCfg:
     # Config.h --------------------------------------------------------------------------------------------------
 
     def config_h_values(self):
-        k, e, bw = self.kernel, self.elem_bytes, self.kernel.bus_width_bytes
+        """Placeholder values for Config.h.in. Widths are in container units (bytes / sizeof(Data_t)), as the kernel
+        counts elements: for packed 2/4-bit types the logical bus width is 512 / bits containers per 64-byte word."""
+        k, bw, nf = self.kernel, self.kernel.bus_width_bytes, self.numeric()
+        e = nf.container_bytes
         v = {
-            "MM_DATA_TYPE":          k.data_type,
-            "MM_MEMORY_BUS_WIDTH_N": bw.n,
-            "MM_MEMORY_BUS_WIDTH_K": bw.k,
-            "MM_MEMORY_BUS_WIDTH_M": bw.m,
+            "MM_DATA_TYPE":          nf.c_type,
+            "MM_MEMORY_BUS_WIDTH_N": nf.logical_bytes(bw.n),
+            "MM_MEMORY_BUS_WIDTH_K": nf.logical_bytes(bw.k),
+            "MM_MEMORY_BUS_WIDTH_M": nf.logical_bytes(bw.m),
             "MM_SIZE_N": 0, "MM_SIZE_K": 0, "MM_SIZE_M": 0,  # Dynamic sizes: unused.
             "MM_MEMORY_TILE_SIZE_N": k.memory_tile_size_n,
             "MM_MEMORY_TILE_SIZE_M": k.memory_tile_size_m,
             "MM_PARALLELISM_N":      k.parallelism_n,
             "MM_PARALLELISM_M":      k.parallelism_m,
             "MM_GRANULARITY_N":      1,
-            "MM_TRANSPOSE_WIDTH":    k.transpose_width_bytes,
+            "MM_TRANSPOSE_WIDTH":    nf.logical_bytes(k.transpose_width_bytes),
             "MM_CLOCK_INTERNAL":     self.clocks.accel_mhz,
             "MM_GOLDEN_DIR":         "",
             "MM_MAP_OP":             "Multiply",
@@ -265,8 +299,7 @@ class BuildCfg:
             "MM_AXI_OUTSTANDING":    k.m_axi.num_outstanding,
             "MM_AXI_LATENCY":        k.m_axi.latency,
         }
-        for t, info in DATA_TYPES.items():
-            v[f"MM_DATA_WIDTH_{t}"] = info["bytes"]
+        v["MM_DATA_WIDTH"] = e  # sizeof(Data_t); Config.h.in writes it as ${MM_DATA_WIDTH_${MM_DATA_TYPE}}
         return v
 
     def render_config_h(self, template_path=None):
@@ -275,6 +308,8 @@ class BuildCfg:
         with open(template_path) as f:
             text = f.read()
         values = {k: str(v) for k, v in self.config_h_values().items()}
+        # The nested width lookup is resolved here: type names such as ap_fixed<16, 8> are not placeholder names.
+        text = text.replace("${MM_DATA_WIDTH_${MM_DATA_TYPE}}", values.pop("MM_DATA_WIDTH"))
         pattern = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
         for _ in range(4):
             text, n = pattern.subn(lambda m: values[m.group(1)] if m.group(1) in values else m.group(0), text)
@@ -283,18 +318,24 @@ class BuildCfg:
         left = pattern.findall(text)
         if left:
             raise ConfigError(f"Config.h.in placeholders without a value: {sorted(set(left))}")
+        if self.numeric().needs_ap_header:  # Config.h.in includes no ap_int.h before Data_t (notes2 plan 2.1)
+            anchor = '#include "hlslib/xilinx/Operators.h"\n'
+            if anchor not in text:
+                raise ConfigError("Config.h.in: cannot place the ap_fixed.h include")
+            text = text.replace(anchor, anchor + "#include <ap_fixed.h>  // litex-matmul: ap_* element type\n", 1)
         return text
 
     # Hashes ----------------------------------------------------------------------------------------------------
 
     def config_hash(self):
         """sha256 of the canonical resolved config (sorted keys, defaults filled), 8 hex digits for display."""
-        return _sha(json.dumps(self.to_dict(), sort_keys=True))
+        return _sha(json.dumps(_hash_dict(self.to_dict()), sort_keys=True))
 
     def hls_hash(self):
         """What the HLS IP depends on: kernel, clocks, hls sections and the kernel source tree."""
-        d = {"kernel": dataclasses.asdict(self.kernel), "clocks": dataclasses.asdict(self.clocks),
-             "hls": dataclasses.asdict(self.hls), "sources": tree_hash(KERNEL_DIR)}
+        d = _hash_dict({"kernel": dataclasses.asdict(self.kernel), "clocks": dataclasses.asdict(self.clocks),
+                        "hls": dataclasses.asdict(self.hls)})
+        d["sources"] = tree_hash(KERNEL_DIR)
         return _sha(json.dumps(d, sort_keys=True))
 
     def build_id(self):
@@ -303,7 +344,7 @@ class BuildCfg:
     def auto_name(self):
         """Name from the parameters that usually vary (plan section 5 naming convention)."""
         k = self.kernel
-        short = {"float": "f32", "half": "f16", "int32_t": "i32", "int16_t": "i16", "uint8_t": "u8"}[k.data_type]
+        short = self.numeric().short
         name = (f"{short}_pe{k.parallelism_n}x{k.parallelism_m}_t{k.memory_tile_size_n}x{k.memory_tile_size_m}"
                 f"_{self.clocks.accel_mhz:g}mhz")
         if k.transposed_a:

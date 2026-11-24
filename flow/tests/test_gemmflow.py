@@ -20,6 +20,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "flow"))
 
 from gemmflow.config import BuildCfg, ConfigError          # noqa: E402
+from gemmflow.numeric import NumericError, parse_spec, resolve  # noqa: E402
 from gemmflow.results import ResultStore, flatten           # noqa: E402
 from gemmflow.steps import write_build_reports              # noqa: E402
 
@@ -92,8 +93,8 @@ class TestRules(unittest.TestCase):
 
     def test_rejected(self):
         cases = {  # what: (kernel fields, expected message)
-            "PM not dividing the M bus word": (dict(parallelism_m=3), r"/ sizeof\) = 16 must be a multiple of parallelism_m"),
-            "tile_m not whole M bus words": (dict(memory_tile_size_m=100), r"memory_tile_size_m = 100 must be a multiple of bus"),
+            "PM not dividing the M bus word": (dict(parallelism_m=3), r"elements per M bus word = 16 must be a multiple of parallelism_m"),
+            "tile_m not whole M bus words": (dict(memory_tile_size_m=100), r"memory_tile_size_m = 100 must be a multiple of the elements"),
             "tile_n not a multiple of PN": (dict(memory_tile_size_n=132), r"memory_tile_size_n = 132 must be a multiple of par"),
             "tile_m/PM < tile_n/PN": (dict(memory_tile_size_n=256, memory_tile_size_m=128), r"double buffering of A"),
             "transposed A, tile_n not whole N bus words":
@@ -142,6 +143,101 @@ class TestRules(unittest.TestCase):
         text = load("pe32x8_ta_t1024x512.json").render_config_h()
         self.assertNotIn("${", text)
         self.assertIn("kInnerTileSizeN = 32;", text)
+
+
+def int_cfg(**kernel):
+    """The best float config turned into another element format (name from the parameters)."""
+    with open(os.path.join(ROOT, "configs", "gemm", "pe32x8_ta_t1024x512.json")) as f:
+        d = json.load(f)
+    d["kernel"].update(kernel)
+    d["name"] = BuildCfg.from_dict(d).auto_name()
+    return BuildCfg.from_dict(d)
+
+
+class TestNumeric(unittest.TestCase):
+    def test_formats(self):
+        cases = [  # (family, bits, frac) -> (spec, c_type, container bytes, elements per word, short, tier)
+            (("float", None, None), ("float32", "float", 4, 16, "f32", "T0")),
+            (("int", 8, None), ("int8", "int8_t", 1, 64, "i8", "T1")),
+            (("uint", 16, None), ("uint16", "uint16_t", 2, 32, "u16", "T1")),
+            (("int", 64, None), ("int64", "int64_t", 8, 8, "i64", "T1")),
+            (("fixed", 16, 8), ("fixed16.8", "ap_fixed<16, 8>", 2, 32, "fx16f8", "T2")),
+            (("ufixed", 8, 8), ("ufixed8.8", "ap_ufixed<8, 0>", 1, 64, "ufx8f8", "T2")),
+            (("int", 4, None), ("int4", "ap_int<4>", 1, 128, "i4", "T3")),
+            (("uint", 2, None), ("uint2", "ap_uint<2>", 1, 256, "u2", "T3")),
+        ]
+        for args, (spec, ctype, cont, epw, short, tier) in cases:
+            with self.subTest(args):
+                nf = resolve(*args)
+                self.assertEqual((nf.spec, nf.c_type, nf.container_bytes, nf.elems_per_word, nf.short, nf.tier),
+                                 (spec, ctype, cont, epw, short, tier))
+                self.assertEqual(parse_spec(spec), nf)
+
+    def test_rejected(self):
+        for args, msg in ((("int", 12), r"kernel to count elements by bits"), (("pow2", 3), r"DenseShift"),
+                          (("int32_t",), r"use data_type 'int' with data_bits 32"), (("fixed", 16), r"needs frac_bits"),
+                          (("fixed", 16, 16), r"frac_bits must be in 0..15"), (("int",), r"needs data_bits"),
+                          (("int", 8, None, 32), r"wider accumulator"), (("float", 16), r"is 32 bits"),
+                          (("int", 8, 3), r"only for fixed")):
+            with self.subTest(args):
+                with self.assertRaisesRegex(NumericError, msg):
+                    resolve(*args)
+
+    def test_logical_bus_width_for_packed_types(self):
+        self.assertEqual(resolve("int", 4).logical_bytes(64), 128)
+        self.assertEqual(resolve("int", 8).logical_bytes(64), 64)
+        self.assertEqual(resolve("fixed", 16, 8).logical_bytes(64), 64)
+
+    def test_columns(self):
+        c = resolve("fixed", 16, 8).columns()
+        self.assertEqual((c["dtype"], c["dtype_kind"], c["dtype_bits"], c["dtype_signed"], c["dtype_frac_bits"]),
+                         ("fixed16.8", "fixed", 16, True, 8))
+        self.assertEqual((c["a_dtype"], c["b_dtype"], c["c_dtype"], c["acc_bits"]), ("fixed16.8",) * 3 + (16,))
+        self.assertIsNone(c["pow2_exp_bits"])
+
+
+class TestIntConfigs(unittest.TestCase):
+    def test_float_hash_ignores_unset_new_fields(self):
+        cfg = load("pe32x8_ta_t1024x512.json")
+        self.assertIsNone(cfg.kernel.data_bits)
+        self.assertEqual(cfg.build_id(), GOLDEN_BUILD_IDS["pe32x8_ta_t1024x512.json"])
+        self.assertIn("data_bits", cfg.to_dict()["kernel"])  # kept in the records
+
+    def test_int8(self):
+        cfg = int_cfg(data_type="int", data_bits=8)
+        cfg.validate()
+        self.assertEqual(cfg.name, "i8_pe32x8_t1024x512_200mhz_tA")
+        self.assertEqual(cfg.size_multiples(), (64, 64, 64))
+        self.assertAlmostEqual(cfg.peak_gops(), 102.4)
+        h = cfg.render_config_h()
+        self.assertIn("using Data_t = int8_t;", h)
+        self.assertNotIn("${", h)
+        self.assertNotIn("ap_fixed.h", h)
+
+    def test_fixed_and_packed_render(self):
+        h = int_cfg(data_type="fixed", data_bits=16, frac_bits=8).render_config_h()
+        self.assertIn("#include <ap_fixed.h>", h)
+        self.assertIn("using Data_t = ap_fixed<16, 8>;", h)
+        self.assertRegex(h, r"\(2 != 64\)\)")  # sizeof(Data_t) vs bus width in the MM_CONVERT_A test
+        cfg = int_cfg(data_type="int", data_bits=4, memory_tile_size_m=512)
+        cfg.validate()
+        h = cfg.render_config_h()
+        self.assertIn("using Data_t = ap_int<4>;", h)
+        self.assertIn("kMemoryWidthBytesM = 128;", h)
+        self.assertEqual(cfg.size_multiples(), (128, 128, 128))
+
+    def test_int_rules_in_elements(self):
+        with self.assertRaisesRegex(ConfigError, r"elements per M bus word = 64 must be a multiple of parallelism_m = 128"):
+            int_cfg(data_type="int", data_bits=8, parallelism_m=128).validate()
+        with self.assertRaisesRegex(ConfigError, r"must be one of \['all', 'dsp', 'fabric'\]"):
+            int_cfg(data_type="int", data_bits=8, mult_resource="fulldsp").validate()
+
+    def test_op_bindings(self):
+        from gemmflow.hls import HlsRun
+        self.assertEqual(HlsRun(load("default.json")).op_bindings(), [])
+        self.assertEqual(HlsRun(int_cfg(data_type="int", data_bits=8, mult_resource="fabric", add_resource="dsp"))
+                         .op_bindings(), [("mul", "fabric"), ("add", "dsp")])
+        self.assertEqual(HlsRun(int_cfg(mult_resource="fulldsp")).op_bindings(), [("fmul", "fulldsp")])
 
 
 class TestResults(unittest.TestCase):
