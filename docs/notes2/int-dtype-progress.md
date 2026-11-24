@@ -336,6 +336,8 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         reset of the `ap_sync_reg_*_ap_ready` flops of every process in the dataflow region. 6 logic levels
         (CARRY4 ×2, LUT6), 81 % routing. With ~40 processes in one region (32 PEs plus the memory readers, converters and writer), that fanout grows with the array. Fixing
         it needs a kernel or HLS-directive change, not a flow setting. The HLS estimate (4.144 ns) does not see it.
+- [ ] Queued `int4_clock` (11:35, after `int4_wide`): int4 PE 32×64 at 225 MHz × default/explore preset (peak
+      921.6 GOP/s). Same 32-PE dataflow control as int8 PE 32×32, which met 225 MHz with the default preset.
 - [ ] Queued `int4_wide` (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
       and PE 48×64 (3072 MACs); at most 2 HLS jobs at once (RAM); DDR tuning on.
 - [x] (stale queue notes, kept for the record) Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` →

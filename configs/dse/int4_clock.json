@@ -1,0 +1,54 @@
+{
+  "campaign": "int4_clock",
+  "comment": "docs/notes2: int4 PE 32x64 (757 GOP/s exact at 200 MHz, WNS 0.015) at 225 MHz. int8 PE 32x32 met 225 MHz with the default preset (dtype_clock); both have 32 PEs, and the limit there is the dataflow ap_sync control fanout, not the PEs. default and explore presets share one HLS run. DDR read taps tuned under load.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@format": [
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 4
+      }
+    ],
+    "@array": [
+      {
+        "kernel.parallelism_n": 32,
+        "kernel.parallelism_m": 64,
+        "kernel.memory_tile_size_n": 512,
+        "kernel.memory_tile_size_m": 2048
+      }
+    ],
+    "clocks.accel_mhz": [
+      225
+    ],
+    "vivado.preset": [
+      "default",
+      "explore"
+    ]
+  },
+  "runtime_grid": {
+    "triples": [
+      [
+        2048,
+        2048,
+        2048
+      ],
+      [
+        4096,
+        4096,
+        4096
+      ]
+    ],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": [
+    "hls",
+    "build",
+    "run"
+  ],
+  "jobs": {
+    "hls": 1
+  },
+  "ddr_load_tune": true
+}
