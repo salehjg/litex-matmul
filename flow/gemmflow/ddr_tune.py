@@ -16,6 +16,7 @@ import importlib.util
 import os
 import re
 import subprocess
+import sys
 
 from .config import ROOT
 
@@ -24,9 +25,15 @@ LANE_RE = re.compile(r"lane (\d): write bitslip (\d+), read bitslip (\d+), delay
 
 
 def _ddr_init():
+    """boards/dupcb/ddr_init.py as a module, without writing boards/dupcb/__pycache__ (that tree is hashed into every
+    SoC build's stamp, cache files included: a new .pyc there makes every build look stale)."""
     spec = importlib.util.spec_from_file_location("ddr_init", os.path.join(ROOT, "boards", "dupcb", "ddr_init.py"))
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    old, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = old
     return mod
 
 

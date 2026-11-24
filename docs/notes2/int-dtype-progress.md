@@ -271,6 +271,18 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         `int4_probe` started before this and runs untuned (re-run with `--resume` and the key if it fails).
       - A permanent fix belongs in the SoC (per-bit IDELAY, DQS capture) or in `ddr_init.py` (calibrate under load).
         Both touch `boards/dupcb` and invalidate every build: user decision.
+- [x] **Hazard found and fixed (08:20):** importing `boards/dupcb/ddr_init.py` as a module (the tuner, the misc
+      probes) wrote `boards/dupcb/__pycache__/ddr_init.cpython-314.pyc`. `tree_hash` hashes `__pycache__` too, and
+      `boards/dupcb` is a SoC input, so every build looked stale. A smoke test of the DSE then started rebuilding
+      `c0ddddde`; I stopped it in placement (08:20). Its synthesis outputs and `vivado.log` were regenerated, but the
+      bitstream, routed checkpoint, timing reports and stamp are the originals, and its runs verify.
+      - The `.pyc` was deleted, and all SoC stamps are up to date again (`gemm_build.py --dry-run`).
+      - `gemmflow.ddr_tune` and `lane_delay.py` now import with `sys.dont_write_bytecode`.
+      - Stamps are hashed at the end of a step, so the `int4_probe` build that was running records the clean hash.
+      - **Suggestion:** make `tree_hash` skip `__pycache__`/`*.pyc`. That is a one-time hash migration (all
+        existing stamps include today's cache files), so it is left for you.
+      - The DSE smoke test with `"ddr_load_tune": true` (run-only campaign on `c0ddddde`, results removed):
+        102 400 → 0 bad at bring-up, 2048³ full ok, row fields present.
 - [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.
       `dtype_clock` now uses the best verified int8 array, PE 32×32 tile 512×1024 (06:50); its 200 MHz default
       point reuses that build.

@@ -7,6 +7,7 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "boards", "dupcb"))
+sys.dont_write_bytecode = True  # no boards/dupcb/__pycache__/ddr_init.*.pyc: that tree is hashed into SoC stamps
 import ddr_init  # noqa: E402
 
 b, ch, lane, wbs, rbs, delay = sys.argv[1], *map(int, sys.argv[2:7])
