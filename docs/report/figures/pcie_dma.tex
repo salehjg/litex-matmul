@@ -1,0 +1,63 @@
+% Host <-> DDR data path: loop-mode DMA rings in host memory, LitePCIe DMA engines, the DDR DMA bridge.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \tikzset{buf/.style={draw=black!60, fill=#1, minimum width=3.2mm, minimum height=5mm, inner sep=0pt},
+           buf/.default=white,
+           w/.style={minimum width=#1}}
+  % ---- host rings ----
+  \foreach \i in {0,...,5} { \node[buf=cBlue!15] (h\i) at (\i*0.36, 1.1) {}; }
+  \node[font=\scriptsize] at (2.35,1.1) {\dots};
+  \node[buf=cBlue!15] (h7) at (2.75,1.1) {};
+  \node[note, anchor=south, text width=36mm] (nh) at (1.35,1.45) {H2C ring: 256\x8\,KB (2\,MB),\\ write-only mmap};
+  \draw[->, cBlue!70!black, thick] (h7.east) to[out=0, in=0, looseness=1.6] ++(0,-0.62) -- ++(-2.85,0)
+        to[out=180, in=180, looseness=1.6] (h0.west);
+  \node[lbl, text=cBlue!70!black] at (1.35,0.32) {loop mode: read over and over};
+
+  \foreach \i in {0,...,5} { \node[buf=cOrange!20] (c\i) at (\i*0.36,-2.4) {}; }
+  \node[font=\scriptsize] at (2.35,-2.4) {\dots};
+  \node[buf=cOrange!20] (c7) at (2.75,-2.4) {};
+  \node[note, anchor=north, text width=36mm] (nc) at (1.35,-2.75) {C2H ring: 256\x8\,KB, mmap;\\ progress from the writer's\\ loop status (index, count)};
+  \begin{scope}[on background layer]
+    \node[region=black, fit=(h0)(h7)(c0)(c7)(nh)(nc), inner sep=5pt] (hm) {};
+  \end{scope}
+  \node[regionl=black, anchor=south west] at (hm.north west) {host memory (IOMMU-mapped)};
+
+  % ---- LitePCIe DMA ----
+  \node[sys, w=30mm, minimum height=13mm] (rd) at (6.3, 1.1)
+       {DMA \textbf{reader} (H2C)\\[-1pt]\scriptsize descriptor table: addr, len\\[-1pt]\scriptsize MRd 512\,B \(\rightarrow\) CplD 256\,B};
+  \node[sys, w=30mm, minimum height=13mm] (wr) at (6.3,-2.4)
+       {DMA \textbf{writer} (C2H)\\[-1pt]\scriptsize descriptor table, loop status\\[-1pt]\scriptsize MWr TLPs, MSI per 32 buffers};
+  \draw[wbus] (3.35,1.1) -- node[lbl, above] {PCIe reads} (rd.west);
+  \draw[wbus] (wr.west) -- node[lbl, above] {PCIe writes} (3.35,-2.4);
+
+  % ---- bridge ----
+  \node[sys, w=17mm] (cv1) at (9.6, 1.1) {converter\\[-1pt]\scriptsize 128\(\rightarrow\)512\,b};
+  \node[sys, w=13mm, trapezium, trapezium left angle=70, trapezium right angle=70, shape border rotate=270,
+        minimum height=11mm, inner sep=1pt] (dmx) at (11.5, 1.1) {\scriptsize demux};
+  \node[sys, w=17mm] (cv2) at (9.6,-2.4) {converter\\[-1pt]\scriptsize 512\(\rightarrow\)128\,b};
+  \node[sys, w=13mm, trapezium, trapezium left angle=70, trapezium right angle=70, shape border rotate=90,
+        minimum height=11mm, inner sep=1pt] (mx) at (11.5,-2.4) {\scriptsize mux};
+  \node[sys, w=26mm] (w0) at (14.2, 1.75) {\code{LiteDRAMDMAWriter}\\[-1pt]\scriptsize CH0: base, length, enable};
+  \node[sys, w=26mm] (w1) at (14.2, 0.45) {\code{LiteDRAMDMAWriter}\\[-1pt]\scriptsize CH1: base, length, enable};
+  \node[sys, w=26mm] (r0) at (14.2,-1.75) {\code{LiteDRAMDMAReader}\\[-1pt]\scriptsize CH0: base, length, enable};
+  \node[sys, w=26mm] (r1) at (14.2,-3.05) {\code{LiteDRAMDMAReader}\\[-1pt]\scriptsize CH1: base, length, enable};
+  \draw[wbus] (rd) -- (cv1);
+  \draw[wbus] (cv1) -- (dmx);
+  \draw[wbus] (dmx.north east) ++(0,-0.15) |- (w0.west);
+  \draw[wbus] (dmx.south east) ++(0,0.15) |- (w1.west);
+  \draw[wbus] (r0.west) -- ++(-0.4,0) |- ([yshift=2mm]mx.east);
+  \draw[wbus] (r1.west) -- ++(-0.4,0) |- ([yshift=-2mm]mx.east);
+  \draw[wbus] (mx) -- (cv2);
+  \draw[wbus] (cv2) -- (wr);
+  \node[cdc/.style={}, draw=cRed!70!black, fill=cRed!6, font=\sffamily\scriptsize, rounded corners=1pt,
+        align=left, text width=37mm, inner sep=3pt] (drop) at (11.0,-0.65)
+       {\textbf{sel} CSR picks the channel for both directions. Data arriving while the selected writer is not
+        running, or after \code{length} bytes, is dropped and counted (\code{h2c\_dropped}).};
+  \draw[wbus] (w0.east) -- ++(0.55,0) node[right, font=\sffamily\scriptsize] {CH0 write port};
+  \draw[wbus] (w1.east) -- ++(0.55,0) node[right, font=\sffamily\scriptsize] {CH1 write port};
+  \draw[wbus] ([xshift=5.5mm]r0.east) node[right, font=\sffamily\scriptsize] {CH0 read port} -- (r0.east);
+  \draw[wbus] ([xshift=5.5mm]r1.east) node[right, font=\sffamily\scriptsize] {CH1 read port} -- (r1.east);
+  \begin{scope}[on background layer]
+    \node[region=cBlue, fit=(cv1)(w0)(r1)(drop), inner sep=6pt] (brg) {};
+  \end{scope}
+  \node[regionl=cBlue, anchor=south west] at (brg.north west) {\code{PCIeDDRBridge} (\file{hw/gemm/ddr\_dma.py}), sys 125\,MHz};
+\end{tikzpicture}

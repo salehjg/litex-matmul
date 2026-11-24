@@ -1,0 +1,50 @@
+% The gemm_hls dataflow (transposed-A variant): memory readers, width converters, PE chain, C drain and writer.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \tikzset{fn/.style={acc, minimum width=24mm, minimum height=9mm},
+           pe/.style={acc, fill=cOrange!32, minimum width=12mm, minimum height=16mm, align=center},
+           mem/.style={ddr, minimum width=14mm, minimum height=9mm}}
+  % memory side
+  \node[mem] (ma) at (0, 2.2)  {\code{gmem0}\\[-1pt]\scriptsize A\(^\mathsf{T}\)};
+  \node[mem] (mb) at (0, 0)    {\code{gmem1}\\[-1pt]\scriptsize B};
+  \node[mem] (mc) at (0,-2.4)  {\code{gmem2}\\[-1pt]\scriptsize C};
+  \node[fn] (ra) at (2.9, 2.2)  {\code{ReadATransposed}\\[-1pt]\scriptsize 16-beat bursts};
+  \node[fn] (ca) at (6.0, 2.2)  {\code{\scriptsize ConvertWidthATransposed}\\[-1pt]\scriptsize 512\,b \(\rightarrow\) \(P_N\) values};
+  \node[fn] (rb) at (2.9, 0)    {\code{ReadB}\\[-1pt]\scriptsize row bursts};
+  \node[fn] (fb) at (6.0, 0)    {\code{FeedB}\\[-1pt]\scriptsize \(P_M\) values / cycle};
+  \node[fn] (wc) at (2.9,-2.4)  {\code{WriteC}};
+  \node[fn] (cc) at (6.0,-2.4)  {\code{ConvertWidthC}\\[-1pt]\scriptsize \(P_M\) values \(\rightarrow\) 512\,b};
+  \draw[wbus] (ma) -- (ra);  \draw[wbus] (ra) -- (ca);
+  \draw[wbus] (mb) -- (rb);  \draw[wbus] (rb) -- (fb);
+  \draw[wbus] (cc) -- (wc);  \draw[wbus] (wc) -- (mc);
+  % PE chain
+  \foreach \i/\x/\t in {0/8.9/0, 1/10.5/1, 2/12.1/2, 3/14.4/{P_N{-}1}} {
+    \node[pe] (pe\i) at (\x, 0) {PE\\[-1pt]\(\t\)\\[2pt]\scriptsize \(P_M\) MAC};
+  }
+  \node[font=\large] at (13.25,0) {\(\cdots\)};
+  \draw[link, cBlue!80!black] (ca.east) -| node[lbl, pos=0.25, above, text=cBlue!80!black] {aPipes[0]} (pe0.north);
+  \draw[link, cBlue!80!black] (fb) -- node[lbl, above, text=cBlue!80!black] {bPipes[0]} (pe0);
+  \foreach \i/\j in {0/1, 1/2} {
+    \draw[link, cBlue!80!black] ([yshift=4mm]pe\i.east) -- ([yshift=4mm]pe\j.west);
+    \draw[link, cBlue!80!black] ([yshift=0mm]pe\i.east) -- ([yshift=0mm]pe\j.west);
+    \draw[link, cGreen!60!black] ([yshift=-4mm]pe\j.west) -- ([yshift=-4mm]pe\i.east);
+  }
+  \draw[link, cBlue!80!black] ([yshift=4mm]pe2.east) -- ++(0.4,0);
+  \draw[link, cBlue!80!black] ([yshift=0mm]pe2.east) -- ++(0.4,0);
+  \draw[link, cGreen!60!black] ([xshift=-0.4cm,yshift=-4mm]pe3.west) -- ([yshift=-4mm]pe2.east);
+  \draw[link, cBlue!80!black] ([xshift=-0.4cm,yshift=4mm]pe3.west) -- ([yshift=4mm]pe3.west);
+  \draw[link, cBlue!80!black] ([xshift=-0.4cm]pe3.west) -- (pe3.west);
+  \draw[link, cGreen!60!black] ([yshift=-4mm]pe3.west) -- ++(-0.4,0);
+  \draw[link, cGreen!60!black] (pe0.south) |- node[lbl, pos=0.75, above, text=cGreen!60!black] {cPipes[0]} (cc.east);
+  % legend for the pipes
+  \node[note, anchor=west, align=left] (lg) at (9.4,-1.75)
+     {\textcolor{cBlue!80!black}{\rule[2pt]{6mm}{1pt}} A and B values move forward along the chain\\
+      \textcolor{cGreen!60!black}{\rule[2pt]{6mm}{1pt}} finished C tiles drain backwards to PE 0};
+  \node[note, anchor=west, align=left, text width=58mm] (nt) at (9.4,-2.75)
+     {Each PE keeps \(\frac{T_N}{P_N}\times T_M\) values of C (\code{cBuffer}, BRAM) and a double-buffered slice of A.
+      All functions run concurrently (\code{\#pragma HLS DATAFLOW}), connected by FIFOs.};
+  \begin{scope}[on background layer]
+    \node[region=cOrange, fit=(ma)(mc)(pe3)(lg)(nt), inner sep=6pt] (ip) {};
+  \end{scope}
+  \node[regionl=cOrange, anchor=south west] at (ip.north west)
+     {\code{MatrixMultiplicationKernel} (\file{kernels/gemm/src/Top.cpp}), accel clock, \code{ap\_ctrl\_hs}};
+\end{tikzpicture}

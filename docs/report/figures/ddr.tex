@@ -1,0 +1,56 @@
+% One DDR3 channel: crossbar ports, LiteDRAM controller, WL7DDRPHY, the fly-by DRAM and the host calibration loop.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \tikzset{w/.style={minimum width=#1}, port/.style={blk, minimum width=30mm, minimum height=6mm, font=\sffamily\scriptsize}}
+  % ports
+  \node[port, fill=dSys]   (p1) at (0, 1.8)  {DMA bridge write port (sys)};
+  \node[port, fill=dSys]   (p2) at (0, 1.05) {DMA bridge read port (sys)};
+  \node[port, fill=dAccel] (p3) at (0, 0.3)  {kernel port A/B/C (accel, CDC)};
+  \node[port, fill=dSys]   (p4) at (0,-0.45) {BIST generator + checker};
+  \node[port, fill=black!5, draw=black!40, text=black!60] (p5) at (0,-1.2) {CH0 only: Wishbone (idle, no CPU)};
+  % crossbar
+  \node[sys, w=20mm, minimum height=36mm] (xb) at (3.4,0.3) {crossbar\\[2pt]\scriptsize per-bank\\ \scriptsize arbitration\\[2pt]\scriptsize 512\,b data\\ \scriptsize 1:4 words};
+  \foreach \p in {p1,p2,p3,p4,p5} { \draw[biln] (\p.east) -- (\p.east -| xb.west); }
+  % controller
+  \node[sys, w=28mm, minimum height=36mm, align=center] (mc) at (6.75,0.3) {};
+  \node[font=\sffamily\footnotesize\bfseries, anchor=north] at (mc.north) {LiteDRAM controller};
+  \foreach \i in {0,...,7} {
+    \node[draw=black!50, fill=white, minimum width=2.4mm, minimum height=7mm, inner sep=0pt] (bm\i) at (5.73+\i*0.29, 0.62) {};
+  }
+  \node[font=\sffamily\scriptsize] at (6.75,1.4) {8 bank machines};
+  \node[draw=black!50, fill=white, minimum width=24mm, font=\sffamily\scriptsize] (mux) at (6.75,-0.25) {command multiplexer};
+  \node[draw=black!50, fill=white, minimum width=24mm, font=\sffamily\scriptsize] (rf)  at (6.75,-0.9) {refresher · timing checks};
+  \node[note] at (6.75,-1.35) {MT41K256M8 timings, 1:4};
+  \draw[wbi] (xb) -- (mc);
+  % PHY
+  \node[ddr, w=30mm, minimum height=36mm] (phy) at (10.55,0.3) {};
+  \node[font=\sffamily\footnotesize\bfseries, anchor=north] at (phy.north) {\code{WL7DDRPHY}};
+  \node[align=center, font=\sffamily\scriptsize] at (10.55,0.15)
+       {OSERDES / ISERDES 8:1\\ (4 phases \x DDR)\\[3pt] read path: IDELAY per DQ,\\ read bitslip per lane\\[3pt]
+        write: bitslip per lane\\[3pt] \textbf{CK phase}: channel MMCM,\\ steps of 1/56 VCO \(\approx\) 17.9\,ps};
+  \draw[wbi] (mc) -- node[lbl, above] {DFI} (phy);
+  % DRAM: DQ lanes point to point, CK/command/address fly-by
+  \foreach \c in {0,...,7} {
+    \node[draw=cPurple!70!black, fill=cPurple!12, minimum width=7mm, minimum height=9mm, font=\sffamily\scriptsize,
+          inner sep=0pt] (d\c) at (13.0+\c*0.85, 0.3) {\(\times\)8};
+    \draw[cPurple!70!black, thick] (d\c.north) -- (d\c.north |- 0,1.25);
+    \node[font=\sffamily\tiny, text=cPurple!70!black, anchor=south] at (d\c.north |- 0,1.25) {DQ\c};
+    \draw[cPurple!70!black] (d\c.south) -- (d\c.south |- 0,-0.55);
+  }
+  \node[draw=black!30, fill=black!4, dashed, minimum width=7mm, minimum height=9mm, font=\sffamily\scriptsize,
+        text=black!45, inner sep=0pt] (d8) at (13.0+8*0.85,0.3) {ECC};
+  \draw[line width=1.6pt, cPurple!70!black] (phy.east |- 0,1.25) -- (d7.north |- 0,1.25);
+  \node[note, anchor=south] at (12.45,1.3) {8 DQ/DQS lanes};
+  \draw[very thick, cPurple!70!black, -{Stealth}] (phy.east |- 0,-0.55) -- ([xshift=4mm]d7.south |- 0,-0.55)
+        node[right, font=\sffamily\scriptsize, align=left, text=cPurple!70!black] {CK, cmd, addr\\(fly-by)};
+  \node[note, anchor=north, text width=64mm] at (16.0,-0.85) {CK reaches the far chips later than the near ones.
+        HR banks (no ODELAY, so no write leveling): one CK phase has to suit every lane.};
+  % host calibration loop
+  \node[hst, align=left, text width=118mm] (cal) at (6.6,-3.0)
+       {\textbf{Host calibration} (\file{boards/dupcb/ddr\_init.py}, CSRs over PCIe), per channel after every load:\\[1pt]
+        \scriptsize 1.~For each CK phase step over one tCK: DRAM init; per-lane write bitslip, read bitslip and read delay
+        scan with random bursts; 64\,MB BIST. A step passes if every lane calibrates and the BIST is clean.\\
+        \scriptsize 2.~CK to the centre of the longest passing run; calibrate again.\quad
+        3.~200 random addresses + BIST (write once, read twice).};
+  \draw[ctl] (phy.south |- cal.north) -- node[lblw, right] {MMCM step, DFI, delays} (phy.south);
+  \draw[ctl] (cal.west) -| node[lblw, pos=0.75, left] {BIST} ([xshift=-4mm]p4.west) -- (p4.west);
+\end{tikzpicture}

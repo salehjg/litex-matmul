@@ -1,0 +1,28 @@
+% The design loop as it happened: campaign -> finding -> next knob, with the best result after each step.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \tikzset{cp/.style={flw, minimum width=31mm, minimum height=10mm, align=center, text width=29mm},
+           fd/.style={note, text width=31mm, align=left, anchor=north},
+           gb/.style={draw=cGreen!60!black, fill=cGreen!12, rounded corners=6pt, font=\sffamily\scriptsize\bfseries,
+                      inner sep=2pt, anchor=south, yshift=0.8mm}}
+  \node[cp] (c1) at (0,0)    {\code{pe\_sweep}\\[-1pt]\scriptsize \(P_N\) = 8, 16, 32 (tile 256)};
+  \node[cp] (c2) at (3.9,0)  {\code{transposed\_a}\\[-1pt]\scriptsize host sends A\(^\mathsf{T}\)};
+  \node[cp] (c3) at (7.8,0)  {\code{tiles\_pe32\_ta}\\[-1pt]\scriptsize \code{\_1024}: tiles up to 1024\x512};
+  \node[cp] (c4) at (11.7,0) {\code{clock\_sweep}, presets\\[-1pt]\scriptsize PE 8\x8: 150--250\,MHz};
+  \node[cp] (c5) at (15.6,0) {\code{clock\_pe32\_ta},\\[-1pt]\code{pe32\_ta\_225\_presets}};
+  \foreach \a/\b in {c1/c2, c2/c3, c3/c4, c4/c5} { \draw[link, thick] (\a) -- (\b); }
+  \node[gb] at (c1.north) {86.5 GFLOP/s};
+  \node[gb] at (c2.north) {87.5};
+  \node[gb] at (c3.north) {95.1 \(\rightarrow\) 98.6};
+  \node[gb] at (c4.north) {PE 8\x8: 29.0 at 250\,MHz};
+  \node[gb] at (c5.north) {110.9 at 225\,MHz};
+  \node[fd] at ([yshift=-1mm]c1.south) {\textbf{Finding:} PE 32\x8 reaches 84\,\% only; A waits 93\,\% of cycles: A is
+        read in single 64-byte strided beats.};
+  \node[fd] at ([yshift=-1mm]c2.south) {\textbf{Finding:} A now in 16-beat bursts; A and B wait equally (16\,\%).
+        The per-tile reload of A/B is next.};
+  \node[fd] at ([yshift=-1mm]c3.south) {\textbf{Finding:} larger tiles halve the waits; the N tile matters most. 1024\x1024
+        does not fit in BRAM.};
+  \node[fd] at ([yshift=-1mm]c4.south) {\textbf{Finding:} PE 8\x8 closes 250\,MHz despite a 4.24\,ns HLS estimate; the only
+        failure was a PCIe path; presets change closure only.};
+  \node[fd] at ([yshift=-1mm]c5.south) {\textbf{Finding:} 225\,MHz misses by 41\,ps with the default preset (routing);
+        \code{explore}/\code{aggressive} close it. 250\,MHz: \(-0.78\)\,ns.};
+\end{tikzpicture}

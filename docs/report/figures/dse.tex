@@ -1,0 +1,29 @@
+% The DSE driver (scripts/gemm_dse.py) and the outer design loop around it.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \tikzset{st/.style={flw, minimum width=29mm, minimum height=12mm, align=center}}
+  \node[art, text width=30mm, minimum height=13mm] (camp) at (0,0)
+       {\textbf{campaign JSON}\\ base config, \code{build\_grid}, \code{runtime\_grid}, stages};
+  \node[st] (exp) at (3.9,0)  {expand\\[-1pt]\scriptsize cross product of\\[-1pt]\scriptsize dotted keys};
+  \node[st] (val) at (7.6,0)  {validate\\[-1pt]\scriptsize gemm\_hls rules;\\[-1pt]\scriptsize invalid points recorded};
+  \node[st] (hls) at (11.3,0) {stage \textbf{hls}\\[-1pt]\scriptsize parallel: min(cores/4,\\[-1pt]\scriptsize free GB/3) jobs};
+  \node[st] (bld) at (11.3,-2.2) {stage \textbf{build}\\[-1pt]\scriptsize Vivado, one at a time;\\[-1pt]\scriptsize \code{ok} / \code{timing\_failed}};
+  \node[st] (run) at (7.6,-2.2)  {stage \textbf{run}\\[-1pt]\scriptsize per build: bring-up,\\[-1pt]\scriptsize sizes \x repetitions};
+  \node[art, text width=33mm, minimum height=13mm] (res) at (3.9,-2.2)
+       {\file{results/<campaign>/}\\ \code{builds.jsonl}, \code{runs.jsonl} + CSV, \code{invocations.jsonl}};
+  \draw[link] (camp) -- (exp); \draw[link] (exp) -- (val); \draw[link] (val) -- (hls);
+  \draw[link] (hls) -- (bld); \draw[link] (bld) -- node[lbl, above] {timing met} (run); \draw[link] (run) -- (res);
+  \node[dec] (an) at (0,-2.2) {analyse};
+  \draw[link] (res) -- (an);
+  \draw[link, cRed!80!black, very thick] (an.north) -- node[lbl, left, text=cRed!80!black, align=right]
+       {next\\campaign} (camp.south);
+  % reuse and resume annotations
+  \node[note, anchor=north, text width=58mm, align=left] at (9.45,-3.35)
+       {\(\bullet\) point names come from the parameters (\code{f32\_pe32x8\_t1024x512\_225mhz\_tA\_aggressive}),
+        so equal points share one build directory across campaigns\\
+        \(\bullet\) unchanged steps are skipped from their stamps; \code{--resume} skips recorded
+        stages and sizes (and the bring-up of a point with nothing left)\\
+        \(\bullet\) a build that misses timing anywhere is never loaded onto the card};
+  \node[note, anchor=north, text width=40mm, align=left] at (1.9,-3.35)
+       {The analysis is done by the engineer (here with an AI assistant): read the counters and the timing paths,
+        pick the next knob.};
+\end{tikzpicture}

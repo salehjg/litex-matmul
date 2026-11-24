@@ -1,0 +1,9 @@
+# Host <-> DDR transfer: time per 2 MB chunk (ms), by phase. Hand-copied measurements (not regenerated):
+#   H2C and "C2H after": sw/gemm_host/tools/ddr_dma_test --channel both --size-mb 64 --repeat 3, build
+#     f32_pe32x8_t1024x512_225mhz_tA_explore-8c43d008, 2026-11-24 (mean of the 6 transfers, rounded)
+#   "C2H before": the same tool before the C2H fix, 2026-11-23 20:47 (docs/notes1/gemm-hls-progress.md)
+# x: 0 = H2C, 1 = C2H before the fix, 2 = C2H after the fix; ms per chunk
+x,label,copy,start,wait,stop,gbps
+0,H2C,0.154,0.119,1.291,1.003,0.817
+1,C2H before fix,0.200,0.120,1.160,1.007,0.840
+2,C2H after fix,0.201,0.005,1.168,0.031,1.492

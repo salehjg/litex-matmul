@@ -1,0 +1,33 @@
+% Where A, B and C live in the two DDR3 channels (default memory_map a=ch0, b=ch1, c=ch1).
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \def\L{14}  % 2 GB = 14 cm
+  \foreach \ch/\y in {CH0/0, CH1/-1.35} {
+    \draw[black!60, fill=black!3] (0,\y-0.35) rectangle (\L,\y+0.35);
+    \node[anchor=east, font=\sffamily\small\bfseries] at (-0.15,\y) {\ch};
+  }
+  % A on CH0 from 0; example 8192^3: 256 MB
+  \fill[cBlue!35] (0,-0.35) rectangle (\L/8,0.35);
+  \draw[cBlue!70!black, dashed] (\L/8,-0.35) -- (\L/8,0.35);
+  \node at (\L/16,0) {A};
+  \node[anchor=west, font=\sffamily\scriptsize, text=black!60] at (\L/8+0.1,0) {room for A up to the whole 2\,GB channel};
+  % B on CH1 from 0, C on CH1 from 1 GB
+  \fill[cOrange!45] (0,-1.7) rectangle (\L/8,-1.0);
+  \node at (\L/16,-1.35) {B};
+  \node[anchor=west, font=\sffamily\scriptsize, text=black!60] at (\L/8+0.1,-1.35) {B \(\le\) 1\,GB};
+  \fill[cGreen!40] (\L/2,-1.7) rectangle (\L/2+\L/8,-1.0);
+  \node at (\L/2+\L/16,-1.35) {C};
+  \node[anchor=west, font=\sffamily\scriptsize, text=black!60] at (\L/2+\L/8+0.1,-1.35) {C \(\le\) 1\,GB, read back in whole 8\,KB buffers};
+  \draw[black!70, thick] (\L/2,-1.75) -- (\L/2,-0.95);
+  % address axis
+  \foreach \a/\t in {0/0x0000\_0000, 0.25/0x2000\_0000, 0.5/0x4000\_0000, 0.75/0x6000\_0000, 1/0x8000\_0000} {
+    \draw[black!50] (\a*\L,-1.8) -- (\a*\L,-1.95);
+    \node[anchor=north, font=\ttfamily\scriptsize] at (\a*\L,-1.95) {\t};
+  }
+  \foreach \a/\t in {0.25/512\,MB, 0.5/1\,GB, 0.75/1.5\,GB, 1/2\,GB} {
+    \node[anchor=south, font=\sffamily\scriptsize, text=black!55] at (\a*\L,0.38) {\t};
+  }
+  \node[note, anchor=north west, text width=13.5cm, align=left] at (0,-2.45)
+    {Default \code{memory\_map}: A on CH0, B and C on CH1; shown for 8192\(^3\) (256\,MB each). When matrices share a
+     channel, \code{gemm\_runner} puts B at 512\,MB and C at 1\,GB of that channel, and rejects matrices that would run
+     into the next region. Byte addresses are per channel; there is no common address space across channels.};
+\end{tikzpicture}

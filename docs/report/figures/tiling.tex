@@ -1,0 +1,40 @@
+% Memory tiling: one T_N x T_M tile of C is computed from a T_N x K strip of A and a K x T_M strip of B.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  % geometry: N = 4.0, K = 3.2, M = 4.8 (drawing units)
+  \def\N{4.0} \def\K{3.2} \def\M{4.8} \def\tn{1.0} \def\tm{1.6}
+  % B (K x M) on top right
+  \draw[black!60, fill=cOrange!8] (0.6,0.6) rectangle (0.6+\M,0.6+\K);
+  \fill[cOrange!40] (0.6+\tm,0.6) rectangle (0.6+2*\tm,0.6+\K);
+  \node at (0.6+\M/2,0.6+\K+0.3) {B \quad \(K\times M\)};
+  \draw[cOrange!70!black, thick] (0.6+\tm,0.6+\K*0.62) -- (0.6+2*\tm,0.6+\K*0.62);
+  \node[lbl, text=cOrange!70!black, anchor=west] at (0.6+2*\tm+0.05,0.6+\K*0.62) {row \(k\): \(T_M\) values};
+  % A (N x K) bottom left
+  \draw[black!60, fill=cBlue!8] (-0.6-\K,-0.6-\N) rectangle (-0.6,-0.6);
+  \fill[cBlue!35] (-0.6-\K,-0.6-2*\tn) rectangle (-0.6,-0.6-\tn);
+  \node[rotate=90] at (-0.6-\K-0.35,-0.6-\N/2) {A \quad \(N\times K\)};
+  \draw[cBlue!70!black, thick] (-0.6-\K*0.38,-0.6-2*\tn) -- (-0.6-\K*0.38,-0.6-\tn);
+  \node[lbl, text=cBlue!70!black, anchor=north] at (-0.6-\K*0.38,-0.6-2*\tn-0.02) {column \(k\): \(T_N\) values};
+  % C (N x M) bottom right, tiled
+  \draw[black!60, fill=cGreen!5] (0.6,-0.6-\N) rectangle (0.6+\M,-0.6);
+  \foreach \i in {1,2,3} { \draw[black!25] (0.6,-0.6-\i*\tn) -- (0.6+\M,-0.6-\i*\tn); }
+  \foreach \j in {1,2} { \draw[black!25] (0.6+\j*\tm,-0.6) -- (0.6+\j*\tm,-0.6-\N); }
+  \fill[cGreen!45] (0.6+\tm,-0.6-2*\tn) rectangle (0.6+2*\tm,-0.6-\tn);
+  \node at (0.6+1.5*\tm,-0.6-1.5*\tn) {\(T_N\times T_M\)};
+  \node at (0.6+\M/2,-0.6-\N-0.75) {C \quad \(N\times M\), computed one memory tile at a time};
+  \draw[decorate, decoration={brace, amplitude=3pt}, black!60] (0.6+\M+0.08,-0.6-\tn) -- node[right=3pt, lbl] {\(T_N\)} (0.6+\M+0.08,-0.6-2*\tn);
+  \draw[decorate, decoration={brace, amplitude=3pt, mirror}, black!60] (0.6+\tm,-0.6-\N-0.08) -- node[below=3pt, lbl] {\(T_M\)} (0.6+2*\tm,-0.6-\N-0.08);
+  % outer product arrows
+  \draw[->, thick, cBlue!70!black] (-0.6,-0.6-1.5*\tn) -- (0.6+\tm-0.05,-0.6-1.5*\tn);
+  \draw[->, thick, cOrange!70!black] (0.6+1.5*\tm,0.6) -- (0.6+1.5*\tm,-0.6-\tn+0.05);
+  % explanation
+  \node[blk, fill=white, align=left, text width=70mm, font=\sffamily\scriptsize, anchor=north west] at (6.3,3.75)
+   {\textbf{For each memory tile} (\(N/T_N \times M/T_M\) of them):\\[2pt]
+    for \(k = 0 \ldots K{-}1\): C tile \(\mathrel{+}=\) (column \(k\) of the A strip) \(\otimes\) (row \(k\) of the B strip),
+    an outer product of \(T_N T_M\) multiply-adds in \(\dfrac{T_N T_M}{P_N P_M}\) cycles.\\[3pt]
+    \textbf{Time:} \(\dfrac{N K M}{P_N P_M}\) cycles + a fixed fill/drain cost per tile (load the first A slice,
+    drain \(T_N T_M\) values of C through the PE chain), amortised over \(K\).\\[3pt]
+    \textbf{Traffic:} A is read \(M/T_M\) times, B \(N/T_N\) times; C is written once.\\[3pt]
+    \textbf{Intensity} (A + B, float32): \(\dfrac{2 T_N T_M K}{4K(T_N+T_M)} = \dfrac{T_N T_M}{2(T_N+T_M)}\) flop/byte,
+    e.g.\ 32 for \(128^2\) tiles and 171 for \(1024\times512\).\\[3pt]
+    \textbf{On chip:} C tile in the PEs' BRAM (\(T_N T_M\) values); this is what limits the tile size (BRAM).};
+\end{tikzpicture}

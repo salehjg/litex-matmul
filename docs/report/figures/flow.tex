@@ -1,0 +1,49 @@
+% Build flow from one JSON config to results, with the cached steps and their outputs.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \tikzset{st/.style={flw, minimum width=30mm, minimum height=11mm, align=center},
+           outp/.style={art, text width=30mm},
+           stamp/.style={draw=cGreen!60!black, fill=cGreen!10, font=\sffamily\tiny, rounded corners=1pt, inner sep=1.5pt}}
+  % row 1: config -> HLS -> SoC -> host
+  \node[art, text width=27mm, minimum height=11mm] (cfg) at (0,0)
+       {\code{configs/gemm/*.json}\\ kernel, memory map, clocks, HLS, Vivado, SoC};
+  \node[st] (bc) at (3.6,0) {\code{BuildCfg}\\[-1pt]\scriptsize validate rules, hashes,\\[-1pt]\scriptsize render \code{Config.h}};
+  \node[st] (hls) at (7.4,0) {\code{HlsStep}\\[-1pt]\scriptsize \code{vitis-run} + \file{run\_hls.tcl}\\[-1pt]\scriptsize csynth, IP export};
+  \node[st] (soc) at (11.2,0) {\code{SocStep}\\[-1pt]\scriptsize \file{gemm\_soc.py} (LiteX)\\[-1pt]\scriptsize + Vivado, Tcl hooks};
+  \node[st] (hst) at (15.0,0) {\code{HostStep}\\[-1pt]\scriptsize liblitepcie,\\[-1pt]\scriptsize \code{gemm\_runner} vs \code{csr.h}};
+  \draw[link] (cfg) -- (bc); \draw[link] (bc) -- (hls); \draw[link] (hls) -- (soc); \draw[link] (soc) -- (hst);
+  % stamps
+  \foreach \n in {hls,soc,hst} { \node[stamp, anchor=south east] at (\n.north east) {stamp: inputs hash}; }
+  % outputs
+  \node[outp] (o1) at (7.4,-1.9) {\file{build/gemm/hls/<hls\_hash>/}\\ IP catalog, \code{csynth.xml}; shared by all Vivado knobs};
+  \node[outp] (o2) at (11.2,-1.9) {bitstream, \code{csr.csv}/\code{csr.h}, LitePCIe driver, timing + utilisation reports};
+  \node[outp] (o3) at (15.0,-1.9) {\file{<build>/sw/}: \code{gemm\_runner}, \code{ddr\_dma\_test}};
+  \foreach \a/\b in {hls/o1, soc/o2, hst/o3} { \draw[->, black!50] (\a) -- (\b); }
+  \node[art, text width=60mm, minimum height=9mm] (bd) at (11.2,-3.55)
+       {\file{build/gemm/soc/<name>-<config\_hash8>/}: \code{config.json}, \code{manifest.json} (git, tools),
+        \code{reports/summary.json}, \code{stamps/}, \code{logs/}};
+  \draw[->, black!50] (o2) -- (bd); \draw[->, black!50] (o3.south) |- (bd.east);
+  % Vivado detail
+  \node[blk, fill=black!4, align=left, text width=44mm, font=\sffamily\scriptsize, anchor=north west] (viv) at (-1.35,-1.3)
+       {\textbf{Vivado in \code{SocStep}} (LiteX build script)\\
+        \code{pre\_synthesis\_commands}: \file{import\_hls\_ip.tcl} (\code{ip\_repo\_paths}, \code{create\_ip},
+        \code{generate\_target}, \code{synth\_ip})\\
+        directives from the preset (default / explore / aggressive), \code{maxThreads}\\
+        The kernel \code{Instance} is generated from the HLS port list.};
+  % row 3: board
+  \node[st, fill=dHost] (prog) at (0.6,-5.6)  {program\\[-1pt]\scriptsize JTAG, \file{program.tcl}};
+  \node[st, fill=dHost] (scan) at (4.3,-5.6)  {PCIe rescan};
+  \node[st, fill=dHost] (drv)  at (8.0,-5.6)  {driver build + load\\[-1pt]\scriptsize probe resets the SoC};
+  \node[st, fill=dHost] (ddr)  at (11.7,-5.6) {DDR calibration\\[-1pt]\scriptsize \file{ddr\_init.sh}, both channels};
+  \node[st, fill=dHost] (run)  at (15.4,-5.6) {\code{gemm\_runner}\\[-1pt]\scriptsize sizes \x repetitions};
+  \draw[link] (prog) -- (scan); \draw[link] (scan) -- (drv); \draw[link] (drv) -- (ddr); \draw[link] (ddr) -- (run);
+  \draw[link] (bd.south) -- ++(0,-0.45) -| (prog.north);
+  \node[art, text width=33mm, minimum height=9mm] (res) at (15.4,-7.3)
+       {\file{results/}: JSONL (source of truth) + CSV; ids, hashes, git, timing, counters};
+  \draw[link] (run) -- (res);
+  \node[lbl, anchor=south west] at ([xshift=2mm]prog.north) {\code{Board.bring\_up()} (\file{flow/gemmflow/board.py}), in this order};
+  \node[note, anchor=north west, text width=88mm, align=left] at (-1.35,-6.55)
+       {\code{scripts/gemm\_build.py <config>} runs the top row (unchanged steps are skipped);
+        \code{scripts/gemm\_run.py <build> --program} runs the bottom row;
+        \code{scripts/gemm\_dse.py <campaign>} does both for every point of a design space
+        (\cref{sec:dse}). The DDR calibration must come after the driver load, because the driver's probe resets the SoC.};
+\end{tikzpicture}

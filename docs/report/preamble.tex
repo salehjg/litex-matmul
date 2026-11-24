@@ -1,0 +1,125 @@
+% preamble.tex - packages, colours and the TikZ/pgfplots styles shared by all figures.
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{libertinus}
+\usepackage[scaled=0.92]{inconsolata}
+\usepackage[a4paper,margin=2.2cm,headheight=14pt]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs,tabularx,array,multirow}
+\usepackage[detect-all]{siunitx}
+\usepackage{caption,subcaption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{positioning,fit,backgrounds,calc,arrows.meta,shapes.geometric,shapes.misc,
+  decorations.pathreplacing,matrix,patterns,shadows.blur,shapes.symbols}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{groupplots,fillbetween}
+\usepackage{pgfplotstable}
+\usepackage[colorlinks=true,linkcolor=cBlue!80!black,citecolor=cGreen!70!black,urlcolor=cBlue!80!black]{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+% Colours (Okabe-Ito, colour-blind safe) ----------------------------------------------------------------------------
+\definecolor{cBlue}{HTML}{0072B2}
+\definecolor{cOrange}{HTML}{E69F00}
+\definecolor{cGreen}{HTML}{009E73}
+\definecolor{cRed}{HTML}{D55E00}
+\definecolor{cPurple}{HTML}{CC79A7}
+\definecolor{cSky}{HTML}{56B4E9}
+\definecolor{cYellow}{HTML}{F0E442}
+\definecolor{cGrey}{HTML}{6E6E6E}
+% Clock domains / parts of the system, used as block fills in every diagram.
+\colorlet{dSys}{cBlue!11}      % sys, 125 MHz
+\colorlet{dAccel}{cOrange!20}  % accel, 200-250 MHz
+\colorlet{dPcie}{cGreen!15}    % PCIe clocks
+\colorlet{dDdr}{cPurple!16}    % DDR3 PHY / memory
+\colorlet{dHost}{black!6}      % host PC
+\colorlet{dFlow}{cSky!18}      % build / DSE flow
+
+% Page style -------------------------------------------------------------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily\leftmark}
+\fancyhead[R]{\small\sffamily GEMM on the DU-PCB-001-003}
+\fancyfoot[C]{\small\sffamily\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\titleformat{\section}{\Large\sffamily\bfseries}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\large\sffamily\bfseries}{\thesubsection}{0.8em}{}
+\titleformat{\subsubsection}{\normalsize\sffamily\bfseries}{\thesubsubsection}{0.8em}{}
+\captionsetup{font=small,labelfont={bf,sf},format=hang}
+\setlist{itemsep=2pt,topsep=4pt}
+\setlength{\parskip}{3pt}
+
+\lstset{basicstyle=\ttfamily\small,columns=fullflexible,keepspaces=true,frame=single,framerule=0.3pt,
+  rulecolor=\color{black!25},backgroundcolor=\color{black!3},xleftmargin=4pt,xrightmargin=4pt,
+  showstringspaces=false,breaklines=true}
+
+% Short names used in the text --------------------------------------------------------------------------------------
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\file}[1]{\texttt{#1}}
+\newcommand{\gflops}[1]{\SI{#1}{GFLOP/s}}
+\newcommand{\x}{\ensuremath{\times}}
+\sisetup{group-separator={\,},group-minimum-digits=4}
+
+% TikZ styles -------------------------------------------------------------------------------------------------------
+\tikzset{
+  >={Stealth[length=2mm,width=1.6mm]},
+  font=\sffamily\small,
+  blk/.style={draw=black!65, rounded corners=2pt, fill=white, align=center, inner sep=3pt,
+    minimum height=7mm, font=\sffamily\small},
+  sys/.style={blk, fill=dSys},
+  acc/.style={blk, fill=dAccel},
+  pci/.style={blk, fill=dPcie},
+  ddr/.style={blk, fill=dDdr},
+  hst/.style={blk, fill=dHost},
+  flw/.style={blk, fill=dFlow},
+  hard/.style={blk, fill=black!14, draw=black!80, double, double distance=0.6pt},
+  note/.style={font=\sffamily\scriptsize, text=black!70, align=center, inner sep=1pt},
+  lbl/.style={font=\sffamily\scriptsize, text=black!75, inner sep=1.5pt},
+  lblw/.style={lbl, fill=white, fill opacity=0.9, text opacity=1},
+  link/.style={->, thick, draw=black!75},
+  biln/.style={<->, thick, draw=black!75},
+  wbus/.style={->, line width=1.6pt, draw=black!70},
+  wbi/.style={<->, line width=1.6pt, draw=black!70},
+  ctl/.style={->, densely dashed, draw=black!60},
+  region/.style={draw=#1!60!black, fill=#1!6, rounded corners=5pt, inner sep=7pt},
+  regionl/.style={font=\sffamily\small\bfseries, text=#1!60!black, inner sep=2pt},
+  step/.style={blk, fill=dFlow, minimum width=24mm, minimum height=9mm},
+  art/.style={draw=black!55, fill=white, align=center, font=\sffamily\scriptsize, inner sep=2.5pt,
+    tape, tape bend top=none, minimum height=6mm},
+  dec/.style={diamond, aspect=2.2, draw=black!65, fill=cYellow!25, align=center, font=\sffamily\scriptsize,
+    inner sep=1pt},
+}
+
+% pgfplots styles ---------------------------------------------------------------------------------------------------
+\pgfplotsset{
+  table/col sep=comma,
+  table/comment chars={\#},
+  every axis/.append style={font=\sffamily\small},
+  every tick label/.append style={font=\sffamily\scriptsize},
+  every axis label/.append style={font=\sffamily\small},
+  rpt/.style={
+    width=\linewidth, height=6.2cm,
+    axis lines*=left, tick align=outside, tick pos=left,
+    grid=major, grid style={black!9},
+    legend style={draw=none, fill=white, fill opacity=0.85, text opacity=1, font=\sffamily\scriptsize},
+    legend cell align=left,
+    enlarge x limits=0.08,
+  },
+  rbar/.style={rpt, ybar, bar width=7pt, ymin=0, enlarge x limits=0.12},
+  s1/.style={draw=cBlue,   fill=cBlue!70,   mark options={fill=cBlue}},
+  s2/.style={draw=cOrange, fill=cOrange!75, mark options={fill=cOrange}},
+  s3/.style={draw=cGreen,  fill=cGreen!70,  mark options={fill=cGreen}},
+  s4/.style={draw=cRed,    fill=cRed!70,    mark options={fill=cRed}},
+  s5/.style={draw=cPurple, fill=cPurple!70, mark options={fill=cPurple}},
+  s6/.style={draw=cSky,    fill=cSky!70,    mark options={fill=cSky}},
+  s7/.style={draw=cGrey,   fill=cGrey!50,   mark options={fill=cGrey}},
+}
+\pgfplotstableset{col sep=comma, comment chars={\#}}

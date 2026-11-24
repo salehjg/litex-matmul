@@ -1,0 +1,37 @@
+% report.tex - GEMM accelerator on the DU-PCB-001-003: architecture, flow, design-space exploration, results.
+% Build: docs/report/build.sh  (pdfLaTeX + latexmk; output docs/report/report.pdf, not in git)
+
+\documentclass[10pt,a4paper]{article}
+\input{preamble}
+
+\title{\sffamily\bfseries A JSON-driven HLS GEMM Accelerator in LiteX\\[2pt]
+  \large\mdseries on the DU-PCB-001-003 Kintex-7 card: architecture, flow, design-space exploration and results}
+\author{\sffamily litex-matmul}
+\date{\sffamily 24 November 2026}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\input{sections/00-abstract}
+\tableofcontents
+\clearpage
+
+\input{sections/01-introduction}
+\input{sections/02-system}
+\input{sections/03-pcie}
+\input{sections/04-ddr}
+\input{sections/05-kernel}
+\input{sections/06-host}
+\input{sections/07-flow}
+\input{sections/08-dse}
+\input{sections/09-evaluation}
+\input{sections/10-lessons}
+
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+\appendix
+\input{sections/11-appendix}
+
+\end{document}

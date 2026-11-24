@@ -1,0 +1,49 @@
+% Clock sources, generated clocks, domains and the clock-domain crossings.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \tikzset{src/.style={blk, fill=white, minimum width=24mm},
+           gen/.style={blk, fill=black!7, minimum width=15mm},
+           dom/.style={blk, minimum width=50mm, align=left, text width=48mm},
+           cdc/.style={draw=cRed!80!black, fill=cRed!8, rounded corners=1pt, font=\sffamily\scriptsize,
+                       align=center, inner sep=2pt}}
+  % sources
+  \node[src] (o0) at (0, 0)    {oscillator \#0\\[-1pt]\scriptsize 200\,MHz (LVDS)};
+  \node[src] (o1) at (0,-2.6)  {oscillator \#1\\[-1pt]\scriptsize 200\,MHz (LVDS)};
+  \node[src] (op) at (0,-4.7)  {PCIe reference\\[-1pt]\scriptsize 100\,MHz from the slot};
+  \node[src] (o5) at (0,-6.8)  {oscillator\\[-1pt]\scriptsize 50\,MHz};
+  % generators
+  \node[gen] (mm)  at (3.1, 0)    {S7MMCM};
+  \node[gen] (pll) at (3.1,-2.6)  {S7PLL};
+  \node[gen] (gtx) at (2.9,-4.7)  {GTX\\[-1pt]\scriptsize TXOUTCLK};
+  \node[gen] (pm)  at (4.6,-4.7)  {MMCM};
+  \node[gen] (dm)  at (6.2, 1.25) {2\x MMCM\\[-1pt]\scriptsize (per channel)};
+  \draw[link] (o0) -- (mm);  \draw[link] (o1) -- (pll);
+  \draw[link] (op) -- (gtx); \draw[link] (gtx) -- (pm);
+  % domains
+  \node[dom, fill=dSys] (sys) at (9.6, 0)
+     {\textbf{sys} 125\,MHz\\[-1pt]\scriptsize CSR bus, LitePCIe endpoint + DMA, DDR DMA bridge, LiteDRAM crossbars + controllers};
+  \node[dom, fill=dDdr] (ddr) at (9.6, 1.6)
+     {\textbf{DDR PHY} 125 + 500\,MHz\\[-1pt]\scriptsize 4\x serdes = 1000\,MT/s; CK phase stepped by the host};
+  \node[dom, fill=dAccel] (acc) at (9.6,-2.6)
+     {\textbf{accel} 150 / 200 / 225 / 250\,MHz\\[-1pt]\scriptsize HLS kernel, AXI\(\rightarrow\)native, perf counters; from \code{clocks.accel\_mhz}};
+  \node[dom, fill=dPcie] (pci) at (9.6,-4.7)
+     {\textbf{PCIe} 125 / 250 / 500\,MHz\\[-1pt]\scriptsize pipe 125, \code{userclk2} 250 (128\,b AXIS), \code{userclk1} 500 (hard-block core, Gen2 x8)};
+  \node[dom, fill=black!4] (fm) at (9.6,-6.8)
+     {\textbf{clk50}\\[-1pt]\scriptsize frequency meters: accel and clk50 measured against sys};
+  \node[blk, fill=black!4, minimum width=18mm] (idl) at (6.2,-1.15) {IDELAYCTRL\\[-1pt]\scriptsize 200\,MHz ref.};
+  \draw[link] (mm) -- (sys);
+  \draw[link] (mm.north) |- (dm.west);
+  \draw[link] (dm) -- (ddr.west |- dm);
+  \draw[link] (mm.south) |- (idl.west);
+  \draw[link] (pll) -- (acc);
+  \draw[link] (pm) -- (pci);
+  \draw[link] (o5) -- (fm);
+  % crossings: one lane per crossing, to the right of the domains
+  \node[cdc, text width=31mm] (x1) at (14.25,-1.3) {\textbf{CDC accel \(\leftrightarrow\) sys}\\ crossbar ports: async FIFOs;\\ CSRs: PulseSynchronizer\\ (start), MultiReg (args,\\ status, counters)};
+  \node[cdc, text width=27mm] (x2) at (17.35,-3.1) {\textbf{CDC PCIe \(\leftrightarrow\) sys}\\ PHY RX/TX datapath:\\ async FIFOs, 128\,b};
+  \draw[<->, thick, cRed!80!black] ([yshift=-1.5mm]sys.east) -| (x1.north);
+  \draw[<->, thick, cRed!80!black] (x1.south) |- (acc.east);
+  \draw[<->, thick, cRed!80!black] ([yshift=2mm]sys.east) -| (x2.north);
+  \draw[<->, thick, cRed!80!black] (x2.south) |- (pci.east);
+  \node[note, anchor=north, text width=50mm] at (9.6,-7.45)
+     {All domains are false-pathed against each other in Vivado; only the crossings above move data between them.};
+\end{tikzpicture}

@@ -1,0 +1,78 @@
+% System overview: host PC, PCIe link, the CPU-less GemmSoC and both DDR3 channels.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \tikzset{w/.style={minimum width=#1}}
+  % ---------------- Host PC ----------------
+  \node[hst, w=31mm] (app)   at (0, 0)    {\code{gemm\_runner} (C++17)\\[-1pt]\scriptsize Python: \code{gemm\_run}, \code{gemm\_dse}};
+  \node[hst, w=31mm] (lib)   at (0,-1.3)  {host library\\[-1pt]\scriptsize \code{Card} · \code{DdrDma} · \code{GemmKernel}};
+  \node[hst, w=31mm] (llp)   at (0,-2.5)  {\code{liblitepcie}};
+  \node[hst, w=31mm] (drv)   at (0,-3.9)  {\code{litepcie.ko}\\[-1pt]\scriptsize ioctl · mmap · MSI};
+  \node[hst, w=31mm] (ring)  at (0,-5.2)  {DMA buffers\\[-1pt]\scriptsize H2C + C2H, 256\x8\,KB each};
+  \node[hst, w=31mm] (iommu) at (0,-6.5)  {IOMMU · root port};
+  \draw[link] (app) -- (lib);
+  \draw[link] (lib) -- (llp);
+  \draw[biln] (llp) -- node[lblw, left=0.5mm] {\code{/dev/litepcie0}} (drv);
+  \draw[biln] (drv) -- (ring);
+  \draw[biln] (ring) -- (iommu);
+  \draw[densely dotted, black!50] (-1.75,-3.2) -- (1.75,-3.2);
+  \node[lbl, anchor=south east] at (1.75,-3.2) {user space};
+  \node[lbl, anchor=north east] at (1.75,-3.2) {kernel};
+  \begin{scope}[on background layer]
+    \node[region=black, fit=(app)(iommu), inner sep=6pt] (host) {};
+  \end{scope}
+  \node[regionl=black, anchor=south west] at (host.north west) {Host PC (Linux, x86-64)};
+
+  % ---------------- FPGA ----------------
+  \def\cA{5.6} \def\cB{8.85} \def\cC{12.1} \def\cD{15.35}
+  \node[hard, w=27mm] (hb)  at (\cA, 0)    {PCIe hard block\\[-1pt]\scriptsize \code{PCIE\_2\_1} + 8 GTX};
+  \node[pci,  w=27mm] (phy) at (\cB, 0)    {PCIe PHY\\[-1pt]\scriptsize \code{S7PCIEPHYRXBE}, CDC};
+  \node[sys,  w=27mm] (ep)  at (\cC, 0)    {LitePCIe endpoint\\[-1pt]\scriptsize TLP layer, crossbar};
+  \node[sys,  w=27mm] (dma) at (\cD, 0)    {DMA reader + writer\\[-1pt]\scriptsize descriptor tables, MSI};
+  \node[sys,  w=27mm] (csr) at (\cC,-1.6)  {BAR0 \(\rightarrow\) CSR bus\\[-1pt]\scriptsize 128\,KB window};
+  \node[sys,  w=27mm] (br)  at (\cD,-1.6)  {DDR DMA bridge\\[-1pt]\scriptsize 128\(\leftrightarrow\)512\,b, channel sel.};
+  \node[acc,  w=38mm, minimum height=15mm] (k) at (\cA+0.55,-3.55)
+       {HLS GEMM kernel\\[-1pt]\scriptsize chain of \(P_N\) PEs, \(P_N P_M\) MAC/cycle\\[-1pt]\scriptsize \code{m\_axi} A, B, C (512\,b)};
+  \node[acc,  w=20mm] (cvt) at (\cB+0.35,-3.55) {AXI\(\rightarrow\)native\\[-1pt]\scriptsize + perf taps};
+  \node[sys,  w=27mm] (xb0) at (\cC,-3.55)  {crossbar CH0\\[-1pt]\scriptsize CDC, 512\,b ports};
+  \node[sys,  w=27mm] (xb1) at (\cD,-3.55)  {crossbar CH1\\[-1pt]\scriptsize CDC, 512\,b ports};
+  \node[sys,  w=27mm] (mc0) at (\cC,-5.25)  {LiteDRAM controller\\[-1pt]\scriptsize 8 bank machines};
+  \node[sys,  w=27mm] (mc1) at (\cD,-5.25)  {LiteDRAM controller\\[-1pt]\scriptsize 8 bank machines};
+  \node[ddr,  w=27mm] (ph0) at (\cC,-6.5)   {\code{WL7DDRPHY} CH0\\[-1pt]\scriptsize 1:4, CK phase by MMCM};
+  \node[ddr,  w=27mm] (ph1) at (\cD,-6.5)   {\code{WL7DDRPHY} CH1\\[-1pt]\scriptsize 1:4, CK phase by MMCM};
+  \node[blk, fill=black!4, w=38mm, align=left, font=\sffamily\scriptsize] (misc) at (\cA+0.55,-6.0)
+       {\textbf{also on the CSR bus}\\ kernel start/args/status, perf counters,\\ \code{build\_id}, DDR calibration + BIST,\\
+        bridge control, freq.\ meters, LEDs};
+
+  \draw[wbi] (hb) -- (phy);
+  \draw[wbi] (phy) -- (ep);
+  \draw[wbi] (ep) -- (dma);
+  \draw[biln] (ep) -- node[lblw, left] {MMIO} (csr);
+  \draw[wbi] (dma) -- node[lblw, right] {128\,b stream} (br);
+  \draw[wbi] ([xshift=5mm]br.south) -- ([xshift=5mm]xb1.north);
+  \draw[wbi] ([xshift=-5mm]br.south) -- ++(0,-0.55) -| ([xshift=5mm]xb0.north);
+  \draw[wbi] (k) -- (cvt);
+  \draw[wbi] (cvt) -- node[lbl, above] {A} (xb0);
+  \draw[wbi] (cvt.south) -- ++(0,-0.62) -| node[lbl, pos=0.12, below] {B, C} ([xshift=-6mm]xb1.south);
+  \draw[wbi] (xb0) -- (mc0);  \draw[wbi] ([xshift=3mm]xb1.south) -- ([xshift=3mm]mc1.north);
+  \draw[wbi] (mc0) -- (ph0);  \draw[wbi] (mc1) -- (ph1);
+  \draw[ctl] (csr.west) -| node[lblw, pos=0.25, above] {start, arguments, status, counters} (k.north);
+
+  \begin{scope}[on background layer]
+    \node[region=cGrey, fit=(hb)(dma)(k)(misc)(ph0)(ph1), inner sep=7pt] (fpga) {};
+  \end{scope}
+  \node[regionl=cGrey, anchor=south west] at (fpga.north west) {Kintex-7 480T (\code{xc7k480tiffg1156-2L}): CPU-less GemmSoC, LiteX 2026.08};
+
+  % ---------------- DDR3 and the link ----------------
+  \node[ddr, w=27mm] (d0) at (\cC,-8.25) {DDR3 CH0 · 2\,GB\\[-1pt]\scriptsize 8 chips \x8, 64\,b data};
+  \node[ddr, w=27mm] (d1) at (\cD,-8.25) {DDR3 CH1 · 2\,GB\\[-1pt]\scriptsize 8 chips \x8, 64\,b data};
+  \draw[wbi] (ph0) -- node[lbl, right] {1000\,MT/s} (d0);
+  \draw[wbi] (ph1) -- node[lbl, right] {1000\,MT/s} (d1);
+  \draw[wbi, draw=cGreen!55!black] (iommu.east) -- (2.55,-6.5) -- node[lbl, sloped, above, pos=0.5]
+       {PCIe Gen2 · 5\,GT/s per lane · x4 in this slot (x8 card)} (2.55,0) -- (hb.west);
+
+  % legend
+  \node[sys, minimum height=4mm, font=\sffamily\scriptsize] (l1) at (0.3,-8.25) {sys 125\,MHz};
+  \node[acc, minimum height=4mm, font=\sffamily\scriptsize, right=1.5mm of l1] (l2) {accel 150--250\,MHz};
+  \node[pci, minimum height=4mm, font=\sffamily\scriptsize, right=1.5mm of l2] (l3) {PCIe clocks};
+  \node[ddr, minimum height=4mm, font=\sffamily\scriptsize, right=1.5mm of l3] (l4) {DDR PHY/DRAM};
+  \node[hard, minimum height=4mm, font=\sffamily\scriptsize, right=1.5mm of l4] (l5) {hard IP};
+\end{tikzpicture}

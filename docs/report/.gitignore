@@ -1,0 +1,20 @@
+# LaTeX output: build.sh writes everything to build/ and copies the PDF here.
+build/
+*.pdf
+# In case someone runs pdflatex/latexmk by hand in this folder.
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.synctex.gz
+*.run.xml
+*.bcf
+*-blx.bib
+# Python cache of tools/
+__pycache__/

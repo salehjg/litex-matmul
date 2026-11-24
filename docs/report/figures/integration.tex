@@ -1,0 +1,51 @@
+% How the HLS IP is wired into the SoC: CSR control across clock domains, AXI to LiteDRAM native, perf taps.
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.append style={font=\sffamily\footnotesize}]
+  \tikzset{w/.style={minimum width=#1}, cs/.style={sys, minimum width=24mm, minimum height=6mm, font=\sffamily\scriptsize}}
+  % CSRs (sys)
+  \node[cs] (c1) at (0, 1.5)  {\code{start} (write pulse)};
+  \node[cs] (c2) at (0, 0.75) {\code{a, b, c, size\_n/k/m}};
+  \node[cs] (c3) at (0, 0)    {\code{soft\_reset}};
+  \node[cs] (c4) at (0,-0.75) {\code{status} (done/idle/busy)};
+  \node[cs] (c5) at (0,-1.5)  {\code{cycles} (64 b)};
+  \node[cs] (c6) at (0,-2.25) {\code{perf\_\{a,b,c\}\_*}};
+  \node[cs] (c7) at (0,-3.0)  {\code{build\_id}};
+  \begin{scope}[on background layer]\node[region=cBlue, fit=(c1)(c7), inner sep=5pt] (csr) {};\end{scope}
+  \node[regionl=cBlue, anchor=south] at (csr.north) {CSRs, sys};
+  % CDC
+  \node[blk, fill=cRed!8, draw=cRed!70!black, w=21mm, font=\sffamily\scriptsize] (ps) at (3.1, 1.5)  {PulseSynchronizer};
+  \node[blk, fill=cRed!8, draw=cRed!70!black, w=21mm, font=\sffamily\scriptsize] (mr) at (3.1, 0.38) {MultiReg};
+  \node[blk, fill=cRed!8, draw=cRed!70!black, w=21mm, font=\sffamily\scriptsize] (mb) at (3.1,-1.5)  {MultiReg};
+  \draw[link] (c1) -- (ps);
+  \draw[link] (c2.east) -- ++(0.3,0) |- ([yshift=1mm]mr.west);
+  \draw[link] (c3.east) -- ++(0.3,0) |- ([yshift=-1mm]mr.west);
+  \draw[link] (mb.west) -- ++(-0.3,0) |- (c4.east);
+  \draw[link] (mb) -- (c5);
+  \draw[link] (mb.west) -- ++(-0.3,0) |- (c6.east);
+  % control FSM (accel)
+  \node[acc, w=27mm, align=left, font=\sffamily\scriptsize, text width=25mm] (fsm) at (6.2,0.6)
+       {\textbf{control} (accel)\\ hold \code{ap\_start} until \code{ap\_ready}; count cycles while busy; done on \code{ap\_done}};
+  \draw[link] (ps) -| (fsm.north);
+  \draw[link] (mr) -- (mr -| fsm.west);
+  \draw[link] (fsm.south) |- (mb.east);
+  % HLS IP
+  \node[acc, fill=cOrange!32, w=30mm, minimum height=40mm, align=center] (ip) at (10.0,0.0)
+       {\textbf{HLS IP}\\ \code{gemm\_kernel\_ip}\\[4pt]\scriptsize Instance generated from\\ \scriptsize the \code{csynth.xml} port list\\[4pt]
+        \scriptsize \code{ap\_ctrl\_hs}, \code{ap\_none} args,\\ \scriptsize \code{m\_axi offset=direct}};
+  \draw[link] (fsm.east |- 0,1.2) -- node[lbl, above] {start / args} (ip.west |- 0,1.2);
+  \draw[link] (ip.west |- 0,0.0) -- node[lbl, above] {done, idle} (fsm.east |- 0,0.0);
+  % AXI paths
+  \foreach \m/\y/\conv in {A/1.4/\code{LiteDRAMAXI2NativeR}, B/0.0/\code{LiteDRAMAXI2NativeR}, C/-1.4/\code{AxiWriteToNative}} {
+    \node[acc, w=8mm, minimum height=6mm, font=\sffamily\scriptsize] (tap\m) at (12.6,\y) {perf};
+    \node[acc, w=30mm, font=\sffamily\scriptsize] (cv\m) at (15.0,\y) {\conv};
+    \node[sys, w=16mm, font=\sffamily\scriptsize] (np\m) at (17.75,\y) {native port};
+    \draw[wbus] (ip.east |- tap\m) -- node[lbl, above, pos=0.45] {AXI4 \m} (tap\m);
+    \draw[wbus] (tap\m) -- (cv\m);
+    \draw[wbus] (cv\m) -- (np\m);
+  }
+  \node[note, anchor=north, text width=60mm] at (15.4,-2.0)
+     {Counters per bundle: AR/AW handshakes, R/W beats, address stalls, cycles waiting for read data
+      (\code{rready \& !rvalid}), back-pressure, write stalls, read latency min/max/sum (AR \(\rightarrow\) first R, single ID).};
+  \draw[ctl] (tapC.south) |- ++(-1.5,-1.85) -| node[lblw, pos=0.25, below] {counters (64 b each)} (mb.south);
+  \node[note, anchor=north, text width=40mm] at (6.2,-2.1)
+     {Arguments are quasi-static: written before \code{start}, so a MultiReg per bit is safe. Counters are read after \code{done}, when they are stable.};
+\end{tikzpicture}
