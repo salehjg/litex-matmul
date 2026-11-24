@@ -408,7 +408,7 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
 - [ ] 🟡 `int4_pe64` round 2 (18:45, `dse_2.log`, `--resume`): 180 MHz aggressive and explore (same HLS run), in
       parallel with `int4_clock`'s HLS (memory: Vivado 7.2 GB peak plus HLS 3.9 GB, against 15 GB RAM and 50 GB swap).
       The board lock serialises the card runs.
-- [ ] ⛔ **Both campaigns stopped (~18:58) by Claude Code's memory guard**, not by a failure in the flow. `int4_clock`'s HLS
+- [x] **Both campaigns stopped (~18:58) by Claude Code's memory guard**, not by a failure in the flow. `int4_clock`'s HLS
       finished sooner than expected (both 225 MHz points: est. 4.144 ns, 34 DSP, 662 BRAM18, stamped), and its first
       Vivado build started next to `int4_pe64`'s 180 MHz aggressive build. Two Vivado runs of this size (~7 GB each)
       plus the rest left the machine critically low, and the session's background shells were stopped. The kernel OOM
@@ -418,8 +418,8 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         All HLS runs are stamped.
       - Lesson: one Vivado build at a time on this 15 GB machine. A DSE campaign can move from HLS to Vivado at any
         point.
-      - Restart (waiting for the user): `int4_pe64 --resume` (180 MHz aggressive, explore), then
-        `int4_clock --resume` (225 MHz default, explore), one after the other.
+      - Restarted on the user's go (19:10), one after the other in one shell: `int4_pe64 --resume` (`dse_3.log`; 180 MHz
+        aggressive, explore), then `int4_clock --resume` (225 MHz default, explore). Only one Vivado run at a time.
 - [x] (superseded: the tile broke rule 1) Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
       and explore presets (one HLS run), and at 180 MHz default (peak 1475 GOP/s, 0.56 ns more period). It goes first:
       4096 MACs at any of these clocks beats int4 PE 32×64 at 225 MHz (921.6 GOP/s peak).
