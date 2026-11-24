@@ -469,8 +469,9 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       - The loss per k step stays about the same when the work per step doubles (41 → 43, 73 → 77 cycles), so the
         share halves.
       - **BRAM did not grow**, in HLS or in Vivado: kernel RAMB36/RAMB18 285/37 (PE 32×64) and 509/69 (PE 64×64), the
-        same as the half-size tiles. My note above (that Vivado would need ~4 more RAMB36 per PE) was wrong. Why the
-        mapping has room for 1024 words was not checked.
+        same as the half-size tiles (HLS: 15 BRAM18 per PE for the 1024 × 256-bit C buffer at both depths). An earlier
+        version of this entry expected ~4 more RAMB36 per PE in Vivado; that was wrong. Why the mapping already had
+        room for 1024 words was not checked.
       - The cost of deeper tiles is the whole-tile effect: matrices should be multiples of 1024 in N.
 - [x] **Report updated** (23:20, `docs/report/`, 28 pages, 0 warnings): new section 10 "Integer and fixed-point formats"
       (tiers, flow and host support, same-array cost, wider arrays and timing, DDR read margin, tile rules, loss per
