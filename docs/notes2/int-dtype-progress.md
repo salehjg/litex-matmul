@@ -129,14 +129,26 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       - The cost falls sharply with width: int8 needs 1/33 of float's DSPs (Vivado maps the 8-bit multiplies to LUTs,
         HLS had estimated DSPs), 45 % of its LUTs and 46 % of its BRAM. int16 and fixed16.8 cost the same.
       - **int32 fails exact verification** (10–19 % of sampled entries). Debugged on the card,
-        [misc/int32_verify](../../misc/int32_verify/README.md): whole C rows inside one M tile are wrong, rows with
-        `i mod 16` ∈ {6, 10, 12, 14}. Those are A lanes in the 512-bit word (channel 0). Only the upper bits are
-        wrong, and only when they toggle: ±100 data fails, 0…100, −100…0 and constant data pass. That is a silicon
-        sampling problem in this placement, not arithmetic. Suspect: the LiteDRAM native-port CDC into `accel` is
-        declared asynchronous, so Vivado never times it.
+        [misc/int32_verify](../../misc/int32_verify/README.md):
+        - Whole C rows inside one M tile are wrong, in PEs 6, 10, 12, 14, 22, 26, 28, 30 (12 and 28 in every tile).
+        - Errors appear only when both operands toggle the upper bits of the multiply-add: ±100 and full-range data
+          fail; 0…100, −100…0 and constant data pass.
+        - **With B = I (C = A) everything is exact**, so A arrives intact. The DDR BIST is clean, and the read-data
+          CDC FIFO is block RAM with a safe schedule. The rails are in spec (VCCINT 0.954 → 0.947 V averaged under
+          load, 48 °C).
+        - The worst `accel` paths are `aBuffer` BRAM → 32-bit multiplier input at 56 ps slack and PE carry chains at
+          62 ps.
+
+        Working diagnosis: silicon timing failure under high switching activity in this placement, although STA
+        passes. `int32_margin` (same array: aggressive preset at 200 MHz, and 180 MHz) is queued to confirm it.
+        Lesson: STA "met" with tens of ps is not enough for heavy-activity datapaths, and exact full-range
+        verification catches it. For floats, uniform(−1, 1) data with a relative tolerance would hide small errors.
       - **float32 checked exactly** with the new integer-valued float mode (`gemm_runner --value-range` for float32,
         exact comparison; 1024³ at ±100, ±127, 0…127): 0 bad. Earlier float results are not affected.
-      - Tools added: `gemm_runner --dump-bad FILE` (mismatches as `i j got ref`) and `--value-range` for float32.
+      - Tools added: `gemm_runner --dump-bad FILE` (mismatches as `i j got ref`), `--value-range` for float32
+        (integer values, exact check) and `--b-identity` (B = I, so C shows A as the kernel read it).
+- [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.
+      `dtype_clock`'s array is set from the `int8_scale` results before it starts.
 - [ ] Queued behind it (05:05): `dtype_size_sweep` (runs on the int8 build), `int8_scale`, `int16_scale`.
       `dtype_size_sweep` finished 05:53 (results below); `int8_scale` started 05:53 (HLS done for all 3 arrays).
 - [x] **`dtype_size_sweep` done** (int8 PE 32×8 build, 45 sizes × 2 reps, all verified exactly,

@@ -1,0 +1,48 @@
+{
+  "campaign": "int32_margin",
+  "comment": "docs/notes2: the int32 PE 32x8 build (200 MHz, default preset, WNS 0.028 ns) fails exact verification under full-range data (misc/int32_verify). Same array with more timing margin: aggressive preset at 200 MHz, and 180 MHz.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@format": [
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 32
+      }
+    ],
+    "@margin": [
+      {
+        "clocks.accel_mhz": 200,
+        "vivado.preset": "aggressive"
+      },
+      {
+        "clocks.accel_mhz": 180,
+        "vivado.preset": "default"
+      }
+    ]
+  },
+  "runtime_grid": {
+    "triples": [
+      [
+        1024,
+        1024,
+        1024
+      ],
+      [
+        4096,
+        4096,
+        4096
+      ]
+    ],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": [
+    "hls",
+    "build",
+    "run"
+  ],
+  "jobs": {
+    "hls": "auto"
+  }
+}
