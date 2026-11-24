@@ -1,0 +1,14 @@
+% Best GFLOP/s after each step of the exploration, against the peak of that configuration.
+\begin{tikzpicture}
+\begin{axis}[rpt, ybar=0pt, bar width=14pt, height=6.4cm, ymin=0, ymax=125,
+    ylabel={GFLOP/s (kernel)}, xtick=data, x tick label style={rotate=28, anchor=north east, font=\sffamily\scriptsize},
+    xticklabels={{PE 8\x8, tile 128}, {PE 8\x8, tile 256}, {PE 16\x8, tile 256}, {PE 32\x8, tile 256},
+                 {+ transposed A}, {+ tile 512\x512}, {+ tile 1024\x512}, {+ 225\,MHz}},
+    nodes near coords, nodes near coords style={font=\sffamily\scriptsize, /pgf/number format/.cd, fixed, precision=1},
+    legend style={at={(0.02,0.98)}, anchor=north west}]
+  \addplot[s7, fill=black!8, draw=black!45, bar shift=0pt, nodes near coords=\empty] table[x=step, y=peak] {data/progress.csv};
+  \addlegendentry{peak of the configuration}
+  \addplot[s1, bar shift=0pt, bar width=9pt] table[x=step, y=gflops] {data/progress.csv};
+  \addlegendentry{best measured}
+\end{axis}
+\end{tikzpicture}

@@ -1,0 +1,10 @@
+% Device utilisation of the best build (PE 32x8, tile 1024x512, 225 MHz): kernel vs the rest of the SoC.
+\begin{tikzpicture}
+\begin{axis}[rpt, xbar stacked, enlarge x limits=false, width=0.84\linewidth, bar width=9pt, height=4.4cm, xmin=0, xmax=100, xlabel={\% of the xc7k480t},
+    ytick={0,1,2,3}, yticklabels={LUT (298.6\,k), FF (597.2\,k), BRAM tiles (955), DSP48 (1920)}, y dir=reverse,
+    enlarge y limits=0.2, legend style={at={(0.98,0.02)}, anchor=south east}, grid=none, xmajorgrids]
+  % kernel: LUT 122.7k, FF 206.8k, BRAM 509 + 69/2 = 543.5 tiles, DSP 1320; whole design: 152.0k, 235.8k, 654.5, 1320
+  \addplot[s2] coordinates {(41.1,0) (34.6,1) (56.9,2) (68.75,3)}; \addlegendentry{GEMM kernel}
+  \addplot[s1] coordinates {(9.8,0) (4.9,1) (11.6,2) (0,3)};      \addlegendentry{rest of the SoC}
+\end{axis}
+\end{tikzpicture}

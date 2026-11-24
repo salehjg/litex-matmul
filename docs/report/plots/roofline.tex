@@ -1,0 +1,18 @@
+% Roofline: tile intensity (A + B traffic) against measured GFLOP/s, with one DDR3 channel as the memory roof.
+\begin{tikzpicture}
+\begin{axis}[rpt, height=6.4cm, xmode=log, ymode=log, log basis x=10, log basis y=10, xmin=4, xmax=400, ymin=8, ymax=200,
+    xlabel={arithmetic intensity of a memory tile (flop per byte of A + B)}, ylabel={GFLOP/s},
+    legend style={at={(0.98,0.02)}, anchor=south east}, log ticks with fixed point]
+  \addplot[l7, very thick, domain=4:400, samples=200] {min(7.2*x, 1e9)}; \addlegendentry{one DDR3 channel, 7.2\,GB/s}
+  \foreach \p/\c in {25.6/cBlue, 51.2/cOrange, 102.4/cGreen, 115.2/cPurple} {
+    \edef\tmp{\noexpand\draw[\c, densely dashed] (axis cs:4,\p) -- (axis cs:400,\p) node[pos=0.0, above right, font=\noexpand\sffamily\noexpand\tiny, text=\c] {\p};}
+    \tmp
+  }
+  \addplot[only marks, mark=*, mark size=2.2pt, cBlue] table[x expr={\thisrow{tn}*\thisrow{tm}/(2*(\thisrow{tn}+\thisrow{tm}))},
+      y=gflops, restrict expr to domain={\thisrow{pn}}{8:8}] {data/builds.csv}; \addlegendentry{PE 8\x8}
+  \addplot[only marks, mark=square*, mark size=2.2pt, cOrange] table[x expr={\thisrow{tn}*\thisrow{tm}/(2*(\thisrow{tn}+\thisrow{tm}))},
+      y=gflops, restrict expr to domain={\thisrow{pn}}{16:16}] {data/builds.csv}; \addlegendentry{PE 16\x8}
+  \addplot[only marks, mark=triangle*, mark size=2.8pt, cGreen!70!black] table[x expr={\thisrow{tn}*\thisrow{tm}/(2*(\thisrow{tn}+\thisrow{tm}))},
+      y=gflops, restrict expr to domain={\thisrow{pn}}{32:32}] {data/builds.csv}; \addlegendentry{PE 32\x8}
+\end{axis}
+\end{tikzpicture}

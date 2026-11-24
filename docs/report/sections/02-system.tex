@@ -1,0 +1,57 @@
+\section{System overview}
+\label{sec:system}
+
+\subsection{The card}
+The DU-PCB-001-003 carries a Kintex-7 \code{xc7k480tiffg1156-2L} (299\,k LUTs, 597\,k flip-flops, 955 BRAM36 tiles,
+1920 DSP48E1 slices) on an x8 PCIe edge connector, with two independent DDR3 channels. Each channel has eight
+2\,Gbit \x8 chips (64-bit data, 2\,GB) plus a ninth chip on an ECC lane that is not used. Two 200\,MHz oscillators,
+a 50\,MHz oscillator and the 100\,MHz PCIe reference clock are available. The design is loaded over JTAG
+(writing the configuration flash is not supported on this card). In the development PC the slot trains the
+link to Gen2 x4.
+
+\subsection{The SoC}
+The base LiteX SoC for the card (\file{boards/dupcb/target.py}) has a VexRiscv CPU, both DDR3 controllers and the
+PCIe endpoint. The accelerator uses a variant without the CPU, \code{GemmSoC} (\file{hw/gemm/gemm\_soc.py}),
+shown in \cref{fig:system}:
+\begin{itemize}
+  \item \textbf{No CPU.} Both channels (\(2\times2\)\,GB) belong to the host DMA and the kernel. The host does
+        everything a CPU would do: DDR3 calibration, kernel control, reading counters.
+  \item \textbf{BAR0 is the CSR bus.} The host reads and writes the SoC's 32-bit control and status registers
+        (CSRs) through a 128\,KB PCIe memory window. Their addresses come from the build's generated \code{csr.h}.
+  \item \textbf{One DMA channel}, used by a bridge that moves data between the PCIe DMA streams and either DDR3
+        channel (\cref{sec:pcie}).
+  \item \textbf{The HLS kernel} with three AXI4 masters (A, B, C). Each is converted to a LiteDRAM native port on the
+        channel the build's \code{memory\_map} assigns to that matrix (\cref{sec:kernel}).
+  \item \textbf{Identification.} A \code{build\_id} register holds the first 32 bits of the build's configuration
+        hash, so the host can refuse to run against the wrong bitstream.
+\end{itemize}
+Channel 0 keeps LiteX's standard \code{add\_sdram} integration (its Wishbone port stays idle without a CPU), so the
+DDR register names, and with them the calibration script, are the same as in the base SoC. Without the kernel the
+SoC uses 25.5\,k LUTs, 19.5\,k flip-flops and 73.5 BRAM tiles.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/system}}
+  \caption{System overview. The host talks to the card over PCIe: memory-mapped CSR accesses for control and two
+    DMA directions for data. On the FPGA, the DMA bridge and the kernel share two LiteDRAM crossbars, one per DDR3
+    channel. Colours mark the clock domains.}
+  \label{fig:system}
+\end{figure}
+
+\subsection{Clocks}
+\Cref{fig:clocks} shows where the clocks come from and which logic runs on each. The \textbf{sys} clock
+(125\,MHz, from oscillator \#0) runs the CSR bus, the LitePCIe endpoint and DMA, the bridge and both LiteDRAM
+controllers. Each DDR3 PHY has its own MMCM for its 4\x clocks, so the host can move each channel's CK phase on its
+own (\cref{sec:ddr}). The \textbf{accel} clock comes from a PLL on the second 200\,MHz oscillator and is set by the
+build configuration (\code{clocks.accel\_mhz}); the kernel and its AXI side run on it. The PCIe hard block and the
+PHY run on clocks derived from the PCIe reference. All domains are false-pathed against each other, and data
+crosses only through the places marked in the figure: the PHY's asynchronous FIFOs, the asynchronous FIFOs inside
+the LiteDRAM crossbar ports for the kernel, and synchronisers for the kernel's control registers. A frequency meter
+reports the measured accel clock to the host, which uses it to convert cycles to seconds.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/clocks}}
+  \caption{Clock sources, the clock domains and the clock-domain crossings (CDC).}
+  \label{fig:clocks}
+\end{figure}

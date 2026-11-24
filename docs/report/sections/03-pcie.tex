@@ -1,0 +1,89 @@
+\section{PCIe: controller, DMA and Linux driver}
+\label{sec:pcie}
+
+\subsection{From the hard block to the endpoint}
+The Kintex-7 has an integrated PCIe block (\code{PCIE\_2\_1}~\cite{ug477}) with eight GTX transceivers. It is
+configured for Gen2 x8 with a 128-bit AXI-Stream interface at 250\,MHz (\code{userclk2}); the block's core runs at
+500\,MHz (\code{userclk1}) and buffers packets in BRAMs placed next to it. LitePCIe's PHY wraps the block and moves
+the streams into the sys domain through asynchronous FIFOs. On top, the LitePCIe endpoint parses and builds
+transaction-layer packets (TLPs) and routes them between a memory-mapped slave (BAR0, the CSR bus) and the DMA
+engines.
+
+\paragraph{The PHY fix.} With LitePCIe 2026.08, the stock 7-series PHY took the receive byte enables of the
+128-bit datapath from \code{tkeep}. On this card that added a garbage 17th beat to every 256-byte read completion,
+and the DMA reader stalled after about 64\,KB. Two early host freezes happened while debugging this stall. The
+project's own PHY (\file{boards/dupcb/s7pciephy\_rx\_be.py}, \code{S7PCIEPHYRXBE}) derives the byte enables from
+the end-of-packet information instead. With it, LitePCIe's DMA loopback test runs at 13.43\,Gb/s
+(\SI{1.68}{GB/s}, Gen2 x4) with no errors, and no host freeze has happened since, with the IOMMU on.
+
+\subsection{DMA engines and the DDR bridge}
+LitePCIe has a DMA \emph{reader} (host to card, H2C) and a \emph{writer} (card to host, C2H). Each works through a
+table of descriptors (host address, length) that the driver fills; the driver runs both in \emph{loop mode} over a
+ring of 256 buffers of 8\,KB in host memory, so the engines go round the ring until they are stopped. The reader
+issues memory-read requests of up to 512\,B and receives completions of 256\,B; the writer sends memory-write TLPs and
+raises an MSI interrupt every 32 buffers. A loop-status register tells the host which descriptor the writer is on and
+how many times it has gone round.
+
+The bridge (\file{hw/gemm/ddr\_dma.py}, \cref{fig:pcie_dma}) connects these 128-bit streams to the 512-bit
+LiteDRAM native ports. One CSR selects the channel for both directions; per channel there is a
+\code{LiteDRAMDMAWriter} (stream to DDR) and a \code{LiteDRAMDMAReader} (DDR to stream), each with base address,
+length and enable registers. Because the reader keeps streaming the ring until it is stopped, the bridge takes exactly
+\code{length} bytes and drops (and counts) everything after them or while the selected writer is not running. This
+makes padding to whole DMA buffers harmless.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/pcie_dma}}
+  \caption{The host-to-DDR data path. The driver's loop-mode rings live in host memory; the bridge converts between
+    the 128-bit DMA streams and the 512-bit DDR words and selects the channel.}
+  \label{fig:pcie_dma}
+\end{figure}
+
+\subsection{The Linux driver}
+The kernel module is LitePCIe's driver, generated with each build (\file{<build>/driver/kernel}). It creates
+\code{/dev/litepcie0} and offers:
+\begin{itemize}
+  \item an ioctl for 32-bit CSR reads and writes (BAR0 cannot be mapped by user space while the driver owns the
+        device);
+  \item ioctls that enable or disable the DMA reader and writer, which (re)program the descriptor tables from buffer~0
+        in loop mode;
+  \item \code{mmap} of both rings into the user process, so the host copies data straight into and out of the DMA
+        buffers;
+  \item MSI interrupts that count finished buffers.
+\end{itemize}
+The rings are allocated by the driver and mapped for the device through the IOMMU, which stays enabled. The
+driver's probe resets the SoC, which is why DDR calibration has to come after the driver is loaded
+(\cref{sec:flow}). A small setup script (\file{scripts/setup\_permissions.sh}) installs udev rules and a helper so
+the whole bring-up runs without a password.
+
+\subsection{Transfer protocol and throughput}
+\label{sec:pcie:rates}
+\code{DdrDma} (\file{sw/gemm\_host/src/ddr\_dma.cpp}) moves data in chunks of one ring (2\,MB):
+\begin{description}[font=\sffamily\small, leftmargin=1.2em]
+  \item[H2C] Copy the chunk into the ring, program the bridge writer (base, length, enable), enable the DMA reader,
+        wait until the channel reports \code{drained} (writer done, FIFO empty), then disable the reader and the
+        bridge writer. The reader cannot stay enabled between chunks, because it would keep streaming the ring.
+  \item[C2H] Enable the DMA writer \emph{once} per call. For each chunk: program the bridge reader for the chunk (in
+        whole 8\,KB buffers, at least two), wait until the writer's loop status shows that many more buffers done,
+        copy out of the ring. Disable the writer at the end.
+\end{description}
+
+The generated driver's DMA stop waits a fixed \SI{1}{ms} (\code{udelay(1000)}), so that read completions still in
+flight land before the engine is reset. With one stop per 2\,MB chunk this is about \SI{40}{\percent} of the transfer
+time (\cref{fig:dma}, right). Enabling the C2H writer once per call instead of once per chunk removed it from that
+direction: C2H went from 0.84 to \SI{1.49}{GB/s}, verified with random and counter patterns on both channels and
+with fully verified GEMMs. H2C stays at \SI{0.82}{GB/s}: shortening the driver delay, or making the bridge
+back-pressure the reader after \code{length} bytes, would remove the remaining cost, but a completion arriving after a
+reset could stall the PCIe path, the same class of fault as the early host freezes, so this is left as a decision
+(\cref{sec:lessons}).
+
+\begin{figure}[t]
+  \centering
+  \input{plots/dma_size}\\[2mm]
+  \input{plots/dma_phases}
+  \caption{Host \(\leftrightarrow\) DDR transfers. Top: rate per transfer size, from every GEMM run (A and B
+    uploads, C downloads). Small transfers pay the per-chunk start and stop; above \(\sim\)8\,MB the rate is flat.
+    Bottom: time per 2\,MB chunk by phase, from \code{ddr\_dma\_test}. The red part is the driver's fixed 1\,ms stop,
+    gone from C2H after the fix.}
+  \label{fig:dma}
+\end{figure}

@@ -1,0 +1,11 @@
+% Host <-> DDR rate per transfer size, from the GEMM runs.
+\begin{tikzpicture}
+\begin{axis}[rpt, height=5.8cm, xmode=log, log basis x=2, xmin=0.1, xmax=600, ymin=0, ymax=1.9,
+    xtick={0.125,0.5,2,8,32,128,512}, xticklabels={128\,K,512\,K,2\,M,8\,M,32\,M,128\,M,512\,M},
+    xlabel={bytes per transfer}, ylabel={GB/s}, legend style={at={(0.02,0.98)}, anchor=north west}]
+  \draw[cGrey, densely dashed] (axis cs:0.1,1.679) -- (axis cs:600,1.679) node[pos=0.98, below left, font=\sffamily\tiny, text=cGrey] {raw DMA loopback 1.68};
+  \addplot[l3, mark=*]        table[x=mib, y=gbps] {data/dma_c2h.csv};     \addlegendentry{C2H (C), writer enabled once per read}
+  \addplot[l7, mark=o, densely dotted] table[x=mib, y=gbps] {data/dma_c2h_old.csv}; \addlegendentry{C2H before that fix}
+  \addplot[l1, mark=square*]  table[x=mib, y=gbps] {data/dma_h2c.csv};     \addlegendentry{H2C (A, B)}
+\end{axis}
+\end{tikzpicture}

@@ -1,0 +1,227 @@
+\section{Evaluation}
+\label{sec:eval}
+
+\subsection{Method}
+All numbers come from the result records of the campaigns (\file{results/}, git-ignored); the plot data in
+\file{docs/report/data/} is extracted from them by \file{docs/report/tools/extract\_data.py}. Unless noted:
+\begin{itemize}
+  \item \textbf{GFLOP/s} means \(2NKM\) divided by the kernel time, i.e.\ cycles counted on the card divided by the
+        accel clock measured on the card. End-to-end times include the uploads and the download.
+  \item Every row is verified (\cref{sec:host}); all 206 rows of the twelve campaigns passed. The memory-map campaign and the first build's
+        bring-up checked every element; the other campaigns used the sampled check (4098 elements per run).
+  \item Repetitions of the same run agree to four or five significant digits (the kernel and the DDR controller are
+        deterministic for a given size), so the plots show single values. Rebuilding and rerunning the best 200\,MHz
+        configuration reproduced \gflops{98.59} exactly.
+  \item A build that misses timing on any clock is not measured.
+\end{itemize}
+
+\subsection{Overview}
+\Cref{fig:progress} shows the best result after each step of the exploration against the peak of that configuration.
+Two kinds of steps alternate: \emph{adding compute} (more PEs, a higher clock) raises the peak, and \emph{removing
+waiting} (transposed A, larger tiles) brings the measurement closer to it. \Cref{fig:stalls} shows the second kind
+through the read-wait counters: the share of kernel cycles in which a read channel was ready but had no data. It is an
+upper bound on memory stalls (the kernel can often go on from buffered data), but it tracks the efficiency closely.
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/progress}
+  \caption{Best kernel GFLOP/s after each exploration step (over all sizes measured for that build), with the peak
+    \(2P_NP_Mf\) of the configuration.}
+  \label{fig:progress}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/stalls}
+  \caption{Read waits along the exploration, at each build's largest measured size. The A path dominated until A was
+    sent transposed; larger tiles then cut both A and B waits.}
+  \label{fig:stalls}
+\end{figure}
+
+\subsection{Processing elements}
+\Cref{fig:pe_sweep} (tile 256\x256, 200\,MHz): PE 8\x8 reaches \SI{96}{\percent} of its peak and PE 16\x8
+\SI{92}{\percent}, but PE 32\x8 only \SI{84.5}{\percent} at \(1024^3\) and \SI{80.4}{\percent} at \(2048^3\). The
+\(1000\times1008\times1040\) shape is lower for all three because the kernel computes whole tiles
+(\cref{sec:eval:sizes}). For PE 32\x8, the A read channel waited in \SI{93}{\percent} of the kernel cycles: the
+on-chip transpose of A reads single 64-byte words, and with four times the PEs of PE 8\x8 the kernel needs A four times
+as fast.
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/pe_sweep}
+  \caption{PE sweep, tile 256\x256, 200\,MHz: percentage of the peak per matrix size.}
+  \label{fig:pe_sweep}
+\end{figure}
+
+\subsection{Data layout: transposed A}
+\label{sec:eval:layout}
+With \code{transposed\_a} the host sends \(A^\mathsf{T}\), and the kernel reads A in 16-beat bursts: at \(2048^3\)
+the number of A read bursts drops from 2\,097\,152 to 131\,072. \Cref{fig:transposed}: PE 32\x8 goes from 82.3 to
+\gflops{87.5} and its A waits from 93 to \SI{16}{\percent}, the same level as B. PE 16\x8 does not change (47.19): its
+A waits fell from 53 to \SI{9}{\percent}, but they were mostly hidden by buffering. The transpose costs nothing on the
+card and is done once on the host, so transposed A is used for all later PE 32\x8 builds.
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/transposed}
+  \caption{Transposed A at \(2048^3\), tile 256\x256: GFLOP/s (left) and A read waits (right).}
+  \label{fig:transposed}
+\end{figure}
+
+\subsection{Memory tiles}
+With A and B waiting equally, the remaining loss is the per-tile work: every memory tile reloads its strips of A and
+B and drains its C values. Larger tiles mean fewer tiles (\cref{fig:tiling}). \Cref{fig:tiles}: from 256\x256 to
+1024\x512, PE 32\x8 goes from 88.3 to \gflops{98.2} at \(4096^3\) (\gflops{98.6} at \(8192^3\), \SI{96.3}{\percent}),
+and the waits fall from \SI{16.6}{\percent} to \SI{3.8}{\percent} (A) and \SI{2.8}{\percent} (B). The N tile matters
+more than the M tile: 512\x256 reaches 94.4 but 256\x512 only 89.4, because a larger N tile means fewer passes over B.
+
+The cost is BRAM only: LUTs and DSPs stay the same, while the kernel's BRAM36 count goes from 285 to 509 and the
+design from 414 to 654.5 BRAM tiles (\SI{69}{\percent}). A 1024\x1024 tile needs 2070 BRAM18 by the HLS estimate,
+more than the 1910 on the device, so 1024\x512 is the largest tile for PE 32\x8.
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/tiles}
+  \caption{Memory tile sweep for PE 32\x8 with transposed A, 200\,MHz. Left: GFLOP/s at three sizes (8192\(^3\) was
+    measured for the two largest tiles). Right: read waits at \(4096^3\).}
+  \label{fig:tiles}
+\end{figure}
+
+\subsection{Matrix sizes}
+\label{sec:eval:sizes}
+The size sweep ran 45 shapes on the best 200\,MHz build (\cref{fig:size}). Two effects explain all of it:
+\begin{itemize}
+  \item \textbf{Whole tiles.} With \(T_N = 1024\), a matrix with \(N = 256\) runs at a quarter of the speed of one
+        with \(N \ge 1024\); with \(T_M = 512\), \(M = 256\) halves it. \(N = M = K = 256\) reaches only 11
+        GFLOP/s. For small matrices a smaller-tile build is faster: the 256\x256 build reaches 84 GFLOP/s at
+        \(512^3\), while the 1024\x512 build reaches 48 for \(N = 512\) even with \(K = M = 1024\).
+  \item \textbf{Fill and drain per tile}, amortised over \(K\): with \(K=256\) the kernel reaches 87.5, with
+        \(K = 4096\) 98.2 GFLOP/s.
+\end{itemize}
+End to end (dashed), the transfers cost a lot below \(\sim\)\(1024^3\), where the kernel takes only milliseconds; at
+\(4096^3\) and above the kernel dominates (\cref{sec:eval:e2e}).
+
+\begin{figure}[ht]
+  \centering
+  \begin{subfigure}[b]{\linewidth}\centering\input{plots/size_lines}\end{subfigure}\\[3mm]
+  \begin{subfigure}[b]{\linewidth}\centering\input{plots/size_heat}\end{subfigure}
+  \caption{Size sweep on PE 32\x8, transposed A, tile 1024\x512, 200\,MHz. Top: kernel GFLOP/s against \(N\) for
+    several \((K, M)\), and end to end for \(K = M = 4096\). Bottom: GFLOP/s over \(N\) and \(M\) at \(K = 4096\);
+    the steps are the whole-tile effect.}
+  \label{fig:size}
+\end{figure}
+
+\subsection{Roofline}
+\label{sec:eval:roofline}
+\Cref{fig:roofline} places every measured build in a roofline model~\cite{roofline}. The intensity is that of one
+memory tile (A and B traffic; C is written once), the memory roof one DDR3 channel at the measured \SI{7.2}{GB/s}.
+Even the smallest tile (\(128^2\), 32 flop/byte) needs only \SI{0.8}{GB/s} at PE 8\x8's peak, and the best build
+needs about \SI{0.65}{GB/s} at \gflops{110.9}. Every point is far to the right of the ridge, so bandwidth is never
+the limit; what kept the kernel from its peak was latency and the per-tile overheads, which is why
+bursts and larger tiles helped and why the memory map hardly matters (\cref{sec:eval:maps}).
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/roofline}
+  \caption{Roofline: tile intensity against measured GFLOP/s for every build, with the compute peaks of 25.6, 51.2,
+    102.4 and 115.2\,GFLOP/s and one DDR3 channel as the memory roof.}
+  \label{fig:roofline}
+\end{figure}
+
+\subsection{Clock frequency and Vivado strategies}
+\label{sec:eval:timing}
+\paragraph{Clock.} The HLS clock estimate (4.24\,ns for PE 8\x8, 4.21\,ns for PE 32\x8) does not change between
+200 and 250\,MHz targets, but HLS pipelines deeper for a tighter target: +7.2\,k flip-flops for PE 8\x8 at 250\,MHz,
++18.6\,k for PE 32\x8 at 225\,MHz. Whether that is enough only a routed build shows (\cref{fig:clock}):
+\begin{itemize}
+  \item \textbf{PE 8\x8 closes at 250\,MHz} (accel slack +0.049\,ns) and reaches \gflops{29.0}. Throughput scales
+        almost linearly with the clock; kernel cycles grow by \SI{1.5}{\percent} from 150 to 250\,MHz because the DDR
+        controllers stay at 125\,MHz.
+  \item \textbf{PE 32\x8 misses 225\,MHz by 41\,ps} with the default strategy (34 endpoints). The failing paths are
+        routing: the 256-bit C-pipe FIFOs between neighbouring PEs, whose write enable fans out to 256 shift-register
+        bits over 4.3--4.5\,ns of wire behind a single LUT, and the dataflow control's ready/reset fan-out.
+  \item \textbf{At 250\,MHz PE 32\x8 misses by 0.78\,ns} (8455 endpoints) on the dataflow control paths (7 logic
+        levels). Going there would need kernel changes, e.g.\ registering the control fan-out.
+\end{itemize}
+
+\paragraph{Presets.} \Cref{fig:presets}: the presets do not change size or cycles, only closure. At 225\,MHz the
+\code{explore} preset closes PE 32\x8 with +0.007\,ns and \code{aggressive} with +0.049\,ns; its physical
+optimisation replicates exactly the high-fanout drivers that failed. The result is \textbf{\gflops{110.9} at
+\(8192^3\)}, \SI{96.2}{\percent} of the peak, \SI{12.4}{\percent} faster than at 200\,MHz, with the same kernel cycle
+count (2.2316 vs 2.2304\,G), so the kernel is still compute-bound at 225\,MHz. Both preset builds give identical
+results. \code{aggressive} costs about \SI{9}{\percent} more build time and gave the most margin on every clock in
+both experiments, but one build per preset is a hint, not a ranking.
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/clock}
+  \caption{Left: PE 8\x8 GFLOP/s against the accel clock (the 200\,MHz value is from the \code{explore} build; the
+    default-preset build missed timing on the PCIe path). Right: routed slack of the accel clock for both
+    configurations and of the PCIe core clock, default preset.}
+  \label{fig:clock}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/presets}
+  \caption{Routed slack per clock for the three Vivado presets, in the two experiments.}
+  \label{fig:presets}
+\end{figure}
+
+\subsection{Timing margin and the PCIe core path}
+\Cref{fig:slack} shows the slack of the accel clock and of the PCIe core clock in all 20 builds. The accel clock
+failed only where the clock was pushed. The PCIe core clock (500\,MHz in the hard block for Gen2 x8) has between
+\(-0.009\) and \(+0.076\)\,ns in every build, whatever the kernel: its critical path goes from the \code{PCIE\_2\_1}
+block to its own receive-buffer BRAM, which the Xilinx IP places next to it, with no logic in between (1.375\,ns of
+the 2\,ns period). It failed alone once (PE 8\x8, 200\,MHz, default preset); that build was not used. Configuring the
+PHY as Gen2 x4, the width the development PC's slot provides, would halve that clock; it is listed as an open decision.
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/slack}
+  \caption{Routed slack (WNS) of the PCIe core clock and of the accel clock in every build. The PCIe path is
+    marginal in all of them; the accel clock fails only at 225\,MHz (default preset) and 250\,MHz for PE 32\x8.}
+  \label{fig:slack}
+\end{figure}
+
+\subsection{Resources}
+\Cref{fig:resources} splits the utilisation of the best build into the kernel and the rest of the SoC. DSPs and
+BRAM are the scarce resources: each multiply-add uses five DSP48E1 slices (three for the multiplier, two for the adder),
+so the 256 MACs of PE 32\x8 need 1280 of the 1320 DSPs in the kernel; and the C tile fills most of the kernel's 543.5
+BRAM tiles. A PE 64\x8 array would need about 2600 DSPs with this mapping, more than the 1920 on the device.
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/resources}
+  \caption{Utilisation of the best build (PE 32\x8, tile 1024\x512, 225\,MHz, \code{aggressive}).}
+  \label{fig:resources}
+\end{figure}
+
+\subsection{Memory maps}
+\label{sec:eval:maps}
+Two other maps were built and verified (PE 8\x8, every element checked): all three matrices on CH0, and A on CH1
+with B and C on CH0 (\cref{fig:memmap_plot}). Sharing a channel between A and B costs \SI{0.3}{\percent}: B's read
+latency rises from 39 to 46 cycles and its waits from 15 to \SI{18}{\percent}. At PE 8\x8 the kernel needs well under
+\SI{1}{GB/s}, so this confirms the roofline picture; the map should matter more for PE 32\x8, which was not measured.
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/memmap}
+  \caption{Memory maps (A, B, C on channel 0 or 1), PE 8\x8, tile 128, 200\,MHz, at \(2048^3\).}
+  \label{fig:memmap_plot}
+\end{figure}
+
+\subsection{Transfers and end-to-end time}
+\label{sec:eval:e2e}
+At \(8192^3\) the host uploads 512\,MB (A and B) and downloads 256\,MB (C). With \SI{0.82}{GB/s} up and
+\SI{1.49}{GB/s} down (\cref{sec:pcie:rates}) that takes 0.83\,s next to 9.92\,s of kernel time: the kernel is
+\SI{92}{\percent} of the 10.77\,s end to end (\cref{fig:e2e}). At \(2048^3\) it is only \SI{74}{\percent}, and the
+upload alone is \SI{19}{\percent}. The H2C stop delay (\cref{sec:pcie:rates}) is therefore the next thing to fix for
+mid-size matrices.
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/e2e}
+  \caption{Where the end-to-end time goes on the best build.}
+  \label{fig:e2e}
+\end{figure}

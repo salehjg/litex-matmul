@@ -1,0 +1,74 @@
+\section{Design-space exploration}
+\label{sec:dse}
+
+\subsection{The DSE driver}
+A \emph{campaign} (\file{configs/dse/*.json}, \cref{lst:campaign}) names a base configuration, a build grid of
+dotted configuration keys with value lists, a runtime grid (matrix sizes as lists or explicit triples, repetitions,
+warm-up, verification mode) and the stages to run. \code{scripts/gemm\_dse.py} (\cref{fig:dse}):
+\begin{enumerate}
+  \item expands the full cross product of the build grid (values can be objects, e.g.\ whole memory maps) and names
+        each point from its parameters;
+  \item validates every point and records invalid ones with the reason, without running any tool;
+  \item \textbf{hls} stage: runs HLS for all points in parallel, as many jobs as \(\min(\text{cores}/4,
+        \text{free GB}/3)\) allows, and records the estimates (clock, LUT, FF, DSP, BRAM);
+  \item \textbf{build} stage: runs LiteX and Vivado for one point at a time; a point whose routed design misses timing
+        on \emph{any} clock is recorded as \code{timing\_failed} and is never loaded onto the card;
+  \item \textbf{run} stage: for each point with timing met, programs the card and brings it up (JTAG, rescan,
+        driver, DDR calibration, host tools), then runs every size of the runtime grid.
+\end{enumerate}
+Results go to \file{results/<campaign>/}: \code{builds.jsonl} (one row per point and stage), \code{runs.jsonl} (one row
+per point, size and repetition, with the full configuration, the hashes and the git state), regenerated CSV files with
+flattened columns, and \code{invocations.jsonl} (every invocation of the campaign). \code{--resume} skips stages and
+sizes already recorded as \code{ok}, and does not even reprogram the card for a point with nothing left to run; it was
+tested by deleting rows from a finished campaign and resuming on the card.
+
+\lstinputlisting[language={}, caption={Campaign \file{configs/dse/pe32\_ta\_225\_presets.json}: two Vivado presets
+  at 225\,MHz, three sizes.}, label={lst:campaign}, basicstyle=\ttfamily\scriptsize]{../../configs/dse/pe32_ta_225_presets.json}
+
+\begin{figure}[t]
+  \centering
+  \resizebox{0.95\linewidth}{!}{\input{figures/dse}}
+  \caption{The DSE driver and the design loop around it. Each campaign's analysis picks the next campaign.}
+  \label{fig:dse}
+\end{figure}
+
+\subsection{The design loop}
+The driver runs a campaign without supervision; choosing the next campaign is the engineer's job, guided by the
+counters and the timing reports. \Cref{fig:journey} shows how the exploration actually went, and
+\cref{tab:campaigns} lists every campaign with its size and duration, taken from the result records. Builds are shared
+between campaigns: the same point appears in several of them but is built once.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/journey}}
+  \caption{The exploration as it happened. Each campaign's finding decided the next knob; badges show the best
+    result of the campaign (kernel GFLOP/s).}
+  \label{fig:journey}
+\end{figure}
+
+\begin{table}[t]
+\centering\small
+\caption{All campaigns, 23--24 November 2026 (\file{docs/report/data/campaigns.csv}). Points: design points;
+  builds: new Vivado runs (reused builds not counted); runs: verified result rows.}
+\label{tab:campaigns}
+\begin{tabular}{@{}lllrrrl@{}}
+\toprule
+Campaign & Time & Stages & Points & Builds & Runs & Question \\
+\midrule
+\code{hls\_pe\_tile} & 17:08--17:10 & hls & 12 & -- & -- & HLS estimates over PEs and tiles \\
+\code{pe\_sweep} & 17:11--18:05 & all & 3 & 3 & 24 & how does throughput scale with \(P_N\)? \\
+\code{transposed\_a} & 18:08--18:50 & all & 2 & 2 & 16 & does reading A in bursts help? \\
+\code{tiles\_pe32\_ta} & 18:51--20:10 & all & 4 & 3 & 24 & which memory tile? \\
+\code{pe32\_ta\_next\_hls} & 20:11--20:14 & hls & 8 & -- & -- & do larger tiles fit? 225\,MHz? \\
+\code{tiles\_pe32\_ta\_1024} & 20:15--20:43 & all & 2 & 1 & 12 & tile 1024\x512 \\
+\code{memory\_maps} & 20:47--21:12 & all & 2 & 2 & 16 & other channel assignments \\
+\code{size\_sweep} & 21:13--21:14 & build, run & 1 & -- & 90 & 45 matrix shapes on the best build \\
+\code{clock\_sweep} & 21:15--21:54 & all & 3 & 3 & 4 & PE 8\x8 at 150/200/250\,MHz \\
+\code{vivado\_preset\_sweep} & 21:54--22:21 & build, run & 3 & 2 & 2 & presets at 200\,MHz \\
+\code{clock\_pe32\_ta} & 22:26--23:30 & all & 3 & 2 & 6 & best config at 200/225/250\,MHz \\
+\code{pe32\_ta\_225\_presets} & 23:31--00:41 & build, run & 2 & 2 & 12 & presets at 225\,MHz \\
+\midrule
+\multicolumn{3}{@{}l}{total} & & 20 & 206 & \\
+\bottomrule
+\end{tabular}
+\end{table}

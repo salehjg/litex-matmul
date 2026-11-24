@@ -1,0 +1,11 @@
+% Time per 2 MB chunk by phase (ddr_dma_test, 64 MB, both channels).
+\begin{tikzpicture}
+\begin{axis}[rpt, xbar stacked, enlarge x limits=false, width=0.84\linewidth, bar width=10pt, height=4.0cm, xmin=0, xmax=2.9, xlabel={ms per 2\,MB chunk},
+    ytick={0,1,2}, yticklabels={H2C, C2H before fix, C2H after fix}, y dir=reverse, enlarge y limits=0.3,
+    legend style={at={(0.5,1.03)}, anchor=south, legend columns=4}, grid=none, xmajorgrids]
+  \addplot[s7] table[y=x, x=copy]  {data/manual_dma_phases.csv}; \addlegendentry{ring copy}
+  \addplot[s1] table[y=x, x=start] {data/manual_dma_phases.csv}; \addlegendentry{start}
+  \addplot[s3] table[y=x, x=wait]  {data/manual_dma_phases.csv}; \addlegendentry{data moving}
+  \addplot[s4] table[y=x, x=stop]  {data/manual_dma_phases.csv}; \addlegendentry{stop (driver: 1\,ms delay)}
+\end{axis}
+\end{tikzpicture}

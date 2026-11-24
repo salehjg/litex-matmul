@@ -1,0 +1,11 @@
+% Memory maps for PE 8x8, tile 128, 200 MHz: GFLOP/s and B read latency at 2048^3.
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1, horizontal sep=1.6cm}, rbar, ybar=4pt, width=0.5\linewidth, height=4.6cm,
+    /pgf/bar width=13pt, xtick=data, xticklabels={{A0 B1 C1}, {A0 B0 C0}, {A1 B0 C0}}, enlarge x limits=0.3,
+    nodes near coords, nodes near coords style={font=\sffamily\scriptsize, /pgf/number format/.cd, fixed, precision=2}]
+  \nextgroupplot[ylabel={GFLOP/s at 2048\(^3\)}, ymin=23.2, ymax=23.5]
+    \addplot[s1] table[x expr=\coordindex, y=g2048] {data/memmap.csv};
+  \nextgroupplot[ylabel={B read latency (cycles)}, ymin=0, ymax=55]
+    \addplot[s2] table[x expr=\coordindex, y=blat2048] {data/memmap.csv};
+\end{groupplot}
+\end{tikzpicture}

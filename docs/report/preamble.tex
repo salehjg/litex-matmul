@@ -12,6 +12,7 @@
 \usepackage{booktabs,tabularx,array,multirow}
 \usepackage[detect-all]{siunitx}
 \usepackage{caption,subcaption}
+\usepackage[section]{placeins}  % floats stay in their section
 \usepackage{enumitem}
 \usepackage{fancyhdr}
 \usepackage{titlesec}
@@ -56,6 +57,10 @@
 \captionsetup{font=small,labelfont={bf,sf},format=hang}
 \setlist{itemsep=2pt,topsep=4pt}
 \setlength{\parskip}{3pt}
+\setlength{\emergencystretch}{2.5em}  % long monospace names in running text
+% Let more floats share a page (the evaluation has many plots).
+\renewcommand{\topfraction}{0.9}\renewcommand{\bottomfraction}{0.8}\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.75}\setcounter{topnumber}{3}\setcounter{totalnumber}{5}
 
 \lstset{basicstyle=\ttfamily\small,columns=fullflexible,keepspaces=true,frame=single,framerule=0.3pt,
   rulecolor=\color{black!25},backgroundcolor=\color{black!3},xleftmargin=4pt,xrightmargin=4pt,
@@ -121,5 +126,12 @@
   s5/.style={draw=cPurple, fill=cPurple!70, mark options={fill=cPurple}},
   s6/.style={draw=cSky,    fill=cSky!70,    mark options={fill=cSky}},
   s7/.style={draw=cGrey,   fill=cGrey!50,   mark options={fill=cGrey}},
+  l1/.style={draw=cBlue,   thick, mark options={fill=cBlue,   draw=cBlue}},
+  l2/.style={draw=cOrange, thick, mark options={fill=cOrange, draw=cOrange}},
+  l3/.style={draw=cGreen,  thick, mark options={fill=cGreen,  draw=cGreen}},
+  l4/.style={draw=cRed,    thick, mark options={fill=cRed,    draw=cRed}},
+  l5/.style={draw=cPurple, thick, mark options={fill=cPurple, draw=cPurple}},
+  l6/.style={draw=cSky,    thick, mark options={fill=cSky,    draw=cSky}},
+  l7/.style={draw=cGrey,   thick, mark options={fill=cGrey,   draw=cGrey}},
 }
 \pgfplotstableset{col sep=comma, comment chars={\#}}

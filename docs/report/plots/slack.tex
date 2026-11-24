@@ -1,0 +1,11 @@
+% Routed WNS of the PCIe core clock (500 MHz) and of the accel clock in every build.
+\begin{tikzpicture}
+\begin{axis}[rpt, ybar=0pt, bar width=3.5pt, height=6.0cm, ylabel={WNS (ns)}, ymin=-0.1, ymax=0.25,
+    xtick=data, xticklabels from table={data/builds.csv}{label},
+    x tick label style={rotate=60, anchor=north east, font=\sffamily\tiny}, enlarge x limits=0.03,
+    legend style={at={(0.98,0.98)}, anchor=north east}, restrict y to domain=-0.1:0.3]
+  \addplot[s3] table[x expr=\coordindex, y=wns_pcie]  {data/builds.csv}; \addlegendentry{PCIe core 500\,MHz}
+  \addplot[s2] table[x expr=\coordindex, y=wns_accel] {data/builds.csv}; \addlegendentry{accel (bars below \(-0.1\) clipped)}
+  \draw[black!70] (axis cs:-0.5,0) -- (axis cs:19.5,0);
+\end{axis}
+\end{tikzpicture}

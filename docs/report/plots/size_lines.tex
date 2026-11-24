@@ -1,0 +1,15 @@
+% Size sweep on the best 200 MHz build (tile 1024x512): kernel GFLOP/s against N for each (K, M).
+\begin{tikzpicture}
+\begin{axis}[rpt, height=6.3cm, xmode=log, log basis x=2, xtick={256,512,1024,2048,4096},
+    xticklabels={256,512,1024,2048,4096}, xlabel={\(N\)}, ylabel={GFLOP/s (kernel)}, ymin=0, ymax=105,
+    enlarge x limits=0.04, legend columns=3, legend style={at={(0.5,1.02)}, anchor=south}]
+  \addplot[l1, mark=*]        table[x=n, y=k4096m4096] {data/size_kernel.csv}; \addlegendentry{\(K\)=4096, \(M\)=4096}
+  \addplot[l3, mark=square*]  table[x=n, y=k1024m1024] {data/size_kernel.csv}; \addlegendentry{\(K\)=1024, \(M\)=1024}
+  \addplot[l2, mark=triangle*]table[x=n, y=k256m1024]  {data/size_kernel.csv}; \addlegendentry{\(K\)=256, \(M\)=1024}
+  \addplot[l5, mark=diamond*] table[x=n, y=k4096m256]  {data/size_kernel.csv}; \addlegendentry{\(K\)=4096, \(M\)=256}
+  \addplot[l4, mark=pentagon*]table[x=n, y=k256m256]   {data/size_kernel.csv}; \addlegendentry{\(K\)=256, \(M\)=256}
+  \addplot[l1, densely dashed, mark=o] table[x=n, y=k4096m4096] {data/size_e2e.csv}; \addlegendentry{end to end, 4096/4096}
+  \draw[black!40, densely dotted] (axis cs:1024,0) -- (axis cs:1024,105) node[pos=0.04, right, font=\sffamily\tiny, text=black!55] {\(N = T_N\)};
+  \draw[densely dashed, cRed] (axis cs:256,102.4) -- (axis cs:4096,102.4) node[pos=0.03, above, font=\sffamily\tiny, text=cRed, anchor=south west] {peak 102.4};
+\end{axis}
+\end{tikzpicture}

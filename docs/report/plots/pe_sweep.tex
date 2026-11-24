@@ -1,0 +1,11 @@
+% PE sweep: % of peak per size, tile 256, 200 MHz.
+\begin{tikzpicture}
+\begin{axis}[rbar, bar width=9pt, height=5.6cm, ymin=0, ymax=114, ylabel={\% of peak},
+    xtick=data, xticklabels={512\(^3\), 1000\x1008\x1040, 1024\(^3\), 2048\(^3\)},
+    nodes near coords, nodes near coords style={font=\sffamily\tiny, rotate=90, anchor=west, /pgf/number format/.cd, fixed, precision=1},
+    legend style={at={(0.5,1.02)}, anchor=south, legend columns=3}]
+  \addplot[s1] table[x expr=\coordindex, y=pe8pct]  {data/pe_sweep.csv}; \addlegendentry{PE 8\x8 (25.6 GFLOP/s peak)}
+  \addplot[s2] table[x expr=\coordindex, y=pe16pct] {data/pe_sweep.csv}; \addlegendentry{PE 16\x8 (51.2)}
+  \addplot[s3] table[x expr=\coordindex, y=pe32pct] {data/pe_sweep.csv}; \addlegendentry{PE 32\x8 (102.4)}
+\end{axis}
+\end{tikzpicture}

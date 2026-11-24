@@ -1,0 +1,59 @@
+\section{All builds}
+\label{app:builds}
+\Cref{tab:builds} lists every Vivado build of the campaigns. WNS values are routed setup slack in ns, LUT and FF
+are in thousands, and min is the Vivado build time in minutes. GFLOP/s is the best verified result of the build
+(-- where it was not run because timing failed). Source: \file{data/builds\_table.csv}, extracted from each build
+directory's summary and timing report.
+
+\begin{table}[ht]
+\centering\scriptsize\setlength{\tabcolsep}{3pt}
+\caption{Every build: configuration, timing per clock, resources and best result.}
+\label{tab:builds}
+\pgfplotstabletypeset[
+  every column/.style={string type, column type=r},
+  columns/label/.style={string type, column name={Build (\(P_N{\times}P_M\), tile, MHz, options)}, column type=l},
+  columns/met/.style={string type, column name={met}, column type=c},
+  columns/wns_accel/.style={column name={WNS accel}},
+  columns/wns_pcie/.style={column name={WNS PCIe}},
+  columns/wns_sys/.style={column name={WNS sys}},
+  columns/lut_k/.style={column name={LUT}},
+  columns/ff_k/.style={column name={FF}},
+  columns/bram/.style={column name={BRAM}},
+  columns/dsp/.style={column name={DSP}},
+  columns/build_min/.style={column name={min}},
+  columns/gflops/.style={column name={GFLOP/s}},
+  columns/pct/.style={column name={\% peak}},
+  every head row/.style={before row=\toprule, after row=\midrule},
+  every last row/.style={after row=\bottomrule},
+]{data/builds_table.csv}
+\end{table}
+
+\section{Reproducing the results}
+\label{app:repro}
+\begin{lstlisting}[language=bash, caption={From a clean checkout (Vivado/Vitis 2026.1, the card in a PCIe slot).}]
+python3 setup.litex.du-pcb.py                      # LiteX 2026.08, venv, tool paths
+git submodule update --init --recursive            # gemm_hls + hlslib (reference only)
+sudo scripts/setup_permissions.sh                  # once: password-less driver and rescan
+
+# one configuration: build, load, run
+.venv/bin/python scripts/gemm_build.py configs/gemm/pe32x8_ta_t1024x512_225mhz.json
+.venv/bin/python scripts/gemm_run.py build/gemm/soc/<build_id> --program \
+        --sizes 4096x4096x4096 8192x8192x8192 --reps 2 --verify sampled
+
+# a whole campaign (builds are reused across campaigns), then this report
+.venv/bin/python scripts/gemm_dse.py configs/dse/pe32_ta_225_presets.json
+docs/report/build.sh
+\end{lstlisting}
+
+\paragraph{Where things are.}
+\begin{itemize}
+  \item \file{kernels/gemm/}: the adapted HLS kernel (\file{ORIGIN.md} lists every change against upstream)
+  \item \file{hw/gemm/}: SoC, DMA bridge, kernel wrapper, AXI converters and counters, simulations
+  \item \file{boards/dupcb/}: base SoC, DDR3 PHY and calibration, PCIe PHY fix
+  \item \file{tcl/}: HLS flow, Vivado hooks, JTAG programming
+  \item \file{sw/gemm\_host/}: C++ host library, \code{gemm\_runner}, \code{ddr\_dma\_test}
+  \item \file{flow/gemmflow/} and \file{flow/tests/}: the Python flow and its unit tests
+  \item \file{scripts/}: \code{gemm\_build.py}, \code{gemm\_run.py}, \code{gemm\_dse.py} and the board scripts
+  \item \file{configs/gemm/}, \file{configs/dse/}: build configurations and campaigns
+  \item \file{docs/notes1/}: plan and progress log (a dated record of every step); \file{docs/report/}: this report
+\end{itemize}

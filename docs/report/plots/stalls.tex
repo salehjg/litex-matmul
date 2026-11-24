@@ -1,0 +1,11 @@
+% Read-wait shares across the exploration steps, at each build's largest size.
+\begin{tikzpicture}
+\begin{axis}[rbar, bar width=6pt, height=5.4cm, ymax=100, ylabel={\% of kernel cycles},
+    xtick=data, x tick label style={rotate=28, anchor=north east, font=\sffamily\scriptsize},
+    xticklabels={{PE 8\x8, tile 128}, {PE 8\x8, tile 256}, {PE 16\x8, tile 256}, {PE 32\x8, tile 256},
+                 {+ transposed A}, {+ tile 512\x512}, {+ tile 1024\x512}, {+ 225\,MHz}},
+    legend style={at={(0.98,0.98)}, anchor=north east}]
+  \addplot[s4] table[x expr=\coordindex, y=await] {data/stalls.csv}; \addlegendentry{A read channel waiting for data}
+  \addplot[s2] table[x expr=\coordindex, y=bwait] {data/stalls.csv}; \addlegendentry{B read channel waiting for data}
+\end{axis}
+\end{tikzpicture}

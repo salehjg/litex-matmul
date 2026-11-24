@@ -1,0 +1,17 @@
+\begin{abstract}
+\noindent
+This report describes a complete FPGA matrix-multiplication accelerator for the DU-PCB-001-003 card
+(Kintex-7 480T, PCIe Gen2, two DDR3 channels): the hardware, the software around it, the build flow and the
+design-space exploration (DSE) that tuned it. A host program sends \(A\) and \(B\) over PCIe DMA into the two DDR3
+channels; an HLS kernel adapted from \code{gemm\_hls}~\cite{gemmhls} computes \(C = A\cdot B\) in float32; the host
+reads \(C\) back together with cycle and memory-stall counters. Everything is built from one JSON file by a Python
+flow (HLS, LiteX, Vivado, host tools), and a DSE driver builds, loads and benchmarks whole grids of configurations
+unattended, writing traceable JSONL/CSV results.
+
+Twelve campaigns (20 Vivado builds, 206 verified run rows) took the kernel from \gflops{23.4} to
+\textbf{\gflops{110.9}} at \(8192^3\), \SI{96.2}{\percent} of the \gflops{115.2} peak of a 32\x8 processing-element
+array at \SI{225}{MHz}. The steps that mattered were sending \(A\) transposed (the kernel read \(A\) one word at a
+time), larger memory tiles (until BRAM ran out) and a higher clock that only Vivado's \code{explore}/\code{aggressive}
+presets closed. Host transfers run at \SI{0.82}{GB/s} (host to card) and \SI{1.49}{GB/s} (card to host); at
+\(8192^3\) the kernel is \SI{92}{\percent} of the end-to-end time.
+\end{abstract}

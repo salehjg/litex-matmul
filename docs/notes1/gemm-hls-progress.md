@@ -909,6 +909,17 @@ in the plan). So the DSE can afford many builds.
       recorded so far (whole-design LUT/FF/BRAM/DSP and timing were right). Columns are now matched by header name,
       with a unit test, and all build summaries were regenerated (`gemm_build.py --report-only`). The campaign
       `builds.jsonl` files are append-only and keep the wrong kernel_* values: use the build dirs' `reports/summary.json`.
+- [x] **LaTeX report** (2026-11-24 02:20, on request): `docs/report/` (23 pages). Sections: system, clocks, PCIe +
+      DMA + Linux driver, DDR3 channels + calibration + memory map, kernel (tiling, dataflow, changes, SoC integration),
+      host software (run sequence), build flow, DSE (driver, design loop, campaign table), evaluation (16 pgfplots
+      plots: progress, PE sweep, transposed A, tiles, waits, size sweep + heatmap, roofline, clock, presets, slack of
+      every build, resources, memory maps, DMA rate per size and per phase, end-to-end split), lessons/open points,
+      appendix with every build. 12 TikZ diagrams in `figures/`, plots in `plots/`. `tools/extract_data.py` turns
+      `results/` + build reports into `data/*.csv` (committed so the report builds from a clean checkout);
+      `data/manual_dma_phases.csv` holds the per-chunk DMA phases measured with `ddr_dma_test` on 2026-11-24 (C2H after
+      the fix: copy 0.20, start 0.005, wait 1.17, stop 0.031 ms per 2 MB). `build.sh` (refresh data, latexmk into
+      `build/`, copy `report.pdf`; `--no-data`, `--clean`); PDF and `build/` git-ignored. Builds with 0 warnings and
+      no overfull boxes.
 - [x] Unit tests for the Python flow (2026-11-24 00:55): `flow/tests/test_gemmflow.py`, stdlib `unittest`, 20 tests in
       < 0.1 s, no tools or card. Covered: golden build ids of every `configs/gemm/*.json` (each matches a build dir on
       disk; a hashing or default change would silently stop all reuse), Vivado knobs leave the HLS hash alone, auto
@@ -1010,6 +1021,11 @@ in the plan). So the DSE can afford many builds.
   `gemm_runner --multiples N,K,M`, which rejects other sizes before any transfer.
 
 ## Log
+
+### 2026-11-24 02:20 — report
+- LaTeX report in `docs/report/` with TikZ architecture diagrams and pgfplots plots of every campaign; one script
+  builds it cleanly. Found on the way: `kernel_*` utilisation fields were parsed one column off (fixed, summaries
+  regenerated).
 
 ### 2026-11-24 00:41 — 225 MHz closes: 110.9 GFLOP/s
 - PE 32×8 tA tile 1024×512 meets timing at 225 MHz with the `aggressive` (+0.049 ns) and `explore` (+0.007 ns) presets

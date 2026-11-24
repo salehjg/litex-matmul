@@ -1,0 +1,78 @@
+\section{Build flow and traceability}
+\label{sec:flow}
+
+\subsection{One JSON file per build}
+Every build starts from a JSON file in \file{configs/gemm/}. \Cref{lst:config} is the best configuration. The
+\code{kernel} section holds every \code{gemm\_hls} parameter; \code{memory\_map} wires the matrices to channels;
+\code{clocks} sets the accel clock and the HLS clock uncertainty; \code{vivado} picks a preset and lets any directive
+be overridden; \code{max\_threads: auto} gives Vivado \(\min(8, \text{cores})\) threads.
+
+\lstinputlisting[language={}, caption={The best configuration, \file{configs/gemm/pe32x8\_ta\_t1024x512\_225mhz.json}.},
+  label={lst:config}, basicstyle=\ttfamily\scriptsize]{../../configs/gemm/pe32x8_ta_t1024x512_225mhz.json}
+
+\code{BuildCfg} (\file{flow/gemmflow/config.py}) loads the file into dataclasses, rejects unknown keys, and checks
+every rule that \code{gemm\_hls} enforces in CMake or with \code{static\_assert}s before any tool runs: bus widths
+against the element size, \(P_M\) against the M bus word, tiles against \(P_N\), \(P_M\) and the bus words, the
+double-buffering rule \(T_M/P_M \ge T_N/P_N\), the transposed-A rule and more. A violation is a configuration error
+with a readable message, not a failed HLS run twenty minutes later. It also renders the kernel's \code{Config.h} and
+computes three hashes:
+\begin{itemize}
+  \item \code{config\_hash}: SHA-256 of the whole resolved configuration. The build id is
+        \code{<name>-<config\_hash[:8]>}, and the first 32 bits are compiled into the bitstream.
+  \item \code{hls\_hash}: the kernel, clock and HLS sections plus a hash of the kernel source tree. Builds that differ
+        only in Vivado settings share one HLS result.
+  \item the stamps' input hashes (below).
+\end{itemize}
+Names follow the parameters (\code{f32\_pe32x8\_t1024x512\_225mhz\_tA\_aggressive}), so the same point in two
+campaigns, or a campaign point and a hand-written config with the same name, is the same build directory.
+
+\subsection{Steps, stamps and outputs}
+\Cref{fig:flow} shows the steps. Each one hashes its inputs and writes a stamp next to its outputs; if the stamp
+matches and the outputs exist, the step is skipped:
+\begin{description}[font=\sffamily\small\bfseries, leftmargin=1.2em]
+  \item[\code{HlsStep}] runs \code{vitis-run --mode hls} with \file{tcl/hls/run\_hls.tcl} (C synthesis, IP export).
+        \code{vitis-run} exits 0 even when synthesis fails, so the flow scans the log for errors. Several HLS runs
+        can go in parallel.
+  \item[\code{SocStep}] runs \file{hw/gemm/gemm\_soc.py}: LiteX generates the Verilog and runs its own Vivado build
+        script with our hooks (IP import before synthesis) and the resolved directives. Its inputs include the source
+        trees of \file{hw/gemm}, \file{boards/dupcb} and \file{tcl/vivado}.
+  \item[\code{HostStep}] builds \code{liblitepcie} and the host tools against the build's \code{csr.h}.
+\end{description}
+A build directory holds the resolved config, \code{manifest.json} (git commit and dirty flag, tool versions, host),
+\code{reports/summary.json} (timing per check, utilisation of the whole design and of the kernel, HLS estimates) and
+the logs. With 15\,GB of RAM on the build machine, one Vivado run of the 480T at a time is the limit; a PE 32\x8 build
+takes 25--35 minutes, a PE 8\x8 build 12--14.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/flow}}
+  \caption{From a JSON configuration to results. Top: the cached build steps and what they produce. Bottom: the
+    bring-up on the card, in the only order that works, and the runs.}
+  \label{fig:flow}
+\end{figure}
+
+\subsection{Vivado strategy presets}
+\Cref{tab:presets} lists the presets. Explicit directives in the config override the preset. Vivado's \emph{default}
+strategy was enough for most builds; \cref{sec:eval:timing} shows where the others mattered.
+
+\begin{table}[ht]
+\centering\scriptsize\setlength{\tabcolsep}{4pt}
+\caption{Vivado presets (\code{VIVADO\_PRESETS} in \file{flow/gemmflow/config.py}).}
+\label{tab:presets}
+\begin{tabular}{@{}lllllll@{}}
+\toprule
+Preset & synth & opt & place & phys\_opt (place) & route & phys\_opt (route) \\
+\midrule
+default & default & default & default & -- & default & default \\
+explore & default & Explore & Explore & Explore & Explore & Explore \\
+aggressive & PerformanceOptimized & ExploreWithRemap & ExtraTimingOpt & AggressiveExplore & AggressiveExplore & AggressiveExplore \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Tests}
+The Python flow has unit tests (\file{flow/tests/}, standard \code{unittest}, under a second, no tools or card): every
+configuration rule with its message, size rules, names, presets, \code{Config.h} rendering, the result store, campaign
+expansion, build reports, and the build ids of every committed configuration. The last one matters because build reuse
+depends on stable hashes: a new config field or a changed default would otherwise silently force full rebuilds. The
+DMA bridge and the C write converter have Migen simulations (\file{hw/gemm/tests/}).

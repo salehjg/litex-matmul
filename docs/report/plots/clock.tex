@@ -1,0 +1,21 @@
+% Accel clock: GFLOP/s (PE 8x8) and routed slack of the accel clock and of the PCIe core clock.
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1, horizontal sep=1.8cm}, rpt, width=0.5\linewidth, height=5.4cm,
+    xlabel={accel clock (MHz)}, xtick={150,200,225,250}]
+  \nextgroupplot[ylabel={GFLOP/s at 1024\(^3\) (PE 8\x8)}, ymin=0, ymax=35, xmin=140, xmax=260,
+      legend style={at={(0.02,0.98)}, anchor=north west}]
+    \addplot[l7, densely dashed, domain=150:250, mark=none] {23.355*x/200}; \addlegendentry{linear in the clock}
+    \addplot[l1, mark=*, only marks, mark size=2.5pt, nodes near coords, nodes near coords style={font=\sffamily\scriptsize, anchor=south east}]
+      table[x=mhz, y=gflops, restrict expr to domain={\coordindex}{0:2}] {data/clock.csv};
+    \addlegendentry{measured}
+  \nextgroupplot[ylabel={WNS (ns)}, ymin=-0.85, ymax=0.15, xmin=140, xmax=260,
+      legend style={at={(0.02,0.02)}, anchor=south west}]
+    \draw[black!60] (axis cs:140,0) -- (axis cs:260,0);
+    \addplot[l2, mark=*]       table[x=mhz, y=wns_accel, restrict expr to domain={\coordindex}{3:5}] {data/clock.csv};
+    \addlegendentry{PE 32\x8: accel clock}
+    \addplot[l1, mark=square*] table[x=mhz, y=wns_accel, restrict expr to domain={\coordindex}{0:2}] {data/clock.csv};
+    \addlegendentry{PE 8\x8: accel clock}
+    \addplot[only marks, mark=triangle*, mark size=2.6pt, cGreen!70!black] table[x=mhz, y=wns_pcie] {data/clock.csv};
+    \addlegendentry{PCIe core 500\,MHz (either)}
+\end{groupplot}
+\end{tikzpicture}

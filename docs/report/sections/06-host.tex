@@ -1,0 +1,38 @@
+\section{Host software}
+\label{sec:host}
+
+The host side (\file{sw/gemm\_host/}, C++17) is compiled per build against that build's generated \code{csr.h} and
+\code{liblitepcie}, so register addresses always match the bitstream. Three small classes carry everything:
+\begin{description}[font=\sffamily\small\bfseries, leftmargin=1.2em]
+  \item[\code{Card}] opens \code{/dev/litepcie0}, reads and writes CSRs through the driver, maps both DMA rings
+        (zero-copy) and enables or disables the DMA engines.
+  \item[\code{DdrDma}] moves data between host memory and a DDR channel through the bridge in 2\,MB chunks, with the
+        protocol of \cref{sec:pcie:rates}, and reports where the time went (copy, start, wait, stop).
+  \item[\code{GemmKernel}] writes the kernel arguments, starts it, polls \code{done}, and returns the cycle count, the
+        measured accel clock and every performance counter.
+\end{description}
+
+\code{gemm\_runner} is the benchmark program built on them; \code{ddr\_dma\_test} checks and times the transfers on
+their own. A run of \code{gemm\_runner} (\cref{fig:sequence}):
+\begin{enumerate}
+  \item checks the bitstream's \code{build\_id} against the expected configuration hash, the matrix sizes against the
+        build's size rules (\code{--multiples}: whole 64-byte words, e.g.\ \(K\) and \(M\) multiples of 16 floats,
+        and \(N\) too with transposed A) and the matrix placement against the channel capacity;
+  \item generates \(A\) and \(B\) from a seed and uploads \(A^\mathsf{T}\) (or \(A\)) and \(B\) to their channels;
+  \item for each warm-up and measured repetition, runs the kernel and downloads \(C\);
+  \item verifies \(C\) against a double-precision host reference, either every element (\code{full}) or 4096 random
+        elements plus two corners (\code{sampled}), with the tolerance
+        \(|c - c_\mathrm{ref}| \le 4K\varepsilon\sum_k|a_{ik}b_{kj}|\), \(\varepsilon = 2^{-23}\);
+  \item prints one JSON row per repetition: sizes, cycles, measured clock, kernel time and GFLOP/s, transfer bytes and
+        times, end-to-end time, verification result and all counters.
+\end{enumerate}
+Kernel time is \(\text{cycles}/f_\text{accel}\), with the clock measured on the card, so it does not include the
+host's polling. Sizes the kernel cannot handle used to give wrong results without any error (e.g.\ \(M\) not a
+multiple of 16 floats); the size check now rejects them before any transfer.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/sequence}}
+  \caption{One GEMM run: build-id check, uploads in 2\,MB chunks, the kernel, the download of C, verification.}
+  \label{fig:sequence}
+\end{figure}

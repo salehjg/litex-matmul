@@ -1,0 +1,51 @@
+\section{DDR3 channels and controllers}
+\label{sec:ddr}
+
+\subsection{From the ports to the chips}
+Each channel (\cref{fig:ddr}) is a LiteDRAM core: a \textbf{crossbar} that arbitrates between ports per bank, a
+\textbf{controller} with one bank machine per DRAM bank, a refresher and a command multiplexer that enforces the
+DDR3 timings (LiteDRAM's MT41K256M8 module, the same geometry and timings as the SK hynix H5TC2G83 chips on the card),
+and the \textbf{PHY}. The controller runs at 1:4: one 125\,MHz sys cycle carries four DRAM clock cycles, so the native
+port is 512 bits wide and the data rate is 1000\,MT/s on 64 bits, \SI{8}{GB/s} raw per channel. A BIST run after
+calibration measures \SI{7.1}{GB/s} writing and \SI{7.2}{GB/s} reading on each channel.
+
+Ports used in \code{GemmSoC}: the bridge has a write port and a read port on each channel; the kernel's A, B and C
+masters each get a port on the channel of their matrix, in the accel domain (the crossbar inserts the asynchronous
+FIFOs); the BIST generator and checker have their own ports. Channel 0 also keeps an idle Wishbone port from the
+standard integration.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/ddr}}
+  \caption{One DDR3 channel. The PHY's CK phase is moved by the host through the channel's MMCM; the calibration
+    loop runs on the host over PCIe after every bitstream load (and after the driver load).}
+  \label{fig:ddr}
+\end{figure}
+
+\subsection{PHY and calibration}
+The DDR banks of this FPGA are high-range (HR) banks: they have no output delay lines, so the PHY cannot move DQS per
+lane to do write leveling. The chips sit on a fly-by bus, so the far chips see CK later than the near ones. With
+LiteX's stock Artix-7-style PHY there was no write timing that worked for every lane under traffic. The project
+uses \code{WL7DDRPHY} (\file{boards/dupcb/wl7ddrphy.py}), from a sister card's design: each channel has its own
+MMCM, and the host moves CK against DQ/DQS in steps of 1/56 of the VCO period (\(\approx\)\SI{17.9}{ps}).
+
+Calibration (\file{boards/dupcb/ddr\_init.py}) runs on the host through the CSRs. For every CK phase step across one
+clock period it initialises the DRAM, searches each lane's write bitslip, read bitslip and read delay with random
+bursts, and runs a 64\,MB BIST. A step passes only if every lane calibrates and the BIST is clean; single-burst checks
+alone pass at phases where streaming traffic fails. CK then goes to the centre of the longest passing run, the lanes
+are calibrated again, and a random-address check and a final BIST (write once, read twice) confirm the channel. The
+measured write windows were 893\,ps on CH0 and 1429\,ps on CH1. A full calibration of both channels takes about 15\,s.
+
+\subsection{Where the matrices are}
+The build's \code{memory\_map} decides which channel each kernel master is wired to; the host must use the same map,
+and the run scripts read it from the build directory. Addresses are per channel; there is no common address space.
+\Cref{fig:memmap} shows the default map, which separates the read traffic of A from that of B. \code{gemm\_runner}
+checks that every matrix, including the slack of whole 8\,KB buffers that the C download reads, ends before the next
+region on its channel.
+
+\begin{figure}[ht]
+  \centering
+  \resizebox{0.95\linewidth}{!}{\input{figures/memmap}}
+  \caption{Placement of A, B and C in the two DDR3 channels (default memory map).}
+  \label{fig:memmap}
+\end{figure}

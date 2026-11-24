@@ -1,0 +1,92 @@
+\section{The GEMM kernel}
+\label{sec:kernel}
+
+\subsection{Algorithm}
+The kernel is \code{gemm\_hls}~\cite{gemmhls}, a communication-avoiding design for HLS. \Cref{fig:tiling} shows its
+tiling. \(C\) is computed one \emph{memory tile} of \(T_N\times T_M\) values at a time; the tile stays on chip in the
+processing elements (PEs) while the kernel streams the whole \(K\) dimension: at each step \(k\), column \(k\) of a
+\(T_N\times K\) strip of \(A\) and row \(k\) of a \(K\times T_M\) strip of \(B\) form an outer product that is added to
+the tile. A chain of \(P_N\) PEs, each \(P_M\) wide, performs \(P_N P_M\) multiply-adds per cycle, so the peak is
+\(2 P_N P_M f\) flop/s. The cost model that explains most of the measurements in \cref{sec:eval}:
+\begin{itemize}
+  \item The time is \(NKM/(P_N P_M)\) cycles plus a fixed fill and drain cost per memory tile; that cost is amortised
+        over \(K\), so efficiency rises with \(K\).
+  \item The kernel always computes whole memory tiles: a matrix with \(N < T_N\) or \(M < T_M\) wastes the rest.
+  \item \(A\) is read \(M/T_M\) times and \(B\) is read \(N/T_N\) times. The tile's arithmetic intensity,
+        \(T_N T_M / (2(T_N+T_M))\) flop per byte of \(A\) and \(B\), is 32 for \(128^2\) tiles and 171 for
+        \(1024\times512\): far above what a \SI{7.2}{GB/s} channel needs, so bandwidth is not the limit
+        (\cref{sec:eval:roofline}).
+  \item The tile lives in BRAM (\(T_N T_M\) values of C, double-buffered A). BRAM decides the largest tile.
+\end{itemize}
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/tiling}}
+  \caption{Memory tiling of \code{gemm\_hls}. The highlighted tile of \(C\) is computed from one strip of \(A\) and
+    one strip of \(B\), one outer product per step of \(k\).}
+  \label{fig:tiling}
+\end{figure}
+
+\subsection{Dataflow}
+\Cref{fig:kernel} shows the hardware as HLS builds it: concurrent functions connected by FIFOs. Readers fetch A and B
+in bursts and convert 512-bit memory words into vectors for the PEs. \(A\) values and \(B\) vectors travel forward
+along the PE chain; each PE keeps its rows of the C tile and a double-buffered slice of A, so that the next outer
+product can be loaded while the current one is computed. When a tile is finished, its values drain backwards through
+the chain to PE~0, are packed into 512-bit words and written.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/kernel}}
+  \caption{Kernel dataflow (transposed-A variant). All functions run at the same time; the C values of a finished
+    tile drain backwards through the PE chain.}
+  \label{fig:kernel}
+\end{figure}
+
+\paragraph{Transposed A.} Without \code{transposed\_a}, the kernel reads \(A\) row-major and transposes it on chip,
+which means reading single 64-byte words with a stride: one AXI burst per word. With \code{transposed\_a} the host
+sends \(A^\mathsf{T}\) and the kernel reads \(A\) in 16-beat bursts. For PE 32\x8 this was the bottleneck
+(\cref{sec:eval:layout}).
+
+\subsection{Changes to gemm\_hls}
+The upstream repository stays unmodified as a submodule; \file{kernels/gemm/} is a copy, and every change is a
+separate commit listed in \file{kernels/gemm/ORIGIN.md}:
+\begin{itemize}
+  \item \textbf{Interfaces for a shell-less SoC.} \code{ap\_ctrl\_hs} block control, \code{m\_axi offset=direct}
+        (each matrix address becomes an input port) and \code{ap\_none} sizes, with no AXI-Lite: the SoC drives
+        them from CSRs. Burst length, outstanding requests and latency of the masters come from the config.
+  \item \textbf{Vitis HLS 2026.1.} Arrays of \code{hlslib::Stream} objects fail in synthesis (HLS 214-177, unresolved
+        Phi node), so synthesis uses \code{hls::stream} while simulation keeps hlslib~\cite{hlslib}.
+        \code{ConvertWidthC} indexed a 512-bit word dynamically in an II=1 loop (estimated 10.6\,ns); it now
+        unpacks a word with constant indices.
+  \item \textbf{Knobs.} FIFO depths and all tiling parameters come from \code{Config.h}, which the flow renders
+        from the JSON config.
+\end{itemize}
+
+\subsection{Integration into the SoC}
+\code{HlsGemmKernel} (\file{hw/gemm/hls\_kernel.py}, \cref{fig:integration}) instantiates the exported IP. Its port
+list is generated from the HLS report (\code{csynth.xml}), so no port name or width is written by hand.
+\begin{itemize}
+  \item \textbf{Control across clock domains.} The \code{start} CSR becomes a pulse in the accel domain; a small
+        state machine holds \code{ap\_start} until \code{ap\_ready} and counts cycles until \code{ap\_done}. The
+        arguments are written before the start and do not change while the kernel runs, so a MultiReg per bit is
+        enough; status and counters cross back the same way and are read after \code{done}.
+  \item \textbf{AXI to LiteDRAM.} A and B use LiteDRAM's AXI-to-native read converter. For C the project has its own
+        \code{AxiWriteToNative} (\file{hw/gemm/axi\_native.py}): with LiteDRAM's write converter, Vivado removed the read
+        side of a response FIFO whose content was constant but kept the cell, leaving driverless pins
+        (\code{Route 35-13}). Each converter is built for one direction only, for the same reason.
+  \item \textbf{Performance counters.} \code{AxiPerfMonitor} (\file{hw/gemm/axi\_perf.py}) watches each master while
+        the kernel runs: handshakes, beats, address stalls, cycles with the read channel ready but no data
+        (\code{rready \& !rvalid}, called \emph{read waits} below), back-pressure, write stalls, and the read latency
+        from each AR handshake to its first R beat (valid because the HLS masters use a single ID, so data returns in
+        order).
+  \item \textbf{Vivado import.} A Tcl hook before synthesis (\file{tcl/vivado/import\_hls\_ip.tcl}) adds the HLS IP
+        repository, creates the IP and synthesises it, including its floating-point cores.
+\end{itemize}
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/integration}}
+  \caption{The kernel inside the SoC: CSR control with clock-domain crossings, the AXI masters converted to LiteDRAM
+    native ports, and a performance monitor on each master.}
+  \label{fig:integration}
+\end{figure}

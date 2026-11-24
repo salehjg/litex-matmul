@@ -1,0 +1,55 @@
+\section{Introduction}
+\label{sec:intro}
+
+Dense matrix multiplication (GEMM) is the standard workload for testing a compute accelerator end to end: it needs
+high arithmetic throughput, it stresses the memory system unless it is tiled well, and its result is easy to check.
+This project puts a GEMM accelerator on the \textbf{DU-PCB-001-003}, a PCIe card with a Kintex-7 480T FPGA and two
+2\,GB DDR3 channels, using open tools around the vendor flow:
+\begin{itemize}
+  \item \textbf{LiteX}~\cite{litex} with LitePCIe~\cite{litepcie} and LiteDRAM~\cite{litedram} for the SoC: PCIe
+        endpoint and DMA, both DDR3 controllers, the control registers and the glue to the kernel;
+  \item \textbf{Vitis HLS}~\cite{ug1399} for the kernel, a copy of the open-source \code{gemm\_hls}~\cite{gemmhls,gemmhlsrepo}
+        adapted to run without a vendor shell;
+  \item \textbf{Vivado} for implementation, driven from LiteX's build script with our Tcl hooks;
+  \item a \textbf{C++ host program} on the LitePCIe Linux driver, and a \textbf{Python flow} that builds, loads,
+        runs and explores configurations from JSON files.
+\end{itemize}
+
+\paragraph{What the system does.} The host sends \(A\) (as \(A^\mathsf{T}\)) and \(B\) over PCIe DMA into the DDR3
+channels, starts the kernel through control registers, waits for it, and reads \(C\) back together with performance
+counters: kernel cycles, per-matrix AXI traffic, the cycles each read channel waited for data, and read latencies.
+Every result is verified against a host reference and written as one JSON row with the build id, the configuration
+hash and the git state, so any number in this report can be traced to the exact bitstream and source that produced it.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item A CPU-less LiteX SoC with a PCIe-DMA-to-DDR3 bridge for both channels and an HLS kernel wired to LiteDRAM
+        through AXI, with per-bundle performance counters (\cref{sec:system,sec:pcie,sec:ddr,sec:kernel}).
+  \item A C++ host runtime on the LitePCIe driver, with zero-copy DMA rings and a fix that doubles card-to-host
+        throughput (\cref{sec:pcie,sec:host}).
+  \item A JSON-driven, cached build flow and a DSE driver that runs whole campaigns unattended and keeps every
+        result traceable (\cref{sec:flow,sec:dse}).
+  \item A measured exploration over processing elements, data layout, tile sizes, memory maps, matrix sizes, clocks
+        and Vivado strategies, ending at \gflops{110.9} (\cref{sec:eval}).
+\end{enumerate}
+
+\paragraph{Results at a glance.} \Cref{tab:headline} lists the configurations that mark the path to the best result.
+The full exploration, with the reasons for each step, is in \cref{sec:dse,sec:eval}.
+
+\begin{table}[ht]
+\centering\small
+\caption{Selected configurations (float32, kernel time, all results verified). Peak = \(2 P_N P_M f\).}
+\label{tab:headline}
+\begin{tabular}{@{}llrrrl@{}}
+\toprule
+Config & Clock & Peak & Best & \% & Resources (LUT / DSP / BRAM tiles) \\
+\midrule
+PE 8\x8, tile 128 (first build) & 200\,MHz & 25.6 & 23.4 & 91.5 & 64.6\,k / 383 / 238.5 \\
+PE 8\x8, tile 128 & 250\,MHz & 32.0 & 29.0 & 90.7 & 67.1\,k / 383 / 231 \\
+PE 16\x8, tile 256 & 200\,MHz & 51.2 & 47.2 & 92.2 & 94.6\,k / 703 / 303 \\
+PE 32\x8, tile 256 & 200\,MHz & 102.4 & 86.5 & 84.5 & 154.2\,k / 1343 / 414.5 \\
+PE 32\x8, A\(^\mathsf{T}\), tile 1024\x512 & 200\,MHz & 102.4 & 98.6 & 96.3 & 154.3\,k / 1320 / 654.5 \\
+\textbf{PE 32\x8, A\(^\mathsf{T}\), tile 1024\x512, aggressive} & \textbf{225\,MHz} & 115.2 & \textbf{110.9} & 96.2 & 152.0\,k / 1320 / 654.5 \\
+\bottomrule
+\end{tabular}
+\end{table}

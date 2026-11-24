@@ -1,0 +1,14 @@
+% Vivado presets: routed WNS per clock for the two configurations where it mattered.
+\begin{tikzpicture}
+\begin{axis}[rbar, ybar=1pt, bar width=6pt, height=5.6cm, ymin=-0.07, ymax=0.25, ylabel={WNS (ns)},
+    xtick=data, xticklabels={default, explore, aggressive, default, explore, aggressive},
+    extra x ticks={1,4}, extra x tick labels={PE 8\x8 @ 200\,MHz, PE 32\x8 @ 225\,MHz},
+    extra x tick style={tick label style={yshift=-4.2mm, font=\sffamily\small}, major tick length=0pt, grid=none},
+    legend style={at={(0.5,1.02)}, anchor=south, legend columns=3}, enlarge x limits=0.1]
+  \addplot[s2] table[x expr=\coordindex, y=wns_accel] {data/presets.csv}; \addlegendentry{accel}
+  \addplot[s3] table[x expr=\coordindex, y=wns_pcie]  {data/presets.csv}; \addlegendentry{PCIe core 500\,MHz}
+  \addplot[s1] table[x expr=\coordindex, y=wns_sys]   {data/presets.csv}; \addlegendentry{sys 125\,MHz}
+  \draw[black!70] (axis cs:-0.5,0) -- (axis cs:5.5,0);
+  \draw[black!30] (axis cs:2.5,-0.07) -- (axis cs:2.5,0.25);
+\end{axis}
+\end{tikzpicture}

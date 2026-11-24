@@ -1,0 +1,11 @@
+% End-to-end time of one GEMM on the best build, split into kernel and transfers.
+\begin{tikzpicture}
+\begin{axis}[rpt, xbar stacked, enlarge x limits=false, width=0.84\linewidth, bar width=10pt, height=3.8cm, xmin=0, xmax=100, xlabel={\% of end-to-end time},
+    ytick={0,1,2}, yticklabels={2048\(^3\) (0.21\,s), 4096\(^3\) (1.46\,s), 8192\(^3\) (10.77\,s)}, y dir=reverse,
+    enlarge y limits=0.3, legend style={at={(0.5,1.03)}, anchor=south, legend columns=4}, grid=none, xmajorgrids]
+  \addplot[s2] table[y expr=\coordindex, x=kernel_pct] {data/e2e.csv}; \addlegendentry{kernel}
+  \addplot[s1] table[y expr=\coordindex, x=h2c_pct]    {data/e2e.csv}; \addlegendentry{upload A, B}
+  \addplot[s3] table[y expr=\coordindex, x=c2h_pct]    {data/e2e.csv}; \addlegendentry{download C}
+  \addplot[s7] table[y expr=\coordindex, x=other_pct]  {data/e2e.csv}; \addlegendentry{other}
+\end{axis}
+\end{tikzpicture}

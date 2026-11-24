@@ -184,6 +184,18 @@ def main():
                          "kbram36", "kbram18", "kdsp", "build_min", "hls_ns", "hls_ff_k", "gflops", "pct", "peak"],
           rows, "every Vivado build: config, per-clock WNS (ns), resources (LUT/FF in thousands), best GFLOP/s")
 
+    # The same, pre-formatted for the appendix table (strings, "--" where a build was not run).
+    def f(v, nd):
+        return "--" if v is None else f"{v:.{nd}f}"
+    trows = []
+    for r in rows:
+        (h, lab, pn, pm, tn, tm, ta, mhz, preset, mp, met, wns, whs, wa, wp, ws, lut, ff, bram, dsp, klut, kff,
+         kb36, kb18, kdsp, bmin, hns, hff, g, pc, peak) = r
+        trows.append([lab, "yes" if met else "no", f(wa, 3), f(wp, 3), f(ws, 3), f(lut, 1), f(ff, 1), f(bram, 1),
+                      f(dsp, 0), f(bmin, 0), f(g, 2), f(pc, 1)])
+    write("builds_table.csv", ["label", "met", "wns_accel", "wns_pcie", "wns_sys", "lut_k", "ff_k", "bram", "dsp",
+                               "build_min", "gflops", "pct"], trows, "builds.csv formatted for the appendix table")
+
     # The road to the best result: best GFLOP/s per step of the exploration.
     steps = [("4e52e7f5", "PE 8x8 tile 128 (first build)"), ("e87d80b7", "PE 8x8 tile 256"),
              ("484ad82d", "PE 16x8 tile 256"), ("1a4479b3", "PE 32x8 tile 256"),

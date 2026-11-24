@@ -1,0 +1,47 @@
+\section{Lessons, open points and conclusion}
+\label{sec:lessons}
+
+\subsection{Lessons}
+\begin{enumerate}[leftmargin=1.4em]
+  \item \textbf{Measure inside the kernel.} The AXI counters (read waits, bursts, latency) pointed at every
+        improvement: the strided A reads, then the per-tile reloads. Without them the PE 32\x8 result would have
+        looked like a bandwidth problem, which it never was (\cref{sec:eval:roofline}).
+  \item \textbf{The HLS clock estimate is not a limit.} HLS deepens pipelines for a tighter target even when its
+        estimate stays the same; only a routed build decides. An earlier conclusion that 225\,MHz was not worth a
+        build was wrong for this reason.
+  \item \textbf{Try the Vivado strategies before changing the kernel.} At 225\,MHz the difference between failing and
+        passing was the physical optimisation of a few high-fanout nets.
+  \item \textbf{Check the whole design's timing.} The most marginal path in every build is inside the PCIe hard block,
+        not in the kernel; a flow that only looked at the kernel clock would have loaded a failing build.
+  \item \textbf{Silent wrong answers are the worst failure.} Sizes that are not whole bus words, and the order of
+        bring-up steps (calibrating DDR before the driver's probe resets the SoC), both produced wrong results without
+        errors. Both are now checked or enforced by the tools.
+  \item \textbf{Vendor tools need guards.} \code{vitis-run} exits 0 on a failed synthesis; Vivado removes logic from
+        constant FIFOs and then fails routing (\code{Route 35-13}); old hlslib constructs fail in a new HLS. Each
+        needed a workaround in the flow or the RTL.
+  \item \textbf{Traceability pays off.} Because every row carries the build id, the configuration hash and the git
+        state, two real bugs in the result handling were found and fixed afterwards: a run-row id that broke
+        \code{--resume}, and kernel utilisation columns read one position off.
+\end{enumerate}
+
+\subsection{Open points}
+\begin{itemize}
+  \item \textbf{H2C throughput} (\SI{0.82}{GB/s}): the generated driver's 1\,ms DMA stop. Options: a shorter delay in
+        the driver copy, or a bridge that back-pressures the DMA reader after \code{length} bytes so that nothing is in
+        flight at the stop. Both touch the class of PCIe fault that froze the host early on, so they need a decision
+        and careful testing.
+  \item \textbf{PCIe core timing}: build the PHY as Gen2 x4 (the slot's width here), or keep x8 and rebuild with
+        another preset when only that path fails.
+  \item \textbf{Clock beyond 225\,MHz} needs kernel changes (registering the dataflow control and the C-pipe enables).
+  \item \textbf{Memory map at PE 32\x8} was not measured; it should matter more there than at PE 8\x8.
+  \item \textbf{Overlap of transfers and compute} (double-buffering matrices in DDR) would hide most of the transfer
+        time for streams of GEMMs.
+\end{itemize}
+
+\subsection{Conclusion}
+The project delivers a working, measured GEMM accelerator on a card without a vendor shell: a CPU-less LiteX SoC
+with PCIe DMA into two DDR3 channels, an adapted \code{gemm\_hls} kernel with performance counters, a C++ host
+runtime, and a JSON-driven flow whose DSE driver built, loaded and benchmarked twenty configurations unattended. The
+best configuration, a 32\x8 PE array with transposed A, 1024\x512 tiles and a 225\,MHz clock closed by Vivado's
+\code{aggressive} strategy, computes float32 GEMM at \textbf{\gflops{110.9}}, \SI{96.2}{\percent} of its peak, with
+every result verified and traceable to the bitstream and source that produced it.

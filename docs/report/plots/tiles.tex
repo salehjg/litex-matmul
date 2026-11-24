@@ -1,0 +1,17 @@
+% Memory tile sweep for PE 32x8 with transposed A, 200 MHz.
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1, horizontal sep=1.7cm}, rpt, width=0.47\linewidth, height=5.6cm,
+    xtick=data, xticklabels={256\x256, 256\x512, 512\x256, 512\x512, 1024\x512},
+    x tick label style={rotate=25, anchor=north east}, xlabel={memory tile \(T_N\times T_M\)}]
+  \nextgroupplot[ybar, bar width=5pt, ymin=80, ymax=105, ylabel={GFLOP/s}, enlarge x limits=0.14,
+      legend style={at={(0.02,0.98)}, anchor=north west}]
+    \addplot[s6] table[x expr=\coordindex, y=g2048] {data/tiles.csv}; \addlegendentry{2048\(^3\)}
+    \addplot[s1] table[x expr=\coordindex, y=g4096] {data/tiles.csv}; \addlegendentry{4096\(^3\)}
+    \addplot[s5] table[x expr=\coordindex, y=g8192] {data/tiles.csv}; \addlegendentry{8192\(^3\)}
+    \draw[densely dashed, cRed] (axis cs:-0.5,102.4) -- node[pos=0.5, above, font=\sffamily\tiny, text=cRed] {peak 102.4} (axis cs:4.5,102.4);
+  \nextgroupplot[ymin=0, ymax=20, ylabel={read waits at 4096\(^3\), \% of cycles}, enlarge x limits=0.1,
+      axis y line*=left, legend style={at={(0.98,0.98)}, anchor=north east}]
+    \addplot[l4, mark=*] table[x expr=\coordindex, y=await4096] {data/tiles.csv}; \addlegendentry{A waits}
+    \addplot[l2, mark=square*] table[x expr=\coordindex, y=bwait4096] {data/tiles.csv}; \addlegendentry{B waits}
+\end{groupplot}
+\end{tikzpicture}

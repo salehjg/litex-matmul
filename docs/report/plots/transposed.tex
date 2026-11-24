@@ -1,0 +1,13 @@
+% Transposed A: GFLOP/s and the share of cycles the A read channel waits for data, at 2048^3, tile 256.
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1, horizontal sep=1.6cm}, rbar, ybar=6pt, width=0.5\linewidth, height=5.2cm,
+    /pgf/bar width=12pt, xtick=data, xticklabels={PE 16\x8, PE 32\x8}, enlarge x limits=0.5,
+    nodes near coords, nodes near coords style={font=\sffamily\scriptsize, /pgf/number format/.cd, fixed, precision=1}]
+  \nextgroupplot[ylabel={GFLOP/s at 2048\(^3\)}, ymax=100, legend style={at={(0.02,0.98)}, anchor=north west}]
+    \addplot[s7] table[x expr=\coordindex, y=g_plain] {data/transposed.csv}; \addlegendentry{A as is}
+    \addplot[s1] table[x expr=\coordindex, y=g_ta]    {data/transposed.csv}; \addlegendentry{A\(^\mathsf{T}\) from the host}
+  \nextgroupplot[ylabel={A read waits, \% of kernel cycles}, ymax=105]
+    \addplot[s7] table[x expr=\coordindex, y=await_plain] {data/transposed.csv};
+    \addplot[s1] table[x expr=\coordindex, y=await_ta]    {data/transposed.csv};
+\end{groupplot}
+\end{tikzpicture}
