@@ -314,13 +314,32 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       - The campaign was stopped (09:30), the two unstamped HLS dirs (225/250 MHz) removed, and the queue
         restarted: `dtype_clock --resume` → `fixed_point` (aggressive) → `int4_wide`. After the restart, one Vitis
         run per hash, duplicates waiting on the lock.
+- [x] **`dtype_clock` done** (09:29–11:20, `results/dtype_clock/`): int8 PE 32×32, tile 512×1024, tA,
+      × 200/225/250 MHz × default/aggressive preset. DDR load tuning was on; all three runnable builds had 0 bad entries
+      before tuning, so no tap was moved.
+
+      | Clock | Preset | WNS ns | TNS ns | SoC LUT | SoC FF | 4096³ / 8192³ GOP/s (% of peak) | Verify |
+      |---|---|---|---|---|---|---|---|
+      | 200 MHz | default | 0.038 | 0 | 130.1k | 119.0k | 378.2 / 379.4 (92.6 %) | ok |
+      | 200 MHz | aggressive | 0.038 | 0 | 130.4k | 119.0k | 378.2 / 379.4 | ok |
+      | **225 MHz** | default | **0.017** | 0 | 131.3k | 119.2k | 425.1 / **426.6** (92.6 %) | ok |
+      | 225 MHz | aggressive | −0.130 | −3.5 | 131.5k | 119.3k | — | timing failed |
+      | 250 MHz | default | −0.365 | −118 | 130.9k | 119.9k | — | timing failed |
+      | 250 MHz | aggressive | −0.589 | −388 | 131.7k | 120.0k | — | timing failed |
+
+      - **New int8 best: 426.6 GOP/s at 225 MHz**, exact (sampled check on every rep; tuning check 1024³ full).
+        That is 3.8× the best float build (110.9 GFLOP/s), with 40 DSPs and 414.5 BRAM tiles for every point.
+      - The aggressive preset does not help here (worse at 225 and 250 MHz). Place and route varies, so one seed per
+        point says little at a margin of 0.1 ns.
+      - At 225 and 250 MHz the limiting path is the HLS dataflow control, not the PEs. It starts at a PE's loop
+        counter (`ProcessingElement_18_U0/trunc_ln_reg_427`, `ProcessingElement_25_U0/n0_fu_96`) and ends at the
+        reset of the `ap_sync_reg_*_ap_ready` flops of every process in the dataflow region. 6 logic levels
+        (CARRY4 ×2, LUT6), 81 % routing. With ~40 processes in one region (32 PEs plus the memory readers, converters and writer), that fanout grows with the array. Fixing
+        it needs a kernel or HLS-directive change, not a flow setting. The HLS estimate (4.144 ns) does not see it.
 - [ ] Queued `int4_wide` (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
       and PE 48×64 (3072 MACs); at most 2 HLS jobs at once (RAM); DDR tuning on.
-- [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.
-      `dtype_clock` now uses the best verified int8 array, PE 32×32 tile 512×1024 (06:50); its 200 MHz default
-      point reuses that build.
-- [ ] Queued behind it (05:05): `dtype_size_sweep` (runs on the int8 build), `int8_scale`, `int16_scale`.
-      `dtype_size_sweep` finished 05:53 (results below); `int8_scale` started 05:53 (HLS done for all 3 arrays).
+- [x] (stale queue notes, kept for the record) Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` →
+      `fixed_point` → `dtype_clock`, all run; `dtype_size_sweep`, `int8_scale`, `int16_scale` done.
 - [x] **`dtype_size_sweep` done** (int8 PE 32×8 build, 45 sizes × 2 reps, all verified exactly,
       `results/dtype_size_sweep/`). Same whole-tile behaviour as float: the kernel always computes full
       1024 (N) × 512 (M) memory tiles. The kernel time for N = 256/512/1024 is the same (1024×1024×1024: 22.36 ms,
