@@ -400,6 +400,14 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         (`ProcessingElement_57_U0/n0_fu_98_reg` → `ap_sync_reg_ProcessingElement_17_U0_ap_ready_reg/R`, 7 levels, 83 %
         routing). The three 64×64 builds at 200 MHz so far give −0.215 / −0.051 / −0.336 ns: placement noise on one
         control net. 180 MHz default builds next.
+      - **180 MHz default (18:37): the kernel met timing (accel clock WNS +0.018 ns), but the PCIe 250 MHz user clock
+        failed: WNS −0.447 ns**, 6 endpoints. The path runs from a LitePCIe 16×146-bit FIFO in block RAM
+        (`storage_25_reg_2`, 1.97 ns of BRAM clock-to-out and LUTs) into the PCIe hard block's TX throttle
+        (`tready_thrtl_reg`, `TRNTCFGGNT`). This is the known PCIe-path failure that a rebuild with another preset fixes.
+        The design is at 67 % LUT, so the PCIe logic gets worse placement.
+- [ ] 🟡 `int4_pe64` round 2 (18:45, `dse_2.log`, `--resume`): 180 MHz aggressive and explore (same HLS run), in
+      parallel with `int4_clock`'s HLS (memory: Vivado 7.2 GB peak plus HLS 3.9 GB, against 15 GB RAM and 50 GB swap).
+      The board lock serialises the card runs.
 - [x] (superseded: the tile broke rule 1) Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
       and explore presets (one HLS run), and at 180 MHz default (peak 1475 GOP/s, 0.56 ns more period). It goes first:
       4096 MACs at any of these clocks beats int4 PE 32×64 at 225 MHz (921.6 GOP/s peak).
