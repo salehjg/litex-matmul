@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LiteX for the DU-PCB-001-003 card: the whole project in one file.
 
-The project files (board, daily scripts, README) are stored at the end of this file as comment
+The project files (board, daily scripts, README, docs/soc.md) are stored at the end of this file as comment
 lines, so the file stays valid Python. Running it unfolds them into a work directory and sets that
 up: LiteX release, Python venv, tool paths. Standard library only; runs on Python 3.6+ (LiteX
 itself needs 3.8+, see --python). Safe to run again: files you changed are kept unless --force.
@@ -42,6 +42,7 @@ ARCHIVE_MARKER = "# ==== ARCHIVE: written by --pack, do not edit by hand ===="
 # Files in the bundle, relative to the work directory. Add new project files here, then --pack.
 FILES = [
     "README.md",
+    "docs/soc.md",
     ".gitignore",
     "boards/dupcb/dupcb_platform.py",
     "boards/dupcb/target.py",
@@ -349,9 +350,75 @@ if __name__ == "__main__":
 
 # ==== ARCHIVE: written by --pack, do not edit by hand ====
 #@@ FILE README.md 644
-#|# LiteX on the DU-PCB-001-003
+#|# GEMM accelerator on the DU-PCB-001-003 (LiteX + HLS)
 #|
-#|LiteX SoC for the DU-PCB-001-003 Kintex-7 480T card (`xc7k480tiffg1156-2L`), used as a PCIe accelerator.
+#|A matrix-multiply accelerator for a Kintex-7 480T PCIe card. An HLS GEMM kernel (adapted from
+#|[spcl/gemm_hls](https://github.com/spcl/gemm_hls)) sits in a CPU-less LiteX SoC. The host sends A and B over PCIe DMA
+#|into two DDR3 channels, the kernel computes C = A·B, and the host reads C back with performance counters. JSON configs
+#|drive the builds (HLS → Vivado → host tools) and the design-space sweeps on the card.
+#|
+#|![System overview](docs/images/system.png)
+#|
+#|## Results
+#|
+#|Best kernel throughput, all results verified exactly on the card:
+#|
+#|| Element format | Array, clock | Best measured | DSPs |
+#||---|---|---|---|
+#|| float32 | PE 32×8, 225 MHz | 110.9 GFLOP/s | 1320 |
+#|| int16 | PE 32×16, 200 MHz | 190.9 GOP/s | 552 |
+#|| int8 | PE 32×32, 225 MHz | 426.6 GOP/s | 40 |
+#|| int4 | PE 32×64, 200 MHz | 756.7 GOP/s | 39 |
+#|
+#|**float32 exploration:** the best result after each step, against the peak of that configuration.
+#|
+#|![Best GFLOP/s after each exploration step](docs/images/progress.png)
+#|
+#|**Roofline:** every float32 build is compute-bound; one DDR3 channel's bandwidth is not the limit.
+#|
+#|![Roofline](docs/images/roofline.png)
+#|
+#|**Clock:** PE 8×8 throughput scales linearly with the accelerator clock (left). The larger PE 32×8 runs out of timing
+#|slack above 200 MHz with the default Vivado flow (right).
+#|
+#|![Clock sweep](docs/images/clock.png)
+#|
+#|**End to end:** where the time goes on the best float32 build, including the PCIe transfers.
+#|
+#|![End-to-end time split](docs/images/e2e.png)
+#|
+#|## Quick start
+#|
+#|```
+#|python3 setup.litex.du-pcb.py                       # once: LiteX, venv, tool paths
+#|git submodule update --init --recursive             # once: gemm_hls (reference only)
+#|sudo scripts/setup_permissions.sh                   # once: password-less card access
+#|
+#|.venv/bin/python scripts/gemm_build.py configs/gemm/default.json                 # build (~15-25 min)
+#|.venv/bin/python scripts/gemm_run.py build/gemm/soc/<build_id> --program \
+#|        --sizes 2048x2048x2048 --verify sampled                                 # load + bring-up + run
+#|.venv/bin/python scripts/gemm_dse.py configs/dse/pe_sweep.json                   # sweep -> results/<campaign>/
+#|```
+#|
+#|## Quick Refs
+#|
+#|| Topic | Where |
+#||---|---|
+#|| Accelerator usage: configs, element formats, verification, DDR tuning, outputs, tests | [docs/gemm.md](docs/gemm.md) |
+#|| Base SoC and board: what is in it, setup, daily scripts, things to know | [docs/soc.md](docs/soc.md) |
+#|| Full report (architecture, flow, every measurement): `docs/report/build.sh` → `report.pdf` | [docs/report/](docs/report/) |
+#|| float32 GEMM: plan and progress log | [plan](docs/notes1/gemm-hls-plan.md) · [progress](docs/notes1/gemm-hls-progress.md) |
+#|| Integer and fixed-point formats: plan and progress log | [plan](docs/notes2/int-dtype-plan.md) · [progress](docs/notes2/int-dtype-progress.md) |
+#|| DDR read margin under load (wrong results, root cause, fix) | [misc/int32_verify](misc/int32_verify/README.md) |
+#|| Changes to the upstream HLS kernel | [kernels/gemm/ORIGIN.md](kernels/gemm/ORIGIN.md) |
+#|| Regenerating the README images | `docs/report/tools/export_figures.sh` |
+#@@ END
+#@@ FILE docs/soc.md 644
+#|# The LiteX SoC on the DU-PCB-001-003
+#|
+#|LiteX SoC for the DU-PCB-001-003 Kintex-7 480T card (`xc7k480tiffg1156-2L`), used as a PCIe accelerator: the base
+#|platform (board files, DDR3 PHY and calibration, PCIe) that the GEMM SoC ([gemm.md](gemm.md)) builds on. Paths are
+#|relative to the repository root.
 #|The board itself is documented in `my-fpga-ws/boards/DU-PCB-001-003/README.md`; section numbers (§) below refer to it.
 #|
 #|## What is in the SoC
@@ -440,69 +507,6 @@ if __name__ == "__main__":
 #|  adds a garbage beat to every read completion and the DMA reader stalls after ~64 KB. With the fix:
 #|  `scripts/driver.sh dma-test` loopback 13.4 Gb/s (Gen2 x4), 0 errors. Driver: `scripts/driver.sh build|load`;
 #|  one-time `sudo scripts/setup_permissions.sh` for password-less use. Keep the IOMMU on (`scripts/iommu/`).
-#|
-#|## GEMM HLS accelerator
-#|
-#|An HLS GEMM kernel (float32, adapted from [spcl/gemm_hls](https://github.com/spcl/gemm_hls)) in a CPU-less variant of
-#|this SoC (`hw/gemm/gemm_soc.py`): the host sends A and B over PCIe DMA into the DDR3 channels, the kernel computes
-#|C = A·B at 200 MHz, the host reads C back together with performance counters (cycles, per-matrix AXI bursts, stalls,
-#|read latency). JSON-driven build and design-space exploration. Plan:
-#|[`docs/notes1/gemm-hls-plan.md`](docs/notes1/gemm-hls-plan.md), status and measurements:
-#|[`docs/notes1/gemm-hls-progress.md`](docs/notes1/gemm-hls-progress.md).
-#|
-#|Measured (kernel time, float32, all results verified against a host reference; 200 MHz unless noted):
-#|
-#|| Config | Peak | Best measured | LUT / DSP / BRAM tiles |
-#||---|---|---|---|
-#|| `default.json`: PE 8×8, tile 128 | 25.6 GFLOP/s | 23.4 (2048³, 91.5 %) | 64.6k / 383 / 238.5 |
-#|| PE 8×8, tile 256 | 25.6 | 24.6 (2048³, 95.9 %) | 64.7k / 383 / 239 |
-#|| PE 16×8, tile 256 | 51.2 | 47.2 (2048³, 92.2 %) | 94.6k / 703 / 303 |
-#|| `pe32x8_ta_t512.json`: PE 32×8, transposed A, tile 512×512 | 102.4 | 95.5 (8192³, 93.2 %) | 153.9k / 1320 / 430.5 |
-#|| `pe32x8_ta_t1024x512.json`: PE 32×8, transposed A, tile 1024×512 | 102.4 | 98.6 (8192³, 96.3 %) | 154.3k / 1320 / 654.5 |
-#|| `pe32x8_ta_t1024x512_225mhz.json`: the same at **225 MHz**, Vivado preset `aggressive` | 115.2 | **110.9** (8192³, 96.2 %) | 152.0k / 1320 / 654.5 |
-#|| `default.json` at 250 MHz (`clocks.accel_mhz`): PE 8×8, tile 128 | 32.0 | 29.0 (1024³, 90.7 %) | 67.1k / 383 / 231 |
-#|
-#|`transposed_a: true` means the host sends Aᵀ (`gemm_runner --transposed-a`, passed automatically from the build's
-#|config), so the kernel reads A in bursts instead of single strided words; this and larger tiles are what took PE 32×8
-#|from 82 to 98.6 GFLOP/s, and 225 MHz (which only the `explore`/`aggressive` presets close) to 110.9.
-#|
-#|```
-#|git submodule update --init --recursive                     # submodules/gemm_hls (+ hlslib): reference only
-#|sudo scripts/setup_permissions.sh                           # once: password-less board access
-#|misc/crash_debug/arm_crash_capture.sh                       # once per boot (see docs: host freezes)
-#|
-#|.venv/bin/python scripts/gemm_build.py configs/gemm/default.json          # HLS -> Vivado -> host tools (~15 min;
-#|                                                                          #  PE 32x8 builds ~25 min)
-#|.venv/bin/python scripts/gemm_run.py build/gemm/soc/<build_id> --program \
-#|        --sizes 1024x1024x1024 2048x2048x2048 --reps 3 --verify sampled  # load + bring-up + runs
-#|.venv/bin/python scripts/gemm_dse.py configs/dse/pe_sweep.json            # sweep: builds + runs -> results/<campaign>/
-#|```
-#|
-#|- **Order on the card:** load → `scripts/pcie_rescan.sh` → `scripts/driver.sh load` → `scripts/ddr_init.sh` →
-#|  runs. The driver's probe resets the SoC, which clears the DDR calibration; `gemmflow.board.Board.bring_up()`
-#|  (used by `gemm_run.py --program` and `gemm_dse.py`) does it in that order.
-#|- **Config:** `configs/gemm/*.json` (PE counts, tiles, bus widths, FIFO depths, m_axi bursts, memory map, accel clock,
-#|  Vivado preset/directives/threads). Checked against every gemm_hls rule before any tool runs (`flow/gemmflow/config.py`).
-#|- **Timing:** a build that misses timing anywhere is recorded as `timing_failed` and never loaded. The PCIe Gen2 x8
-#|  core (500 MHz, inside the hard block) has only tens of ps of margin in every build and failed alone once; if a build
-#|  fails only there, rebuild with `vivado.preset: explore` or `aggressive`.
-#|- **Sizes:** N, K, M must be whole bus words for the build (64-byte words: K and M multiples of 16 floats, N too with
-#|  transposed A); `gemm_runner` rejects other sizes. The kernel computes whole memory tiles, so matrices smaller than
-#|  the tile run at a fraction of the peak (size sweep in the progress file).
-#|- **Host ↔ DDR transfers:** H2C 0.82 GB/s, C2H 1.49 GB/s (the driver's DMA stop costs 1 ms per 2 MB chunk on H2C).
-#|- **DDR placement** (default `memory_map` a=ch0, b=ch1, c=ch1): A at CH0 0x0, B at CH1 0x0, C at CH1 0x4000_0000;
-#|  limits A ≤ 2 GB, B ≤ 1 GB, C ≤ 1 GB, checked by `gemm_runner` (details in the progress file, "DDR memory map").
-#|- **Tests (no tools, no card):** `.venv/bin/python -m unittest discover -s flow/tests` (config rules, size rules,
-#|  names, golden build ids, results, campaign expansion; < 1 s); gateware simulations
-#|  `.venv/bin/python hw/gemm/tests/test_axi_native.py` and `hw/gemm/tests/test_ddr_dma.py` (Migen, ~1 min).
-#|- **Outputs:** `build/gemm/hls/<hls_hash>/`, `build/gemm/soc/<build_id>/` (config, manifest, reports/summary.json,
-#|  logs; `gemm_build.py <config> --report-only` rewrites the summary), `results/<campaign>/` (JSONL + CSV with build id,
-#|  config hash, git sha, sizes, timing, counters; `invocations.jsonl`; `gemm_dse.py --resume` continues an interrupted
-#|  campaign). All git-ignored.
-#|- **Layout:** `kernels/gemm/` (adapted HLS C++, changes in `ORIGIN.md`), `hw/gemm/` (SoC, DMA↔DDR bridge, kernel
-#|  wrapper, AXI perf counters, tests), `tcl/` (HLS flow, Vivado hooks, JTAG program), `sw/gemm_host/` (C++: DMA,
-#|  kernel control, `gemm_runner`, `ddr_dma_test`), `flow/gemmflow/` (Python package), `scripts/gemm_*.py`,
-#|  `configs/{gemm,dse}/`, `misc/` (debug cases).
 #@@ END
 #@@ FILE .gitignore 644
 #|# Created by setup.litex.du-pcb.py
