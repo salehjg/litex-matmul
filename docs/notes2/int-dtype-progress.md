@@ -455,9 +455,14 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         For int4 PE 64×64 that is tile 1024×4096, about +512 BRAM18 by the HLS estimate (1142 → ~1650, under the
         1760 gate). If the 73 lost cycles stay fixed: 1024/1097 = 93 % → ~1375 GOP/s at 180 MHz. For PE 32×64 at
         225 MHz, tile 1024×2048: 1024/1065 = 96 % → ~886 GOP/s. 
-- [ ] 🟡 `int4_tile` (started 22:10, `results/int4_tile/dse.log`): int4 PE 32×64 tile 1024×2048 at 225 MHz default and
+- [ ] 🟡 `int4_tile` (started 21:54, `results/int4_tile/dse.log`): int4 PE 32×64 tile 1024×2048 at 225 MHz default and
       PE 64×64 tile 1024×4096 at 180 MHz aggressive (the clocks and presets of the best builds). One HLS run at a
       time, then one Vivado build at a time; 4096³ and 8192³, DDR tuning on.
+      - HLS done (~23:05): **the same BRAM18 estimate as the half-size tiles** (662 and 1142), est. 4.209 ns, DSP 34/35,
+        LUT 244k/455k, ports 512 bits. The C buffer is split into one narrow memory per element of a PE
+        (4-bit lanes); a BRAM18 holds up to 4096 × 4 bits, so 512 or 1024 entries cost the same block. The +512 BRAM18
+        estimated above does not apply: for int4, deeper tiles are free in BRAM up to 4096 entries per PE.
+        Vivado builds running (PE 32×64 first).
 - [x] **Both campaigns stopped (~18:58) by Claude Code's memory guard**, not by a failure in the flow. `int4_clock`'s HLS
       finished sooner than expected (both 225 MHz points: est. 4.144 ns, 34 DSP, 662 BRAM18, stamped), and its first
       Vivado build started next to `int4_pe64`'s 180 MHz aggressive build. Two Vivado runs of this size (~7 GB each)
