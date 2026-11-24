@@ -7,7 +7,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=$1
 OUT=$ROOT/misc/int32_verify/logs; mkdir -p "$OUT"
 cd "$ROOT"
-exec 9>"$ROOT/build/.board.lock"; flock 9; export GEMM_BOARD_LOCK_HELD=1   # the card is ours (gemmflow.board)
+[[ -n "${GEMM_BOARD_LOCK_HELD:-}" ]] || { exec 9>"$ROOT/build/.board.lock"; flock 9; export GEMM_BOARD_LOCK_HELD=1; }  # the card is ours
 if [[ "${2:-}" != "--no-program" ]]; then
   .venv/bin/python scripts/gemm_run.py "$B" --program --sizes 512x512x512 --verify full --results "$OUT/bringup.jsonl" \
     2>&1 | grep -v "^\[bring-up\]" | tail -2

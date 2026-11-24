@@ -1,6 +1,6 @@
 {
   "campaign": "fixed_point",
-  "comment": "docs/notes2 tier T2: fixed32.16 at PE 32x8 (fixed16.8 is in dtype_same_array; 8-bit fixed crashes Vitis HLS csynth).",
+  "comment": "docs/notes2 tier T2: fixed32.16 at PE 32x8 (fixed16.8 is in dtype_same_array; 8-bit fixed crashes Vitis HLS csynth). DDR read taps tuned under load at bring-up (gemmflow.ddr_tune, misc/int32_verify).",
   "base": "configs/gemm/pe32x8_ta_t1024x512.json",
   "build_grid": {
     "@format": [
@@ -40,5 +40,6 @@
   ],
   "jobs": {
     "hls": "auto"
-  }
+  },
+  "ddr_load_tune": true
 }

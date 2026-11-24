@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(ROOT, "flow"))
 
 from gemmflow.board import Board, board_lock  # noqa: E402
 from gemmflow.config import BuildCfg      # noqa: E402
+from gemmflow.runner import runner_cmd    # noqa: E402
 
 
 def git_rev():
@@ -54,6 +55,8 @@ def main():
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--program", action="store_true", help="JTAG load + rescan before the rest of the bring-up.")
     p.add_argument("--no-bringup", action="store_true", help="Skip driver/DDR/tools (already done for this load).")
+    p.add_argument("--ddr-load-tune", action="store_true",
+                   help="After DDR calibration, tune the read taps under GEMM load (gemmflow.ddr_tune).")
     p.add_argument("--results", help="JSONL file (default results/<build_id>/runs.jsonl).")
     a = p.parse_args()
 
@@ -65,10 +68,10 @@ def main():
 
 def run(a, build_dir, cfg, info):
     if not a.no_bringup:
-        Board(build_dir).bring_up(program=a.program, log=lambda s: print(f"[bring-up] {s}", flush=True))
+        tune = runner_cmd(cfg, build_dir, info["config_hash"]) if a.ddr_load_tune else None
+        Board(build_dir).bring_up(program=a.program, log=lambda s: print(f"[bring-up] {s}", flush=True),
+                                  tune_runner=tune)
 
-    runner = os.path.join(build_dir, "sw", "gemm_runner")
-    mm = cfg.memory_map
     results = a.results or os.path.join(ROOT, "results", info["build_id"], "runs.jsonl")
     os.makedirs(os.path.dirname(results), exist_ok=True)
     sha, dirty = git_rev()
@@ -80,12 +83,9 @@ def run(a, build_dir, cfg, info):
     failures = 0
     for size in a.sizes:
         n, k, m = (int(x) for x in size.lower().split("x"))
-        cmd = [runner, "--n", str(n), "--k", str(k), "--m", str(m), "--reps", str(a.reps), "--warmup", str(a.warmup),
-               "--seed", str(a.seed), "--verify", a.verify, "--map", f"a={mm.a},b={mm.b},c={mm.c}",
-               "--expect-build-id", info["config_hash"][:8], "--dtype", nf.spec, "--json"] + \
-              (["--float-exact"] if nf.kind == "float" else []) + \
-              (["--transposed-a"] if cfg.kernel.transposed_a else []) + \
-              ["--multiples", ",".join(map(str, cfg.size_multiples()))]
+        cmd = runner_cmd(cfg, build_dir, info["config_hash"]) + \
+            ["--n", str(n), "--k", str(k), "--m", str(m), "--reps", str(a.reps), "--warmup", str(a.warmup),
+             "--seed", str(a.seed), "--verify", a.verify, "--json"]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         for line in proc.stdout.splitlines():
             if line.startswith("{"):

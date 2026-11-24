@@ -1,11 +1,13 @@
 #
 # board.py - bring a GemmSoC build up on the card (plan section 8), in the order that works:
-#   program (JTAG) -> PCIe rescan -> driver build + load (its probe resets the SoC) -> DDR calibration -> host tools.
+#   program (JTAG) -> PCIe rescan -> driver build + load (its probe resets the SoC) -> DDR calibration -> host tools
+#   [-> DDR read taps tuned under GEMM load (ddr_tune, opt-in)].
 # The DDR calibration must come after the driver load: the driver's probe writes CSR_CTRL_RESET, which clears it.
 #
 
 import contextlib
 import fcntl
+import json
 import os
 import re
 import subprocess
@@ -87,10 +89,20 @@ class Board:
     def host_tools(self):
         self._sh(["make", "-s", "-C", "sw/gemm_host", f"BUILD_DIR={self.build_dir}"], "host_tools.log")
 
-    def bring_up(self, program=True, log=print):
+    def bring_up(self, program=True, log=print, tune_runner=None):
+        """tune_runner: gemm_runner base command (gemmflow.runner.runner_cmd) to tune the DDR read taps under GEMM
+        load after calibration (gemmflow.ddr_tune); the result goes to logs/ddr_tune.json and is returned."""
         if program:
             log("program (JTAG)");     self.program()
             log("pcie rescan");        log("  link " + self.rescan())
         log("driver build + load");    self.driver()
         log("ddr calibration");        log("  " + self.ddr_init())
         log("host tools");             self.host_tools()
+        if tune_runner:
+            from .ddr_tune import tune
+            log("ddr read taps under load")
+            res = tune(self.build_dir, tune_runner, log=lambda s: log("  " + s))
+            with open(os.path.join(self.log_dir, "ddr_tune.json"), "w") as f:
+                json.dump(res, f, indent=1)
+            return res
+        return None

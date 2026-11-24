@@ -362,5 +362,37 @@ class TestBuildReports(unittest.TestCase):
             self.assertEqual(s["build_id"], cfg.build_id())
 
 
+class TestDdrTune(unittest.TestCase):
+    def test_best_tap(self):
+        from gemmflow.ddr_tune import best_tap
+        self.assertEqual(best_tap({10: 5, 11: 0, 12: 0, 13: 0, 14: 7, 15: 0}), (12, 3))
+        self.assertEqual(best_tap({3: 9, 4: 2, 5: 4}), (4, 0))
+
+    def test_calibrated(self):
+        from gemmflow.ddr_tune import calibrated
+        log = ("DDR3 CH0: calibration at CK step -56\n"
+               "  lane 0: write bitslip 0, read bitslip 3, delay 16 (window 11/32 taps)\n"
+               "  lane 4: write bitslip 0, read bitslip 3, delay  8 (window 11/32 taps), bit offsets [0, 2, 0, 0, 0, 2, 2, 0]\n"
+               "DDR3 CH0: check, 200 random addresses\n"
+               "DDR3 CH1: calibration at CK step -42\n"
+               "  lane 0: write bitslip 0, read bitslip 3, delay  5 (window 11/32 taps)\n"
+               "DDR3 CH1: check, 200 random addresses\n")
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "logs"))
+            with open(os.path.join(d, "logs", "ddr_init.log"), "w") as f:
+                f.write(log)
+            self.assertEqual(calibrated(d, 0), {0: [0, 3, 16, [0] * 8], 4: [0, 3, 8, [0, 2, 0, 0, 0, 2, 2, 0]]})
+            self.assertEqual(calibrated(d, 1), {0: [0, 3, 5, [0] * 8]})
+
+    def test_runner_cmd(self):
+        from gemmflow.runner import runner_cmd
+        cfg = BuildCfg.load(os.path.join(ROOT, "configs", "gemm", "pe32x8_ta_t1024x512.json"))
+        cmd = runner_cmd(cfg, "/b")
+        self.assertEqual(cmd[0], "/b/sw/gemm_runner")
+        self.assertIn("--float-exact", cmd)
+        self.assertIn("--transposed-a", cmd)
+        self.assertEqual(cmd[cmd.index("--dtype") + 1], "float32")
+
+
 if __name__ == "__main__":
     unittest.main()

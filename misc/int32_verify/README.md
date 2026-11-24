@@ -18,6 +18,14 @@ Evidence:
 
 The sections below record how it was found; the timing-closure hypotheses were wrong.
 
+## Host-only fix (08:10–08:30): tune the taps under load
+`load_tune.py` (now `gemmflow.ddr_tune`, used by `gemm_run.py --ddr-load-tune` and the campaign key
+`"ddr_load_tune"`): per byte lane, sweep the read tap ±4 around the calibrated value while the build's kernel runs an
+exact 1024³ check, take the centre of the longest zero-error run, two passes. `tune_and_screen.sh` = screen, tune,
+screen. All four failing builds become exact (int32 200 and 180 MHz, int8 PE 16×64, float32 `a88777ec`: 0 bad over
+2×2048³ full each). Logs: `logs/tune_*.log`. Under load, windows are 3–8 taps (CH0) and 2–7 (CH1), and the idle centre
+of CH0 lanes 0–2 is 1–2 taps too high.
+
 ## Root-cause evidence (07:50–08:10)
 
 **Which bits flip.** `gemm_runner --dump-inputs` writes A and B; `solve_delta.py` finds, for each wrong C row-tile,
@@ -57,8 +65,8 @@ the same marginal PHY, just less coupling.
 ## Fix options (SoC/board changes, for the user to decide: they touch `boards/dupcb`, so every build rebuilds)
 1. **Per-bit read delay**: gate the IDELAYE2 `CE`/`LD` with `dly_sel_bits` as the bitslips already are, and
    calibrate every DQ bit at the centre of its own window (per-bit deskew).
-2. **Calibrate under load**: choose the lane taps (or CK phase) with the GEMM array running. This can be done from
-   the host with the existing PHY; `lane_sweep.sh` is the prototype.
+2. **Calibrate under load**: choose the lane taps (or CK phase) with the GEMM array running. This works from the
+   host with the existing PHY and is now in the flow as an opt-in step (`gemmflow.ddr_tune`, above).
 3. Capture with DQS (a K7DDRPHY-style read path) or lower the DDR rate for margin.
 4. Keep exact verification on (done: integers always, float via `--float-exact`).
 

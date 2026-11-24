@@ -1,6 +1,6 @@
 {
   "campaign": "dtype_clock",
-  "comment": "docs/notes2: clock headroom of the best verified int8 array from int8_scale (PE 32x32, tile 512x1024, 379 GOP/s at 200 MHz). 200 MHz default reuses that build.",
+  "comment": "docs/notes2: clock headroom of the best verified int8 array from int8_scale (PE 32x32, tile 512x1024, 379 GOP/s at 200 MHz). 200 MHz default reuses that build. DDR read taps tuned under load at bring-up (gemmflow.ddr_tune, misc/int32_verify).",
   "base": "configs/gemm/pe32x8_ta_t1024x512.json",
   "build_grid": {
     "@format": [
@@ -51,5 +51,6 @@
   ],
   "jobs": {
     "hls": "auto"
-  }
+  },
+  "ddr_load_tune": true
 }

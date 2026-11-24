@@ -247,6 +247,30 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         - per-bit IDELAY control plus per-bit deskew calibration;
         - calibrating the lane taps under GEMM load (host-only, prototype `lane_sweep.sh`);
         - DQS-based capture or a lower DDR rate.
+- [x] **Host-only fix: read taps tuned under load** (08:10–08:30). `gemmflow.ddr_tune` keeps the bring-up's
+      calibration and, per byte lane, sweeps the read tap around it while the build's own kernel runs an exact
+      check, then takes the centre of the zero-error run (2 passes; misc prototype `load_tune.py`). Applied to every
+      build that had failed (2×2048³ full afterwards, 8.4 M entries each):
+
+      | Build | Bad before (2048³ full) | Bad after | Taps changed (calibrated → tuned) |
+      |---|---|---|---|
+      | int32 PE 32×8 200 MHz `c0ddddde` | 97–102 k per 1024³ | **0** | CH0 lanes 0/1: 16 → 14 (lane 1 13–15 clean) |
+      | int32 PE 32×8 180 MHz | 2–4 k | **0** | CH0 lanes 0–4 down 1–2 taps |
+      | int8 PE 16×64 | ~31 k | **0** | CH1 lanes 0–2/7 down 1–2 taps |
+      | float32 PE 32×8 200 MHz `a88777ec` | ~34 k (bit-exact check) | **0**, max rel 0.0 | CH0 lanes 0–2 down 1–2 taps |
+
+      - The under-load windows are 3–8 taps on CH0 and 2–7 on CH1; idle calibration reported 10–12. The idle
+        centre sits at or just past the upper edge on CH0 lanes 0–2.
+      - Throughput is unchanged (e.g. int32 98.59 GOP/s at 8192³).
+      - In the flow: `Board.bring_up(tune_runner=…)`, `gemm_run.py --ddr-load-tune`, campaign key
+        `"ddr_load_tune": true` (rows: `ddr_load_tuned`, `ddr_tune_bad_before/after`; result in
+        `<build>/logs/ddr_tune.json`).
+      - End to end `gemm_run.py --program --ddr-load-tune` on `c0ddddde`: 102 400 bad → 0, then 2048³ full OK,
+        60 s including JTAG.
+      - Off by default. Enabled for the campaigns that had not started yet (`fixed_point`, `dtype_clock`).
+        `int4_probe` started before this and runs untuned (re-run with `--resume` and the key if it fails).
+      - A permanent fix belongs in the SoC (per-bit IDELAY, DQS capture) or in `ddr_init.py` (calibrate under load).
+        Both touch `boards/dupcb` and invalidate every build: user decision.
 - [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.
       `dtype_clock` now uses the best verified int8 array, PE 32×32 tile 512×1024 (06:50); its 200 MHz default
       point reuses that build.

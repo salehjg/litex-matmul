@@ -139,6 +139,16 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   `fixed` | `ufixed` with `data_bits` (8/16/32/64; 2/4 packed) and `frac_bits` (fixed point), no kernel change; the
   kernel accumulates in the element type (integer results wrap). Rows carry `dtype`, `dtype_kind`, `dtype_bits`, … and
   `gops`; `gemm_runner --dtype int8` etc. verifies exactly. Campaigns `configs/dse/dtype_*.json`, `int*_scale.json`.
+- **Verification is exact:** integer and fixed-point formats always. float32 bit for bit against a reference that
+  accumulates in the kernel's order (`--float-exact`, default in `gemm_dse.py` and `gemm_run.py`; rows carry
+  `verify_exact`).
+- **DDR read margin under load** ([misc/int32_verify](misc/int32_verify/README.md)): with the GEMM array busy, the
+  idle-calibrated read taps of some byte lanes sit at the edge of their window. Single DQ bits then flip on odd beats
+  (CH0 DQ5 on this card), which gives wrong C entries in some builds although the kernel is right.
+  - `gemm_run.py --ddr-load-tune`, or `"ddr_load_tune": true` in a campaign, re-tunes the taps under load after
+    calibration (`gemmflow.ddr_tune`, ~30 s, host-only). Rows record `ddr_load_tuned` and the error counts before
+    and after.
+  - The board lock `build/.board.lock` keeps tools from sharing the card.
 - **Sizes:** N, K, M must be whole bus words for the build (64-byte words: K and M multiples of 16 floats, N too with
   transposed A); `gemm_runner` rejects other sizes. The kernel computes whole memory tiles, so matrices smaller than
   the tile run at a fraction of the peak (size sweep in the progress file).

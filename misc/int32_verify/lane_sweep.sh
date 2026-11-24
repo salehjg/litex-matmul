@@ -7,7 +7,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=$(cd "$1" && pwd); CH=${2:-0}; LANE=${3:-0}; shift 3 2>/dev/null; DELTAS=${*:-"-3 -2 -1 0 1 2 3"}
 OUT=$ROOT/misc/int32_verify/logs; mkdir -p "$OUT"
 cd "$ROOT"
-exec 9>"$ROOT/build/.board.lock"; flock 9; export GEMM_BOARD_LOCK_HELD=1
+[[ -n "${GEMM_BOARD_LOCK_HELD:-}" ]] || { exec 9>"$ROOT/build/.board.lock"; flock 9; export GEMM_BOARD_LOCK_HELD=1; }  # the card is ours
 .venv/bin/python scripts/gemm_run.py "$B" --program --sizes 512x512x512 --verify full --results "$OUT/bringup.jsonl" 2>&1 | grep -o "verify.*" || true
 # calibrated values of this lane, from the bring-up's ddr_init.log
 read -r WBS RBS D0 OFFS < <(python3 - "$B/logs/ddr_init.log" "$CH" "$LANE" <<'PY'

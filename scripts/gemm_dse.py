@@ -39,6 +39,7 @@ from gemmflow.board import Board, board_lock           # noqa: E402
 from gemmflow.config import DEVICE, BuildCfg, ConfigError  # noqa: E402
 from gemmflow.manifest import manifest                 # noqa: E402
 from gemmflow.results import ResultStore               # noqa: E402
+from gemmflow.runner import runner_cmd                 # noqa: E402
 from gemmflow.steps import HlsStep, SimStep, SocStep, HostStep, write_build_reports  # noqa: E402
 from gemmflow.tools import ToolError                   # noqa: E402
 
@@ -256,21 +257,20 @@ def main():
                 continue
             print(f"run {cfg.build_id()}: bring-up", flush=True)
             with board_lock(log=lambda s: print(f"  {s}", flush=True)):  # the card, for this build's bring-up and sizes
+                tune = bool(camp.get("ddr_load_tune"))  # campaign key: DDR read taps tuned under load (ddr_tune)
                 try:
-                    Board(bdir).bring_up(program=True, log=lambda s: print(f"  [bring-up] {s}", flush=True))
+                    tuned = Board(bdir).bring_up(program=True, log=lambda s: print(f"  [bring-up] {s}", flush=True),
+                                                 tune_runner=runner_cmd(cfg, bdir) if tune else None)
                 except (ToolError, OSError) as e:
                     print(f"  bring-up failed: {e}  (stopping: the card may need a rescan or a warm reboot; --resume)")
                     runs.write_csv()
                     sys.exit(1)
-                mm = cfg.memory_map
+                ddr = {"ddr_load_tuned": tune, **({"ddr_tune_bad_before": tuned["start_bad"],
+                                                    "ddr_tune_bad_after": tuned["end_bad"]} if tuned else {})}
                 for n, k, m in todo:
-                    cmd = [os.path.join(bdir, "sw", "gemm_runner"), "--n", str(n), "--k", str(k), "--m", str(m),
-                           "--reps", str(reps), "--warmup", str(rt.get("warmup", 0)),
-                           "--verify", rt.get("verify", "sampled"), "--map", f"a={mm.a},b={mm.b},c={mm.c}",
-                           "--expect-build-id", cfg.config_hash()[:8], "--dtype", cfg.numeric().spec, "--json"] + \
-                          (["--float-exact"] if cfg.numeric().kind == "float" else []) + \
-                          (["--transposed-a"] if cfg.kernel.transposed_a else []) + \
-                          ["--multiples", ",".join(map(str, cfg.size_multiples()))]
+                    cmd = runner_cmd(cfg, bdir) + ["--n", str(n), "--k", str(k), "--m", str(m), "--reps", str(reps),
+                                                   "--warmup", str(rt.get("warmup", 0)),
+                                                   "--verify", rt.get("verify", "sampled"), "--json"]
                     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
                     for line in proc.stdout.splitlines():
                         if line.startswith("{"):
@@ -286,7 +286,7 @@ def main():
                                          "git_sha": manifest()["git_sha"],
                                          "git_dirty": manifest()["git_dirty"], "peak_gops": cfg.peak_gops(), **extra,
                                          "pct_of_peak": round(100 * gops / cfg.peak_gops(), 2),
-                                         "config": cfg.to_dict(), **row, **nf.columns(),
+                                         "config": cfg.to_dict(), **row, **nf.columns(), **ddr,
                                          "build_id": cfg.build_id(), "hw_build_id": row.get("build_id")})
                             unit = "GFLOP/s" if nf.kind == "float" else "GOP/s"
                             print(f"  {n}x{k}x{m} {nf.spec} rep {row['rep']}: {gops:.2f} {unit}, verify {status}")
