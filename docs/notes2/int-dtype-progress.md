@@ -305,6 +305,22 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       - fixed32.16 needs 1064 DSPs against int32's 808: the 64-bit product before the shift by 16.
       - SoC: 79.3k LUT, 106.3k FF, 654.5 BRAM tiles. HLS estimate 4.209 ns, like int32.
       - Re-queued with `vivado.preset: aggressive` (which gave int32 at this array +0.044 ns), before `int4_wide`.
+- [x] **`fixed_point` retry done (aggressive preset, 11:20–11:45): fixed32.16 PE 32×8 meets 200 MHz, exact.**
+
+      | Format (PE 32×8, 200 MHz) | Preset | WNS ns | DSP | SoC LUT | SoC FF | BRAM tiles | 8192³ GOP/s (% of peak) | Verify |
+      |---|---|---|---|---|---|---|---|---|
+      | fixed16.8 (`dtype_same_array`) | default | — | 296 | — | — | — | 98.64 | ok |
+      | int32 (`int32_margin`) | aggressive | 0.044 | 808 | — | — | — | 98.59 | ok, full screen exact |
+      | **fixed32.16** | aggressive | **0.060** | **1064** | 79.2k | 106.4k | 654.5 | **98.59** (96.3 %) | ok, **full screen exact** |
+      | fixed32.16 | default | −0.076 | 1064 | 79.3k | 106.3k | 654.5 | — | timing failed |
+
+      - Same speed as int32 (the array, not the format, sets the rate), at 1.3× its DSPs: the full 64-bit product is
+        built before the shift by 16 (AP_TRN) and the wrap to 32 bits.
+      - Bit-exact against the host model (`numeric.hpp`: truncate each product, wrap each sum): 2048³ to 8192³
+        sampled on every rep, plus the full screen (2 seeds × 2048³, 8.4 M entries, 0 bad,
+        `misc/int32_verify/screen.sh`). DDR load tuning found 0 bad before, moved no tap.
+      - As with int32, the aggressive preset is what closes 200 MHz at this array; the default preset misses by
+        0.08 ns on the `cPipes` FIFO address fanout.
 - [x] **Flow bug found and fixed (09:27): concurrent HLS runs in one directory.** `dtype_clock` is the first
       campaign whose points differ only in a Vivado setting (preset), so 225 MHz default and aggressive share an HLS
       hash and directory. The parallel HLS stage started both, and one died (225 MHz default: `vitis-run` exit 1,
