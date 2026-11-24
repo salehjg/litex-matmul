@@ -299,7 +299,13 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       - Full exact screens (2×2048³ each, 8.4 M entries) of both PE 32×64 builds: 0 bad, without DDR tuning.
       - The rough DSP-per-MAC estimate in `numeric.py` now counts 0 DSPs for ≤8-bit multiplies (the warning was
         wrong for int8/int4).
-- [ ] Queued `int4_wide` (09:15, after `dtype_clock`): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
+- [x] **`fixed_point` (fixed32.16, PE 32×8, 200 MHz, default preset): timing failed** (09:08–09:26).
+      - WNS −0.076 ns (10 failing endpoints), so no runs. The failing path is the `cPipes` FIFO address fanout into
+        256 SRL bits (95 % routing), a path class already near-critical in the int32 builds.
+      - fixed32.16 needs 1064 DSPs against int32's 808: the 64-bit product before the shift by 16.
+      - SoC: 79.3k LUT, 106.3k FF, 654.5 BRAM tiles. HLS estimate 4.209 ns, like int32.
+      - Re-queued with `vivado.preset: aggressive` (which gave int32 at this array +0.044 ns), before `int4_wide`.
+- [ ] Queued `int4_wide` (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
       and PE 48×64 (3072 MACs); at most 2 HLS jobs at once (RAM); DDR tuning on.
 - [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.
       `dtype_clock` now uses the best verified int8 array, PE 32×32 tile 512×1024 (06:50); its 200 MHz default
