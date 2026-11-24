@@ -113,9 +113,39 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 
 ## Phase 6: FPGA campaigns 🟡
 User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, unattended overnight).
-- [ ] `dtype_same_array` (int8, int16, int32, fixed16.8 at PE 32×8, tile 1024×512, 200 MHz; float32 reused):
-      queued behind `dtype_hls` (Vivado needs the RAM the HLS jobs use), log `results/dtype_same_array/dse.log`.
+- [x] **`dtype_same_array` done** (2026-11-24 04:53–05:53, `results/dtype_same_array/`): PE 32×8, tile 1024×512,
+      tA, 200 MHz, default preset; peak 102.4 GOP/s for every format. All builds meet timing.
+
+      | Format | DSP | SoC LUT | SoC FF | BRAM tiles | kernel LUT | WNS ns | 2048³ / 4096³ / 8192³ GOP/s | Verify |
+      |---|---|---|---|---|---|---|---|---|
+      | float32 (reused) | 1320 | 154.3k | 225.4k | 654.5 | 125.6k | 0.050 | 97.37 / 98.18 / 98.59 | ok |
+      | int8 | **40** | 69.4k | 75.7k | 299.5 | 40.8k | 0.005 | 97.53 / 98.27 / 98.64 | ok (exact) |
+      | int16 | 296 | 67.0k | 83.0k | 428.0 | 38.3k | 0.038 | 97.53 / 98.27 / 98.64 | ok (exact) |
+      | int32 | 808 | 81.4k | 102.2k | 654.5 | 52.6k | 0.028 | 97.37 / 98.18 / 98.59 | **failed** |
+      | fixed16.8 | 296 | 67.3k | 79.0k | 428.5 | 38.6k | 0.046 | 97.53 / 98.27 / 98.64 | ok (exact) |
+
+      - Equal ops per cycle give equal throughput (compute bound, ~96 % of peak). The narrow formats are 0.1 % faster
+        (fewer bytes per tile).
+      - The cost falls sharply with width: int8 needs 1/33 of float's DSPs (Vivado maps the 8-bit multiplies to LUTs,
+        HLS had estimated DSPs), 45 % of its LUTs and 46 % of its BRAM. int16 and fixed16.8 cost the same.
+      - **int32 fails exact verification** (10–19 % of sampled entries). Debugged on the card,
+        [misc/int32_verify](../../misc/int32_verify/README.md): whole C rows inside one M tile are wrong, rows with
+        `i mod 16` ∈ {6, 10, 12, 14}. Those are A lanes in the 512-bit word (channel 0). Only the upper bits are
+        wrong, and only when they toggle: ±100 data fails, 0…100, −100…0 and constant data pass. That is a silicon
+        sampling problem in this placement, not arithmetic. Suspect: the LiteDRAM native-port CDC into `accel` is
+        declared asynchronous, so Vivado never times it.
+      - **float32 checked exactly** with the new integer-valued float mode (`gemm_runner --value-range` for float32,
+        exact comparison; 1024³ at ±100, ±127, 0…127): 0 bad. Earlier float results are not affected.
+      - Tools added: `gemm_runner --dump-bad FILE` (mismatches as `i j got ref`) and `--value-range` for float32.
 - [ ] Queued behind it (05:05): `dtype_size_sweep` (runs on the int8 build), `int8_scale`, `int16_scale`.
+      `dtype_size_sweep` finished 05:53 (results below); `int8_scale` started 05:53 (HLS done for all 3 arrays).
+- [x] **`dtype_size_sweep` done** (int8 PE 32×8 build, 45 sizes × 2 reps, all verified exactly,
+      `results/dtype_size_sweep/`). Same whole-tile behaviour as float: the kernel always computes full
+      1024 (N) × 512 (M) memory tiles. The kernel time for N = 256/512/1024 is the same (1024×1024×1024: 22.36 ms,
+      96.0 GOP/s; 256×1024×1024: 22.36 ms, 24.0 GOP/s), and M = 256 takes as long as M = 512 (half rate). K costs
+      little: K = 256 already reaches 88 GOP/s on full tiles, K ≥ 1024 reaches 96–98 GOP/s. Host overhead (DMA plus
+      packing, e2e − kernel) at 1024³ is 5.6 ms (20 % of e2e). The float32 build at the same array spends 15.5 ms
+      (41 %; e2e 37.9 ms against a 22.4 ms kernel) because it moves 4× the bytes. At 4096³ int8 spends 55 ms (4 %).
 - Then: `int4_probe` (HLS ports are 512 bits, so it is worth building), `fixed_point` (fixed32.16), `dtype_clock`
   (on the best int8 array).
 

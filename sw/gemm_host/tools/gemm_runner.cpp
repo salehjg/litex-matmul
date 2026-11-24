@@ -9,8 +9,12 @@
 // whole code range unless --value-range LO,HI (codes) is given; results are checked exactly against a model of the
 // kernel's arithmetic (src/numeric.hpp: products and sums wrap at the element width). N, K, M must be multiples of
 // the build's bus words (--multiples; default 512/bits elements per 64-byte word). One JSON line per repetition with
-// --json. Exit status: 0 = all repetitions verified (or --verify off), 1 = mismatch, 2 = usage, 3 = error.
+// --json. For float32, --value-range LO,HI draws integer values instead of uniform(-1, 1) and checks exactly (every
+// partial sum is an integer below 2^24, so the kernel's float result must equal the reference bit for bit): a
+// corrupted element is then visible instead of hidden by the relative tolerance. --dump-bad FILE writes the
+// mismatching entries as "i j got ref" lines. Exit status: 0 = all repetitions verified (or --verify off), 1 = mismatch, 2 = usage, 3 = error.
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cinttypes>
 #include <cmath>
@@ -44,14 +48,15 @@ struct Options {
     // 0 = not given: whole 64-byte words (N: 512/bits with transposed A, else 1; K and M: 512/bits).
     uint32_t mult[3] = {0, 0, 0};
     Dtype dt;                   // element format of the build (default float32)
-    bool have_range = false;    // --value-range: integer/fixed codes in [lo, hi]
+    bool have_range = false;    // --value-range: integer/fixed codes in [lo, hi] (float32: integer values, exact check)
     int64_t lo = 0, hi = 0;
+    std::string dump_bad;       // --dump-bad FILE: integer/fixed mismatches as "i j got ref" lines (debugging)
 };
 
 [[noreturn]] void usage(const char *argv0) {
     std::fprintf(stderr, "usage: %s --n N --k K --m M [--reps R] [--warmup W] [--seed S] [--verify full|sampled|off]\n"
                          "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a]\n"
-                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--json]\n", argv0);
+                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--dump-bad FILE] [--json]\n", argv0);
     std::exit(2);
 }
 
@@ -89,10 +94,17 @@ Options parse(int argc, char **argv) {
             long long lo, hi;
             if (std::sscanf(next().c_str(), "%lld,%lld", &lo, &hi) != 2 || lo > hi) usage(argv[0]);
             o.have_range = true; o.lo = lo; o.hi = hi;
-        } else usage(argv[0]);
+        } else if (a == "--dump-bad") o.dump_bad = next();
+        else usage(argv[0]);
     }
-    if (o.have_range && (o.dt.is_float() || o.lo < o.dt.min_code() || (o.dt.bits < 64 && o.hi > o.dt.max_code()))) {
-        std::fprintf(stderr, "error: --value-range needs an integer/fixed dtype and codes in [%lld, %lld]\n",
+    if (o.have_range && o.dt.is_float()) {
+        const double vmax = double(std::max(std::llabs(o.lo), std::llabs(o.hi)));
+        if (double(o.k) * vmax * vmax >= double(1 << 24)) {
+            std::fprintf(stderr, "error: float32 --value-range: K * max|v|^2 must stay below 2^24 for an exact check\n");
+            std::exit(2);
+        }
+    } else if (o.have_range && (o.lo < o.dt.min_code() || (o.dt.bits < 64 && o.hi > o.dt.max_code()))) {
+        std::fprintf(stderr, "error: --value-range: codes must be in [%lld, %lld]\n",
                      (long long)o.dt.min_code(), (long long)o.dt.max_code());
         std::exit(2);
     }
@@ -126,6 +138,16 @@ void ref_entry(const std::vector<float> &a, const std::vector<float> &bt, uint32
 }
 
 struct Verify { size_t checked = 0, bad = 0; double max_rel = 0; };
+using BadList = std::vector<std::vector<std::array<int64_t, 4>>>;  // per thread: i, j, got, ref (--dump-bad)
+
+void write_bad(const Options &o, const BadList &bad) {
+    if (o.dump_bad.empty()) return;
+    if (FILE *f = std::fopen(o.dump_bad.c_str(), "w")) {
+        for (auto &b : bad) for (auto &e : b)
+            std::fprintf(f, "%lld %lld %lld %lld\n", (long long)e[0], (long long)e[1], (long long)e[2], (long long)e[3]);
+        std::fclose(f);
+    }
+}
 
 Verify verify(const std::vector<float> &a, const std::vector<float> &bt, const std::vector<float> &c,
               const Options &o, uint64_t seed) {
@@ -134,6 +156,7 @@ Verify verify(const std::vector<float> &a, const std::vector<float> &bt, const s
     const auto idx = check_indices(o, seed);
     const unsigned nt = std::max(1u, std::thread::hardware_concurrency());
     std::vector<Verify> part(nt);
+    BadList bad(nt);
     std::vector<std::thread> th;
     for (unsigned t = 0; t < nt; t++)
         th.emplace_back([&, t]() {
@@ -145,12 +168,17 @@ Verify verify(const std::vector<float> &a, const std::vector<float> &bt, const s
                 const double rel = absr > 0 ? err / absr : err;
                 part[t].checked++;
                 part[t].max_rel = std::max(part[t].max_rel, rel);
-                if (err > tol_factor * absr + 1e-30 || std::isnan(got)) part[t].bad++;
+                const bool wrong = o.have_range ? !(got == ref) : (err > tol_factor * absr + 1e-30 || std::isnan(got));
+                if (wrong) {
+                    part[t].bad++;
+                    if (!o.dump_bad.empty()) bad[t].push_back({int64_t(idx[q].first), int64_t(idx[q].second), int64_t(got), int64_t(ref)});
+                }
             }
         });
     for (auto &x : th) x.join();
     Verify v;
     for (auto &p : part) { v.checked += p.checked; v.bad += p.bad; v.max_rel = std::max(v.max_rel, p.max_rel); }
+    write_bad(o, bad);
     return v;
 }
 
@@ -161,6 +189,7 @@ Verify verify_codes(const std::vector<int64_t> &a, const std::vector<int64_t> &b
     const auto idx = check_indices(o, seed);
     const unsigned nt = std::max(1u, std::thread::hardware_concurrency());
     std::vector<Verify> part(nt);
+    BadList bad(nt);
     std::vector<std::thread> th;
     for (unsigned t = 0; t < nt; t++)
         th.emplace_back([&, t]() {
@@ -173,12 +202,14 @@ Verify verify_codes(const std::vector<int64_t> &a, const std::vector<int64_t> &b
                     part[t].bad++;
                     const __int128 d = __int128(got) - __int128(ref);
                     part[t].max_rel = std::max(part[t].max_rel, double(d < 0 ? -d : d));
+                    if (!o.dump_bad.empty()) bad[t].push_back({int64_t(i), int64_t(j), got, ref});
                 }
             }
         });
     for (auto &x : th) x.join();
     Verify v;
     for (auto &p : part) { v.checked += p.checked; v.bad += p.bad; v.max_rel = std::max(v.max_rel, p.max_rel); }
+    write_bad(o, bad);
     return v;
 }
 
@@ -239,9 +270,11 @@ int main(int argc, char **argv) {
         std::vector<uint8_t> a_dev(round64(bytes_a), 0), b_dev(round64(bytes_b), 0);
         if (dt.is_float()) {
             std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+            std::uniform_int_distribution<int64_t> idist(o.lo, o.hi);
+            auto value = [&]() { return o.have_range ? float(idist(rng)) : dist(rng); };
             af.resize(size_t(o.n) * o.k); bf.resize(size_t(o.k) * o.m); btf.resize(size_t(o.m) * o.k);
-            for (auto &x : af) x = dist(rng);
-            for (auto &x : bf) x = dist(rng);
+            for (auto &x : af) x = value();
+            for (auto &x : bf) x = value();
             for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) btf[size_t(col) * o.k + r] = bf[size_t(r) * o.m + col];
             std::vector<float> a_send;
             if (o.transposed_a) {
