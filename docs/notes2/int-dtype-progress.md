@@ -283,6 +283,24 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         existing stamps include today's cache files), so it is left for you.
       - The DSE smoke test with `"ddr_load_tune": true` (run-only campaign on `c0ddddde`, results removed):
         102 400 → 0 bad at bring-up, 2048³ full ok, row fields present.
+- [x] **`int4_probe` done** (07:50–09:08, `results/int4_probe/`; untuned DDR; 200 MHz, tA, default preset).
+      **The packed sub-byte tier T3 works end to end on the card:** 128 int4 lanes per 64-byte word, packed by the
+      host, exact results.
+
+      | Build | MACs | DSP | SoC LUT | SoC FF | BRAM tiles | WNS ns | 2048³ / 4096³ GOP/s (% of peak) | Verify |
+      |---|---|---|---|---|---|---|---|---|
+      | int4 PE 32×32 (512×1024) | 1024 | 39 | 82.1k | 81.7k | 300.5 | 0.002 | 375.8 / 378.6 (92 %) | ok |
+      | uint4 PE 32×32 | 1024 | 39 | 82.1k | 81.7k | 300.5 | 0.043 | 375.8 / 378.6 | ok |
+      | **int4 PE 32×64 (512×2048)** | 2048 | 39 | 116.9k | 103.9k | 414.5 | 0.015 | 751.0 / **756.7** (92 %) | ok, **full screen exact** |
+      | uint4 PE 32×64 | 2048 | 39 | 116.8k | 103.9k | 414.5 | 0.043 | 751.0 / 756.7 | ok, full screen exact |
+
+      - **756.7 GOP/s for int4: 6.8× the best float build and 2× int8 PE 32×32**, with 39 DSPs and 39 % of the
+        LUTs. The 4-bit multiplies are tiny: Vivado needs 117k LUTs where HLS estimated 240k.
+      - Full exact screens (2×2048³ each, 8.4 M entries) of both PE 32×64 builds: 0 bad, without DDR tuning.
+      - The rough DSP-per-MAC estimate in `numeric.py` now counts 0 DSPs for ≤8-bit multiplies (the warning was
+        wrong for int8/int4).
+- [ ] Queued `int4_wide` (09:15, after `dtype_clock`): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
+      and PE 48×64 (3072 MACs); at most 2 HLS jobs at once (RAM); DDR tuning on.
 - [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.
       `dtype_clock` now uses the best verified int8 array, PE 32×32 tile 512×1024 (06:50); its 200 MHz default
       point reuses that build.

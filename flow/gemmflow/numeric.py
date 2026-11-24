@@ -103,7 +103,10 @@ class NumericFormat:
             return 5
         if self.family == "half":
             return 3
-        mult = 0 if mult_resource == "fabric" else (1 if self.bits <= 18 else math.ceil(self.bits / 25) * math.ceil(self.bits / 18))
+        if mult_resource == "fabric" or (mult_resource is None and self.bits <= 8):
+            mult = 0  # Vivado maps 8-bit and narrower multiplies to LUTs (int8/int4 builds: ~40 DSPs in total)
+        else:
+            mult = 1 if self.bits <= 18 else math.ceil(self.bits / 25) * math.ceil(self.bits / 18)
         add = 1 if add_resource == "dsp" else 0
         return mult + add
 
