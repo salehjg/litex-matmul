@@ -455,27 +455,23 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         For int4 PE 64×64 that is tile 1024×4096, about +512 BRAM18 by the HLS estimate (1142 → ~1650, under the
         1760 gate). If the 73 lost cycles stay fixed: 1024/1097 = 93 % → ~1375 GOP/s at 180 MHz. For PE 32×64 at
         225 MHz, tile 1024×2048: 1024/1065 = 96 % → ~886 GOP/s. 
-- [ ] 🟡 `int4_tile` (started 21:54, `results/int4_tile/dse.log`): int4 PE 32×64 tile 1024×2048 at 225 MHz default and
-      PE 64×64 tile 1024×4096 at 180 MHz aggressive (the clocks and presets of the best builds). One HLS run at a
-      time, then one Vivado build at a time; 4096³ and 8192³, DDR tuning on.
-      - HLS done (~23:05): **the same BRAM18 estimate as the half-size tiles** (662 and 1142), est. 4.209 ns, DSP 34/35,
-        LUT 244k/455k, ports 512 bits. Each PE has one C buffer of PM × 4 = 256 bits per word (`cBuffer`, 1R1W); HLS
-        counts it as 15 BRAM18 at both 512 and 1024 words (1024 × 18 mode). Vivado packed the 512-word buffer
-        into fewer blocks (512 × 72), so the real cost should still grow: about +4 RAMB36 per PE, +128 for PE 32×64
-        and +256 for PE 64×64 (~910 of 955 tiles). The HLS-based resource gate does not see this. Vivado builds
-        running (PE 32×64 first).
-- [x] **Both campaigns stopped (~18:58) by Claude Code's memory guard**, not by a failure in the flow. `int4_clock`'s HLS
-      finished sooner than expected (both 225 MHz points: est. 4.144 ns, 34 DSP, 662 BRAM18, stamped), and its first
-      Vivado build started next to `int4_pe64`'s 180 MHz aggressive build. Two Vivado runs of this size (~7 GB each)
-      plus the rest left the machine critically low, and the session's background shells were stopped. The kernel OOM
-      killer did not fire.
-      - State: no tool processes left. The two interrupted SoC builds (`i4_pe32x64_..._225mhz_tA-9fd9e3a8`,
-        `i4_pe64x64_..._180mhz_tA_aggressive-2b2028f3`) have no stamp and no bitstream, so a restart rebuilds them.
-        All HLS runs are stamped.
-      - Lesson: one Vivado build at a time on this 15 GB machine. A DSE campaign can move from HLS to Vivado at any
-        point.
-      - Restarted on the user's go (19:10), one after the other in one shell: `int4_pe64 --resume` (`dse_3.log`; 180 MHz
-        aggressive, explore), then `int4_clock --resume` (225 MHz default, explore). Only one Vivado run at a time.
+- [x] **`int4_tile` done** (21:54–23:53, `results/int4_tile/dse.log`): int4 PE 32×64 tile 1024×2048 at 225 MHz default and
+      PE 64×64 tile 1024×4096 at 180 MHz aggressive (the clocks and presets of the best builds), twice the work per k
+      step (tile_n/PN · tile_m/PM = 1024). **The fixed-loss model holds: both gain what it predicted.**
+
+      | Build | WNS / WHS ns | SoC LUT | FF | BRAM tiles | DSP | Build | 4096³ / 8192³ GOP/s | Lost per k step |
+      |---|---|---|---|---|---|---|---|---|
+      | PE 32×64, 1024×2048, 225 MHz | 0.031 / 0.014 | 118.3k | 89.9k | 414.5 | 40 | 18 min | 881.3 / **884.5** (96.0 %; predicted ~886) | 43 of 1024 |
+      | PE 64×64, 1024×4096, 180 MHz aggr. | 0.019 / 0.016 | 201.2k | 135.7k | 652.5 | 38 | 29 min | 1360.5 / **1370.9** (93.0 %; predicted ~1375) | 77 of 1024 |
+
+      - **New int4 best: 1370.9 GOP/s** (+6.3 % over tile 512×4096), and PE 32×64 at 225 MHz 884.5 (+3.6 %). Verified
+        (sampled) on every rep; DDR tuning found 0 bad before, moved no tap.
+      - The loss per k step stays about the same when the work per step doubles (41 → 43, 73 → 77 cycles), so the
+        share halves.
+      - **BRAM did not grow**, in HLS or in Vivado: kernel RAMB36/RAMB18 285/37 (PE 32×64) and 509/69 (PE 64×64), the
+        same as the half-size tiles. My note above (that Vivado would need ~4 more RAMB36 per PE) was wrong. Why the
+        mapping has room for 1024 words was not checked.
+      - The cost of deeper tiles is the whole-tile effect: matrices should be multiples of 1024 in N.
 - [x] **Report updated** (23:20, `docs/report/`, 28 pages, 0 warnings): new section 10 "Integer and fixed-point formats"
       (tiers, flow and host support, same-array cost, wider arrays and timing, DDR read margin, tile rules, loss per
       k step, campaigns), two plots (`formats_cost`, `formats_best`), appendix table of all 31 integer/fixed builds;
