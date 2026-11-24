@@ -50,7 +50,9 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   runs. The driver's probe resets the SoC, which clears the DDR calibration; `gemmflow.board.Board.bring_up()`
   (used by `gemm_run.py --program` and `gemm_dse.py`) does it in that order.
 - **Config:** `configs/gemm/*.json` (PE counts, tiles, bus widths, FIFO depths, m_axi bursts, memory map, accel clock,
-  Vivado preset/directives/threads). Checked against every gemm_hls rule before any tool runs (`flow/gemmflow/config.py`).
+  Vivado preset/directives/threads). Checked against every gemm_hls rule before any tool runs (`flow/gemmflow/config.py`),
+  including two the kernel needs but upstream does not check: tile_m/PM ≥ PN, and tile_m/PM, tile_n/PN powers of two
+  ([misc/pe_forwarding](../misc/pe_forwarding/README.md)).
 - **Timing:** a build that misses timing anywhere is recorded as `timing_failed` and never loaded. The PCIe Gen2 x8
   core (500 MHz, inside the hard block) has only tens of ps of margin in every build and failed alone once; if a build
   fails only there, rebuild with `vivado.preset: explore` or `aggressive`.
