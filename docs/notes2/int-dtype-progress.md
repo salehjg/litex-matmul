@@ -354,8 +354,21 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         it needs a kernel or HLS-directive change, not a flow setting. The HLS estimate (4.144 ns) does not see it.
 - [ ] Queued `int4_clock` (11:35, after `int4_wide`): int4 PE 32×64 at 225 MHz × default/explore preset (peak
       921.6 GOP/s). Same 32-PE dataflow control as int8 PE 32×32, which met 225 MHz with the default preset.
-- [ ] Queued `int4_wide` (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
+- [ ] 🟡 `int4_wide` (started 11:45 (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
       and PE 48×64 (3072 MACs); at most 2 HLS jobs at once (RAM); DDR tuning on.
+      - HLS done 13:02 (all ports 512 bits):
+
+        | Array (tile) | MACs | HLS est. ns | DSP | BRAM18 | LUT (HLS) | Gate |
+        |---|---|---|---|---|---|---|
+        | PE 32×128 (512×4096) | 4096 | 4.209 | 30 | 2045 | 383k | **over budget** (2045 + 150 > 1910): not built |
+        | PE 64×64 (1024×2048) | 4096 | 4.144 | 34 | 1142 | 446k | building |
+        | PE 48×64 (768×2048) | 3072 | 4.144 | 252 | 902 | 345k | queued |
+
+      - The gate is about right for PE 32×128. Across 24 built points the kernel uses 85–95 % of the HLS BRAM18
+        estimate. The SoC outside the kernel takes 111 BRAM tiles (222 BRAM18; the gate assumes 150). So PE 32×128
+        would need ~1950–2170 of 1910. HLS LUT estimates are 2–3× Vivado for int4 (PE 32×64: 240k → 117k), so the
+        LUTs of the 4096-MAC arrays may still fit.
+      - PE 48×64 gets 252 DSPs: the non-power-of-two PN brings index multiplies.
 - [x] (stale queue notes, kept for the record) Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` →
       `fixed_point` → `dtype_clock`, all run; `dtype_size_sweep`, `int8_scale`, `int16_scale` done.
 - [x] **`dtype_size_sweep` done** (int8 PE 32×8 build, 45 sizes × 2 reps, all verified exactly,
