@@ -8,6 +8,7 @@
 # write_build_reports() writes <build>/reports/summary.json (and manifest.json) for gemm_build.py and gemm_dse.py.
 #
 
+import fcntl
 import hashlib
 import json
 import os
@@ -185,6 +186,13 @@ class SimStep(Step):
         mn, mk, mm = self.cfg.size_multiples()
         up = lambda x, m: -(-x // m) * m
         return up(32, mn), 2 * mk, up(32, mm)
+
+    def run(self, force=False):
+        """One run per sim dir at a time (points that differ only outside the HLS hash share it)."""
+        os.makedirs(os.path.dirname(self.dir), exist_ok=True)
+        with open(self.dir + ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return super().run(force)
 
     @property
     def stamp_path(self):
