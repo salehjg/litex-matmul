@@ -396,6 +396,10 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         at tile 1024×2048 missed by 0.215). Same path: `ProcessingElement_2_U0/n0_fu_98_reg` →
         `ap_sync_reg_ProcessingElement_*_U0_ap_ready_reg/R`, 6 levels, 84 % routing. SoC 199.6k LUT, 134.9k FF,
         654.5 BRAM tiles, 38 DSP; build 33 min.
+      - **200 MHz explore (18:13): timing failed, WNS −0.336 ns** (TNS −20.4). Same path class
+        (`ProcessingElement_57_U0/n0_fu_98_reg` → `ap_sync_reg_ProcessingElement_17_U0_ap_ready_reg/R`, 7 levels, 83 %
+        routing). The three 64×64 builds at 200 MHz so far give −0.215 / −0.051 / −0.336 ns: placement noise on one
+        control net. 180 MHz default builds next.
 - [x] (superseded: the tile broke rule 1) Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
       and explore presets (one HLS run), and at 180 MHz default (peak 1475 GOP/s, 0.56 ns more period). It goes first:
       4096 MACs at any of these clocks beats int4 PE 32×64 at 225 MHz (921.6 GOP/s peak).
