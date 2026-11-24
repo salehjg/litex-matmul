@@ -387,8 +387,11 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         is broken; PN 12 is fine when both hold). Every earlier board build met both rules.
       - Fix: both rules are errors in `config.py` `validate` (+3 cases in `test_rejected`; 37 tests pass). No existing campaign point
         other than the two `int4_wide` ones is affected.
-- [ ] 🟡 `int4_pe64` (started 15:46, HLS running): PE 64×64 now with **tile 512×4096** (tile_n/PN 8, tile_m/PM 64 = PN,
+- [ ] 🟡 `int4_pe64` (started 15:46, HLS done 17:10, Vivado builds running): PE 64×64 now with **tile 512×4096** (tile_n/PN 8, tile_m/PM 64 = PN,
       same per-PE C buffer as 1024×2048).
+      - HLS (both clocks): est. 4.209 ns, 35 DSP, 1142 BRAM18 (as tile 1024×2048: the per-PE C buffer is the same),
+        LUT 454k (HLS; Vivado was 2.6× lower for the 1024×2048 tile), ports 512 bits, under the resource gate.
+        Builds in order: 200 MHz aggressive, 200 MHz explore, 180 MHz default.
 - [x] (superseded: the tile broke rule 1) Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
       and explore presets (one HLS run), and at 180 MHz default (peak 1475 GOP/s, 0.56 ns more period). It goes first:
       4096 MACs at any of these clocks beats int4 PE 32×64 at 225 MHz (921.6 GOP/s peak).
