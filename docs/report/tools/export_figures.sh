@@ -13,7 +13,7 @@ OUT="$HERE/../images"
 TMP="$HERE/build/figures"
 DPI=${DPI:-180}
 names=("$@")
-[[ ${#names[@]} -gt 0 ]] || names=(figures/system plots/progress plots/roofline plots/pe_sweep plots/clock plots/e2e)
+[[ ${#names[@]} -gt 0 ]] || names=(figures/system plots/progress plots/roofline plots/clock plots/e2e)
 
 for tool in pdflatex pdfcrop pdftoppm; do
     command -v "$tool" > /dev/null || { echo "missing $tool"; exit 1; }
