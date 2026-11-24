@@ -217,6 +217,36 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       - int16 uses one DSP per MAC (16×16 multiplies fit a DSP48E1), so 1024 int16 MACs would also take ~1060 of
         the 1920 DSPs: BRAM runs out first.
       - At equal MACs int16 matches int8 (190.9 vs 191.0 GOP/s at PE 32×16) for 14× the DSPs and fewer LUTs.
+- [x] **`int32_margin` done** (07:13–07:50, resumed after a transient `cs_server` init error at JTAG programming):
+      - aggressive preset at 200 MHz (WNS 0.044 ns): 95.9 / 98.2 GOP/s, **exact** (also 2×2048³ full).
+      - 180 MHz default (WNS 0.022 ns): 86.3 / 88.4 GOP/s, **fails** (PEs 6 and 22, lane 6 again).
+
+      A lower clock gave no margin, which led to the root-cause hunt below.
+- [x] **Root cause of the wrong results: DDR3 read-capture margin under load** (07:50–08:10,
+      [misc/int32_verify](../../misc/int32_verify/README.md); supersedes the timing-closure hypotheses above).
+      - **Which bits flip.** `gemm_runner --dump-inputs` + `solve_delta.py` recover each corrupted A element. All
+        are **single-bit flips at word bit ≡ 5 (or 4/6) mod 64, i.e. DQ5 of CH0, on odd beats 3/5/7**.
+        - The PHY maps word bit = 64·beat + DQ.
+        - The int8 PE 16×64 errors (B on CH1) map to DQ5–7/13–15/29–31 on beats 3/5/7.
+        - The float PE 12 errors are mantissa flips of the same size.
+      - **Moving only CH0 lane 0's read IDELAY tap** (same bitstream and data, `lane_sweep.sh`) changes the int32
+        error rate from ~17 k (taps 13–15) to 97 k (calibrated tap 16) to ~524 k of 1 M (taps ≤ 11 and ≥ 17).
+        Calibration at idle found an 11-tap window; under GEMM load it is ~3 taps, and not fully clean even there.
+      - **Load, not traffic:** DMA streaming at the same taps with an idle core is clean (even at tap 17–18), and so
+        is the kernel with B = I (same A traffic, almost no compute).
+      - The WL7DDRPHY samples DQ with the internal `sys4x_w` clock (odd beats on `CLKB`), not DQS, and has one tap
+        per byte lane (IDELAY `CE`/`LD` are not gated by `dly_sel_bits`). Core switching noise shifts the capture
+        point, and the late bits of a lane fall off its window.
+      - **Consequences:**
+        - A build fails or passes depending on how strongly its core activity couples into the PHY, not on its
+          own correctness.
+        - "verify_failed" rows in these campaigns (int32 PE 32×8 200/180 MHz, int8 PE 16×64) are DDR read errors
+          and say nothing about the formats. Their GOP/s are valid.
+        - The integer formats themselves are correct on the card (many builds exact over 8.4 M entries each).
+      - **Fix options (SoC/board changes, not made: user decision, every build would rebuild):**
+        - per-bit IDELAY control plus per-bit deskew calibration;
+        - calibrating the lane taps under GEMM load (host-only, prototype `lane_sweep.sh`);
+        - DQS-based capture or a lower DDR rate.
 - [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.
       `dtype_clock` now uses the best verified int8 array, PE 32×32 tile 512×1024 (06:50); its 200 MHz default
       point reuses that build.

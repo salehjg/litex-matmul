@@ -57,13 +57,15 @@ struct Options {
     std::string dump_bad;       // --dump-bad FILE: mismatches as "i j got ref" lines (debugging)
     bool b_identity = false;    // --b-identity (K == M): B = I, so C = A as the kernel read it (debugging)
     bool a_identity = false;    // --a-identity (N == K): A = I, so C = B as the kernel read it (debugging)
+    std::string dump_inputs;    // --dump-inputs PREFIX: PREFIX.a / PREFIX.b raw arrays (A row-major N x K, B row-major K x M;
+                                // int64 codes, or float32) for offline analysis of mismatches (debugging)
     bool float_exact = false;   // --float-exact: float32 reference in the kernel's order (c = c + a*b, k = 0..K-1, fp32)
 };
 
 [[noreturn]] void usage(const char *argv0) {
     std::fprintf(stderr, "usage: %s --n N --k K --m M [--reps R] [--warmup W] [--seed S] [--verify full|sampled|off]\n"
                          "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a]\n"
-                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--dump-bad FILE] [--a-identity] [--b-identity] [--float-exact] [--json]\n", argv0);
+                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--dump-bad FILE] [--a-identity] [--b-identity] [--float-exact] [--dump-inputs PREFIX] [--json]\n", argv0);
     std::exit(2);
 }
 
@@ -105,6 +107,7 @@ Options parse(int argc, char **argv) {
         else if (a == "--b-identity") o.b_identity = true;
         else if (a == "--a-identity") o.a_identity = true;
         else if (a == "--float-exact") o.float_exact = true;
+        else if (a == "--dump-inputs") o.dump_inputs = next();
         else usage(argv[0]);
     }
     if (o.have_range && o.dt.is_float()) {
@@ -326,6 +329,21 @@ int main(int argc, char **argv) {
             }
             gemm::pack(dt, bi.data(), bi.size(), b_dev.data());
             ci.resize(size_t(o.n) * o.m);
+        }
+
+        if (!o.dump_inputs.empty()) {
+            auto dump = [&](const std::string &path, const void *p, size_t bytes) {
+                if (FILE *f = std::fopen(path.c_str(), "wb")) { std::fwrite(p, 1, bytes, f); std::fclose(f); }
+            };
+            if (dt.is_float()) {
+                dump(o.dump_inputs + ".a", af.data(), af.size() * sizeof(float));
+                dump(o.dump_inputs + ".b", bf.data(), bf.size() * sizeof(float));
+            } else {
+                std::vector<int64_t> bdump(size_t(o.k) * o.m);  // bti is B^T: write B row-major
+                for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bdump[size_t(r) * o.m + col] = bti[size_t(col) * o.k + r];
+                dump(o.dump_inputs + ".a", ai.data(), ai.size() * sizeof(int64_t));
+                dump(o.dump_inputs + ".b", bdump.data(), bdump.size() * sizeof(int64_t));
+            }
         }
 
         int rc = 0;
