@@ -10,7 +10,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 |---|---|---|
 | 1 | Plan and progress files | ✅ 2026-11-24 |
 | 2 | Config schema, `numeric.py`, hash compatibility, rendering, operator binding, unit tests | ✅ 2026-11-24 |
-| 3 | Host: `numeric.hpp`, `gemm_runner --dtype`, `make test`, float regression on the board | ⬜ |
+| 3 | Host: `numeric.hpp`, `gemm_runner --dtype`, `make test`, float regression on the board | ✅ 2026-11-24 |
 | 4 | Result columns, scripts, port-width check, `sim` stage, report fallback | ⬜ |
 | 5 | Campaign files, HLS-only probe `dtype_hls` | ⬜ |
 | 6 | Build and board campaigns (after "go") | ⬜ |
@@ -34,6 +34,22 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
       the 512×512 build's host stamp is older than the C2H fix).
 - [x] Tests: 30 pass (new: formats and specs, rejections, logical bus width, columns, int8/fixed/int4 configs and
       their `Config.h`, rules in elements, op bindings; updated two messages).
+
+## Phase 3: host ✅
+- [x] `sw/gemm_host/src/numeric.hpp` (header-only): spec parsing (same grammar as `numeric.py`), dense little-endian
+      packing in the `DataPack` bit order (element e at bit e·W), and the kernel-arithmetic model (products and sums
+      wrap at W bits; fixed point: product floored by 2^F = AP_TRN, AP_WRAP; accumulation mod 2^64 and one final
+      wrap, which is equivalent).
+- [x] `make -C sw/gemm_host test` (`tests/test_numeric.cpp`, no card): specs and rejections, wrap, hand-computed dot
+      products (int8, int64, fixed16.8 incl. rounding toward −∞, ufixed8.4), pack/unpack round trips at 2…64 bits,
+      nibble order. **Cross-check against Vitis `ap_int`/`ap_fixed`:** 2000 random 16-term dot products each for
+      int2, uint4, int8, uint16, int32, int64, fixed8.4, fixed16.8, ufixed16.8, fixed32.16, ufixed32.12: all equal.
+- [x] `gemm_runner --dtype <spec>` (default `float32`, unchanged behaviour) and `--value-range LO,HI` (codes):
+      integer/fixed data as raw codes, packed for the card (A^T for transposed-A builds), byte sizes from bits,
+      default multiples 512/bits, exact verification (`verify_bad`, `max_abs_err` in LSBs). JSON adds `dtype`,
+      `dtype_kind`, `dtype_bits`, `dtype_signed`, `gops` (and keeps `gflops` and `max_rel_err` for float).
+- [x] **Float regression on the card** (loaded build `…225mhz_tA_explore-8c43d008`): 2048³ 109.33 GFLOP/s, max rel
+      1.30e-07 (identical to the campaign record, same seed); 1024³ full verification OK (1 048 576 entries).
 
 ## Log
 

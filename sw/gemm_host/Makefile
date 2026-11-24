@@ -1,5 +1,6 @@
 # sw/gemm_host - host tools for GemmSoC, built per SoC build (CSR addresses come from that build's csr.h).
 #   make BUILD_DIR=build/gemm_soc            -> $(BUILD_DIR)/sw/{ddr_dma_test,gemm_runner}
+#   make test                                -> unit tests of src/numeric.hpp (no build dir or card needed)
 # gemm_runner works only on builds with the HLS kernel (gemm_* CSRs); on others it reports that and exits.
 # The build's driver must be built first (scripts/driver.sh build), it provides liblitepcie.a.
 
@@ -32,7 +33,19 @@ $(OUT)/%: $(SRC)/tools/%.cpp $(LIB_OBJS) $(LIBLITEPCIE)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ $< $(LIB_OBJS) $(LIBLITEPCIE)
 
+# Unit tests: no csr.h, no card. The Vitis headers (path from config.sh) add an ap_int/ap_fixed cross-check.
+TEST_OUT      := $(SRC)/tests/build
+VITIS_INCLUDE ?= $(shell sed -n 's|^VIVADO_SETTINGS="\(.*\)/Vivado/settings64.sh"|\1/Vitis/include|p' $(ROOT)/config.sh 2>/dev/null)
+TEST_INC      := -I$(SRC)/src $(if $(wildcard $(VITIS_INCLUDE)/ap_fixed.h),-isystem $(VITIS_INCLUDE))
+
+test: $(TEST_OUT)/test_numeric
+	$(TEST_OUT)/test_numeric
+
+$(TEST_OUT)/test_numeric: $(SRC)/tests/test_numeric.cpp $(SRC)/src/numeric.hpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(TEST_INC) -o $@ $<
+
 clean:
 	rm -rf $(OUT)
 
-.PHONY: all clean
+.PHONY: all clean test

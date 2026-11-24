@@ -1,11 +1,15 @@
 // gemm_runner.cpp - C = A * B on the FPGA (GemmSoC + HLS kernel), with timing, perf counters and verification.
 //
 //   gemm_runner --n N --k K --m M [--reps R] [--warmup W] [--seed S] [--verify full|sampled|off]
-//               [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--json]
+//               [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a] [--multiples N,K,M]
+//               [--dtype float32|int8|uint16|int4|fixed16.8|...] [--value-range LO,HI] [--json]
 //
-// Float32, row-major: A is N x K, B is K x M, C is N x M (kernels/gemm conventions). K and M must be multiples of the
-// kernel's memory width (16 floats for 64-byte buses). One JSON line per repetition with --json.
-// Exit status: 0 = all repetitions verified (or --verify off), 1 = mismatch, 2 = usage, 3 = error.
+// Row-major: A is N x K, B is K x M, C is N x M (kernels/gemm conventions). The element format must be the build's
+// (--dtype, from the build config; default float32). Integer and fixed-point data are raw codes, uniform over the
+// whole code range unless --value-range LO,HI (codes) is given; results are checked exactly against a model of the
+// kernel's arithmetic (src/numeric.hpp: products and sums wrap at the element width). N, K, M must be multiples of
+// the build's bus words (--multiples; default 512/bits elements per 64-byte word). One JSON line per repetition with
+// --json. Exit status: 0 = all repetitions verified (or --verify off), 1 = mismatch, 2 = usage, 3 = error.
 #include <algorithm>
 #include <chrono>
 #include <cinttypes>
@@ -21,6 +25,7 @@
 #include "card.hpp"
 #include "ddr_dma.hpp"
 #include "gemm_kernel.hpp"
+#include "numeric.hpp"
 
 using namespace gemm;
 
@@ -36,14 +41,17 @@ struct Options {
     bool json = false;
     bool transposed_a = false;  // build has kernel.transposed_a: send A^T (K x N)
     // N, K, M must be multiples of these (bus words / transpose width of the build, BuildCfg.size_multiples()).
-    // 0 = not given: the 64-byte float defaults (N: 16 with transposed A, else 1; K: 16; M: 16).
+    // 0 = not given: whole 64-byte words (N: 512/bits with transposed A, else 1; K and M: 512/bits).
     uint32_t mult[3] = {0, 0, 0};
+    Dtype dt;                   // element format of the build (default float32)
+    bool have_range = false;    // --value-range: integer/fixed codes in [lo, hi]
+    int64_t lo = 0, hi = 0;
 };
 
 [[noreturn]] void usage(const char *argv0) {
     std::fprintf(stderr, "usage: %s --n N --k K --m M [--reps R] [--warmup W] [--seed S] [--verify full|sampled|off]\n"
                          "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a]\n"
-                         "          [--multiples N,K,M] [--json]\n", argv0);
+                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--json]\n", argv0);
     std::exit(2);
 }
 
@@ -74,12 +82,38 @@ Options parse(int argc, char **argv) {
         else if (a == "--multiples") {
             if (std::sscanf(next().c_str(), "%u,%u,%u", &o.mult[0], &o.mult[1], &o.mult[2]) != 3) usage(argv[0]);
             for (uint32_t x : o.mult) if (x == 0) usage(argv[0]);
+        } else if (a == "--dtype") {
+            const std::string spec = next();
+            try { o.dt = Dtype::parse(spec); } catch (const std::exception &e) { std::fprintf(stderr, "error: %s\n", e.what()); std::exit(2); }
+        } else if (a == "--value-range") {
+            long long lo, hi;
+            if (std::sscanf(next().c_str(), "%lld,%lld", &lo, &hi) != 2 || lo > hi) usage(argv[0]);
+            o.have_range = true; o.lo = lo; o.hi = hi;
         } else usage(argv[0]);
     }
-    if (o.mult[0] == 0) o.mult[0] = o.transposed_a ? 16 : 1;
-    if (o.mult[1] == 0) o.mult[1] = 16;
-    if (o.mult[2] == 0) o.mult[2] = 16;
+    if (o.have_range && (o.dt.is_float() || o.lo < o.dt.min_code() || (o.dt.bits < 64 && o.hi > o.dt.max_code()))) {
+        std::fprintf(stderr, "error: --value-range needs an integer/fixed dtype and codes in [%lld, %lld]\n",
+                     (long long)o.dt.min_code(), (long long)o.dt.max_code());
+        std::exit(2);
+    }
+    const uint32_t epw = o.dt.elems_per_word();
+    if (o.mult[0] == 0) o.mult[0] = o.transposed_a ? epw : 1;
+    if (o.mult[1] == 0) o.mult[1] = epw;
+    if (o.mult[2] == 0) o.mult[2] = epw;
     return o;
+}
+
+// Sampled or full set of (i, j) entries to check.
+std::vector<std::pair<uint32_t, uint32_t>> check_indices(const Options &o, uint64_t seed) {
+    std::vector<std::pair<uint32_t, uint32_t>> idx;
+    if (o.verify == "full") {
+        for (uint32_t i = 0; i < o.n; i++) for (uint32_t j = 0; j < o.m; j++) idx.push_back({i, j});
+    } else {
+        std::mt19937_64 rng(seed ^ 0x5eed);
+        for (int s = 0; s < 4096; s++) idx.push_back({uint32_t(rng() % o.n), uint32_t(rng() % o.m)});
+        idx.push_back({0, 0}); idx.push_back({o.n - 1, o.m - 1});
+    }
+    return idx;
 }
 
 // Reference C[i][j] and the sum of |a_ik * b_kj| (for the tolerance). B is passed transposed (M x K) for locality.
@@ -97,14 +131,7 @@ Verify verify(const std::vector<float> &a, const std::vector<float> &bt, const s
               const Options &o, uint64_t seed) {
     const double eps = std::ldexp(1.0, -23);
     const double tol_factor = 4.0 * o.k * eps;  // |c - ref| <= 4 K eps sum|a b|
-    std::vector<std::pair<uint32_t, uint32_t>> idx;
-    if (o.verify == "full") {
-        for (uint32_t i = 0; i < o.n; i++) for (uint32_t j = 0; j < o.m; j++) idx.push_back({i, j});
-    } else {
-        std::mt19937_64 rng(seed ^ 0x5eed);
-        for (int s = 0; s < 4096; s++) idx.push_back({uint32_t(rng() % o.n), uint32_t(rng() % o.m)});
-        idx.push_back({0, 0}); idx.push_back({o.n - 1, o.m - 1});
-    }
+    const auto idx = check_indices(o, seed);
     const unsigned nt = std::max(1u, std::thread::hardware_concurrency());
     std::vector<Verify> part(nt);
     std::vector<std::thread> th;
@@ -119,6 +146,34 @@ Verify verify(const std::vector<float> &a, const std::vector<float> &bt, const s
                 part[t].checked++;
                 part[t].max_rel = std::max(part[t].max_rel, rel);
                 if (err > tol_factor * absr + 1e-30 || std::isnan(got)) part[t].bad++;
+            }
+        });
+    for (auto &x : th) x.join();
+    Verify v;
+    for (auto &p : part) { v.checked += p.checked; v.bad += p.bad; v.max_rel = std::max(v.max_rel, p.max_rel); }
+    return v;
+}
+
+// Integer / fixed point: exact comparison with the kernel-arithmetic model. max_rel holds the largest |got - ref| in
+// LSBs (codes), reported as max_abs_err.
+Verify verify_codes(const std::vector<int64_t> &a, const std::vector<int64_t> &bt, const std::vector<int64_t> &c,
+                    const Options &o, uint64_t seed) {
+    const auto idx = check_indices(o, seed);
+    const unsigned nt = std::max(1u, std::thread::hardware_concurrency());
+    std::vector<Verify> part(nt);
+    std::vector<std::thread> th;
+    for (unsigned t = 0; t < nt; t++)
+        th.emplace_back([&, t]() {
+            for (size_t q = t; q < idx.size(); q += nt) {
+                const uint32_t i = idx[q].first, j = idx[q].second;
+                const int64_t ref = gemm::ref_entry(o.dt, &a[size_t(i) * o.k], &bt[size_t(j) * o.k], o.k);
+                const int64_t got = c[size_t(i) * o.m + j];
+                part[t].checked++;
+                if (got != ref) {
+                    part[t].bad++;
+                    const __int128 d = __int128(got) - __int128(ref);
+                    part[t].max_rel = std::max(part[t].max_rel, double(d < 0 ? -d : d));
+                }
             }
         });
     for (auto &x : th) x.join();
@@ -142,7 +197,8 @@ int main(int argc, char **argv) {
                          o.expect_build_id);
             return 3;
         }
-        const size_t bytes_a = size_t(o.n) * o.k * 4, bytes_b = size_t(o.k) * o.m * 4, bytes_c = size_t(o.n) * o.m * 4;
+        const size_t bytes_a = o.dt.bytes(size_t(o.n) * o.k), bytes_b = o.dt.bytes(size_t(o.k) * o.m),
+                     bytes_c = o.dt.bytes(size_t(o.n) * o.m);
         auto round64 = [](size_t x) { return (x + 63) & ~size_t(63); };
         // DDR layout (docs/notes1/gemm-hls-progress.md, "DDR memory map"): each matrix at the start of its channel;
         // B at 512 MB if it shares the channel with A, C at 1 GB if it shares it with A or B.
@@ -174,57 +230,90 @@ int main(int argc, char **argv) {
                 }
         }
 
+        // Host data and what goes to the card. A goes as A (N x K) or, for transposed-A builds, A^T (K x N); the
+        // references always use A and B^T. Float: as before. Integer/fixed: raw codes, packed (src/numeric.hpp).
+        const Dtype &dt = o.dt;
         std::mt19937_64 rng(o.seed);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        std::vector<float> a(size_t(o.n) * o.k), b(size_t(o.k) * o.m), bt(size_t(o.m) * o.k);
-        for (auto &x : a) x = dist(rng);
-        for (auto &x : b) x = dist(rng);
-        for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bt[size_t(col) * o.k + r] = b[size_t(r) * o.m + col];
-        std::vector<float> c(size_t(o.n) * o.m);
-        // What goes to the card for A: A (N x K) or, for transposed-A builds, A^T (K x N). The reference uses A.
-        std::vector<float> a_dev;
-        if (o.transposed_a) {
-            a_dev.resize(size_t(o.k) * o.n);
-            for (uint32_t r = 0; r < o.n; r++)
-                for (uint32_t col = 0; col < o.k; col++) a_dev[size_t(col) * o.n + r] = a[size_t(r) * o.k + col];
+        std::vector<float> af, bf, btf, cf;            // float32
+        std::vector<int64_t> ai, bti, ci;              // integer / fixed codes
+        std::vector<uint8_t> a_dev(round64(bytes_a), 0), b_dev(round64(bytes_b), 0);
+        if (dt.is_float()) {
+            std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+            af.resize(size_t(o.n) * o.k); bf.resize(size_t(o.k) * o.m); btf.resize(size_t(o.m) * o.k);
+            for (auto &x : af) x = dist(rng);
+            for (auto &x : bf) x = dist(rng);
+            for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) btf[size_t(col) * o.k + r] = bf[size_t(r) * o.m + col];
+            std::vector<float> a_send;
+            if (o.transposed_a) {
+                a_send.resize(size_t(o.k) * o.n);
+                for (uint32_t r = 0; r < o.n; r++)
+                    for (uint32_t col = 0; col < o.k; col++) a_send[size_t(col) * o.n + r] = af[size_t(r) * o.k + col];
+            }
+            std::memcpy(a_dev.data(), o.transposed_a ? a_send.data() : af.data(), bytes_a);
+            std::memcpy(b_dev.data(), bf.data(), bytes_b);
+            cf.resize(size_t(o.n) * o.m);
         } else {
-            a_dev = a;
+            std::uniform_int_distribution<int64_t> dist(o.lo, o.hi);
+            auto code = [&]() { return o.have_range ? dist(rng) : dt.wrap(rng()); };
+            ai.resize(size_t(o.n) * o.k); bti.resize(size_t(o.m) * o.k);
+            std::vector<int64_t> bi(size_t(o.k) * o.m);
+            for (auto &x : ai) x = code();
+            for (auto &x : bi) x = code();
+            for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bti[size_t(col) * o.k + r] = bi[size_t(r) * o.m + col];
+            if (o.transposed_a) {
+                std::vector<int64_t> a_send(size_t(o.k) * o.n);
+                for (uint32_t r = 0; r < o.n; r++)
+                    for (uint32_t col = 0; col < o.k; col++) a_send[size_t(col) * o.n + r] = ai[size_t(r) * o.k + col];
+                gemm::pack(dt, a_send.data(), a_send.size(), a_dev.data());
+            } else {
+                gemm::pack(dt, ai.data(), ai.size(), a_dev.data());
+            }
+            gemm::pack(dt, bi.data(), bi.size(), b_dev.data());
+            ci.resize(size_t(o.n) * o.m);
         }
-        a_dev.resize(round64(bytes_a) / 4, 0.0f);  // DMA lengths in 64-byte words
-        b.resize(round64(bytes_b) / 4, 0.0f);
 
         int rc = 0;
         for (unsigned rep = 0; rep < o.warmup + o.reps; rep++) {
             const bool warm = rep < o.warmup;
             const auto t0 = std::chrono::steady_clock::now();
             const TransferStats ta = ddr.write(o.ch[0], addr[0], a_dev.data(), round64(bytes_a));
-            const TransferStats tb = ddr.write(o.ch[1], addr[1], b.data(), round64(bytes_b));
+            const TransferStats tb = ddr.write(o.ch[1], addr[1], b_dev.data(), round64(bytes_b));
             const KernelRun kr = kern.run(addr[0], addr[1], addr[2], o.n, o.k, o.m);
-            std::vector<float> cbuf(round64(bytes_c) / 4);
+            std::vector<uint8_t> cbuf(round64(bytes_c));
             const TransferStats tc = ddr.read(o.ch[2], addr[2], cbuf.data(), round64(bytes_c));
             const double e2e = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-            std::memcpy(c.data(), cbuf.data(), bytes_c);
+            if (dt.is_float()) std::memcpy(cf.data(), cbuf.data(), bytes_c);
+            else gemm::unpack(dt, cbuf.data(), ci.size(), ci.data());
 
             Verify v;
-            if (o.verify != "off") v = verify(a, bt, c, o, o.seed + rep);
+            if (o.verify != "off") v = dt.is_float() ? verify(af, btf, cf, o, o.seed + rep) : verify_codes(ai, bti, ci, o, o.seed + rep);
             const bool ok = v.bad == 0;
             if (!warm && !ok) rc = 1;
-            const double flops = 2.0 * o.n * o.k * o.m;
-            const double gflops = kr.seconds > 0 ? flops / kr.seconds / 1e9 : 0;
-            std::printf("%s rep %u: %ux%ux%u  kernel %" PRIu64 " cycles @ %.3f MHz = %.3f ms, %.2f GFLOP/s  "
-                        "H2C %.2f GB/s  C2H %.2f GB/s  e2e %.1f ms  verify %s (%zu checked, %zu bad, max rel %.2e)\n",
-                        warm ? "warmup" : "run", rep, o.n, o.k, o.m, kr.cycles, kr.accel_hz / 1e6, kr.seconds * 1e3,
-                        gflops, (ta.bytes + tb.bytes) / (ta.seconds + tb.seconds) / 1e9, tc.gbps(), e2e * 1e3,
-                        o.verify == "off" ? "off" : ok ? "OK" : "FAIL", v.checked, v.bad, v.max_rel);
+            const double ops = 2.0 * o.n * o.k * o.m;
+            const double gops = kr.seconds > 0 ? ops / kr.seconds / 1e9 : 0;
+            std::printf("%s rep %u: %ux%ux%u %s  kernel %" PRIu64 " cycles @ %.3f MHz = %.3f ms, %.2f %s  "
+                        "H2C %.2f GB/s  C2H %.2f GB/s  e2e %.1f ms  verify %s (%zu checked, %zu bad, max %s %.2e)\n",
+                        warm ? "warmup" : "run", rep, o.n, o.k, o.m, dt.spec().c_str(), kr.cycles, kr.accel_hz / 1e6,
+                        kr.seconds * 1e3, gops, dt.is_float() ? "GFLOP/s" : "GOP/s",
+                        (ta.bytes + tb.bytes) / (ta.seconds + tb.seconds) / 1e9, tc.gbps(), e2e * 1e3,
+                        o.verify == "off" ? "off" : ok ? "OK" : "FAIL", v.checked, v.bad,
+                        dt.is_float() ? "rel" : "abs LSB", v.max_rel);
             if (o.json && !warm) {
                 std::printf("{\"build_id\":\"%08x\",\"n\":%u,\"k\":%u,\"m\":%u,\"rep\":%u,\"seed\":%" PRIu64
-                            ",\"map\":\"a=ch%u,b=ch%u,c=ch%u\",\"kernel_cycles\":%" PRIu64 ",\"accel_hz\":%.0f,"
-                            "\"kernel_s\":%.9f,\"kernel_wall_s\":%.6f,\"gflops\":%.4f,\"h2c_bytes\":%zu,\"h2c_s\":%.6f,"
-                            "\"c2h_bytes\":%zu,\"c2h_s\":%.6f,\"e2e_s\":%.6f,\"verify\":\"%s\",\"verify_checked\":%zu,"
-                            "\"verify_bad\":%zu,\"max_rel_err\":%.3e,\"perf\":{",
-                            bid, o.n, o.k, o.m, rep - o.warmup, o.seed, o.ch[0], o.ch[1], o.ch[2], kr.cycles,
-                            kr.accel_hz, kr.seconds, kr.wall_s, gflops, ta.bytes + tb.bytes, ta.seconds + tb.seconds,
-                            tc.bytes, tc.seconds, e2e, o.verify.c_str(), v.checked, v.bad, v.max_rel);
+                            ",\"map\":\"a=ch%u,b=ch%u,c=ch%u\",\"dtype\":\"%s\",\"dtype_kind\":\"%s\",\"dtype_bits\":%u,"
+                            "\"dtype_signed\":%s,\"kernel_cycles\":%" PRIu64 ",\"accel_hz\":%.0f,"
+                            "\"kernel_s\":%.9f,\"kernel_wall_s\":%.6f,\"gops\":%.4f,",
+                            bid, o.n, o.k, o.m, rep - o.warmup, o.seed, o.ch[0], o.ch[1], o.ch[2], dt.spec().c_str(),
+                            dt.kind_name(), dt.bits, dt.is_signed ? "true" : "false", kr.cycles, kr.accel_hz,
+                            kr.seconds, kr.wall_s, gops);
+                if (dt.is_float()) std::printf("\"gflops\":%.4f,", gops);
+                if (o.have_range) std::printf("\"value_range\":[%lld,%lld],", (long long)o.lo, (long long)o.hi);
+                std::printf("\"h2c_bytes\":%zu,\"h2c_s\":%.6f,\"c2h_bytes\":%zu,\"c2h_s\":%.6f,\"e2e_s\":%.6f,"
+                            "\"verify\":\"%s\",\"verify_checked\":%zu,\"verify_bad\":%zu,",
+                            ta.bytes + tb.bytes, ta.seconds + tb.seconds, tc.bytes, tc.seconds, e2e, o.verify.c_str(),
+                            v.checked, v.bad);
+                if (dt.is_float()) std::printf("\"max_rel_err\":%.3e,\"perf\":{", v.max_rel);
+                else std::printf("\"max_abs_err\":%.0f,\"perf\":{", v.max_rel);
                 bool first_m = true;
                 for (auto &mat : kr.perf) {
                     std::printf("%s\"%s\":{", first_m ? "" : ",", mat.first.c_str());
