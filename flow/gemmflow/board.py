@@ -4,12 +4,35 @@
 # The DDR calibration must come after the driver load: the driver's probe writes CSR_CTRL_RESET, which clears it.
 #
 
+import contextlib
+import fcntl
 import os
 import re
 import subprocess
 
 from .config import ROOT
 from .tools import Vivado, ToolError
+
+
+BOARD_LOCK = os.path.join(ROOT, "build", ".board.lock")
+
+
+@contextlib.contextmanager
+def board_lock(log=print):
+    """Exclusive use of the card (flock on build/.board.lock) for a bring-up plus its runs. Shell tools take the
+    same lock (`exec 9>build/.board.lock; flock 9`) and export GEMM_BOARD_LOCK_HELD=1, so their Python children do
+    not wait on it."""
+    if os.environ.get("GEMM_BOARD_LOCK_HELD"):
+        yield
+        return
+    os.makedirs(os.path.dirname(BOARD_LOCK), exist_ok=True)
+    with open(BOARD_LOCK, "w") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("waiting for the board lock (another tool is using the card)")
+            fcntl.flock(f, fcntl.LOCK_EX)
+        yield
 
 
 class Board:

@@ -19,7 +19,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(ROOT, "flow"))
 
-from gemmflow.board import Board          # noqa: E402
+from gemmflow.board import Board, board_lock  # noqa: E402
 from gemmflow.config import BuildCfg      # noqa: E402
 
 
@@ -59,6 +59,11 @@ def main():
 
     build_dir = os.path.abspath(a.build_dir)
     cfg, info = load_build_info(build_dir, a.config)
+    with board_lock():
+        run(a, build_dir, cfg, info)
+
+
+def run(a, build_dir, cfg, info):
     if not a.no_bringup:
         Board(build_dir).bring_up(program=a.program, log=lambda s: print(f"[bring-up] {s}", flush=True))
 
@@ -78,6 +83,7 @@ def main():
         cmd = [runner, "--n", str(n), "--k", str(k), "--m", str(m), "--reps", str(a.reps), "--warmup", str(a.warmup),
                "--seed", str(a.seed), "--verify", a.verify, "--map", f"a={mm.a},b={mm.b},c={mm.c}",
                "--expect-build-id", info["config_hash"][:8], "--dtype", nf.spec, "--json"] + \
+              (["--float-exact"] if nf.kind == "float" else []) + \
               (["--transposed-a"] if cfg.kernel.transposed_a else []) + \
               ["--multiples", ",".join(map(str, cfg.size_multiples()))]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)

@@ -13,7 +13,9 @@
 // partial sum is an integer below 2^24, so the kernel's float result must equal the reference bit for bit): a
 // corrupted element is then visible instead of hidden by the relative tolerance. --dump-bad FILE writes the
 // mismatching entries as "i j got ref" lines; --b-identity (K == M) sets B = I, so C is A as the kernel read it;
-// --a-identity (N == K) sets A = I, so C is B.
+// --a-identity (N == K) sets A = I, so C is B. --float-exact checks float32 bit for bit against a reference that
+// accumulates like the kernel's PEs (fp32, c = c + a*b in k order, round to nearest; the host build has no FMA
+// contraction: -std=c++17 and no -march), so even a flipped low mantissa bit counts as a mismatch.
 // Exit status: 0 = all repetitions verified (or --verify off), 1 = mismatch, 2 = usage, 3 = error.
 #include <algorithm>
 #include <array>
@@ -55,12 +57,13 @@ struct Options {
     std::string dump_bad;       // --dump-bad FILE: mismatches as "i j got ref" lines (debugging)
     bool b_identity = false;    // --b-identity (K == M): B = I, so C = A as the kernel read it (debugging)
     bool a_identity = false;    // --a-identity (N == K): A = I, so C = B as the kernel read it (debugging)
+    bool float_exact = false;   // --float-exact: float32 reference in the kernel's order (c = c + a*b, k = 0..K-1, fp32)
 };
 
 [[noreturn]] void usage(const char *argv0) {
     std::fprintf(stderr, "usage: %s --n N --k K --m M [--reps R] [--warmup W] [--seed S] [--verify full|sampled|off]\n"
                          "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a]\n"
-                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--dump-bad FILE] [--a-identity] [--b-identity] [--json]\n", argv0);
+                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--dump-bad FILE] [--a-identity] [--b-identity] [--float-exact] [--json]\n", argv0);
     std::exit(2);
 }
 
@@ -101,6 +104,7 @@ Options parse(int argc, char **argv) {
         } else if (a == "--dump-bad") o.dump_bad = next();
         else if (a == "--b-identity") o.b_identity = true;
         else if (a == "--a-identity") o.a_identity = true;
+        else if (a == "--float-exact") o.float_exact = true;
         else usage(argv[0]);
     }
     if (o.have_range && o.dt.is_float()) {
@@ -172,11 +176,18 @@ Verify verify(const std::vector<float> &a, const std::vector<float> &bt, const s
                 double ref, absr;
                 ref_entry(a, bt, o.k, idx[q].first, idx[q].second, ref, absr);
                 const double got = c[size_t(idx[q].first) * o.m + idx[q].second];
+                if (o.float_exact) {  // kernel order in fp32
+                    const float *ar = &a[size_t(idx[q].first) * o.k], *br = &bt[size_t(idx[q].second) * o.k];
+                    float acc = 0.0f;
+                    for (uint32_t x = 0; x < o.k; x++) { const float p = ar[x] * br[x]; acc = acc + p; }
+                    ref = acc;
+                }
                 const double err = std::fabs(got - ref);
                 const double rel = absr > 0 ? err / absr : err;
                 part[t].checked++;
                 part[t].max_rel = std::max(part[t].max_rel, rel);
-                const bool wrong = o.have_range ? !(got == ref) : (err > tol_factor * absr + 1e-30 || std::isnan(got));
+                const bool wrong = (o.have_range || o.float_exact) ? !(got == ref)
+                                                                   : (err > tol_factor * absr + 1e-30 || std::isnan(got));
                 if (wrong) {
                     part[t].bad++;
                     if (!o.dump_bad.empty()) bad[t].push_back({int64_t(idx[q].first), int64_t(idx[q].second), int64_t(got), int64_t(ref)});
@@ -354,9 +365,9 @@ int main(int argc, char **argv) {
                 if (dt.is_float()) std::printf("\"gflops\":%.4f,", gops);
                 if (o.have_range) std::printf("\"value_range\":[%lld,%lld],", (long long)o.lo, (long long)o.hi);
                 std::printf("\"h2c_bytes\":%zu,\"h2c_s\":%.6f,\"c2h_bytes\":%zu,\"c2h_s\":%.6f,\"e2e_s\":%.6f,"
-                            "\"verify\":\"%s\",\"verify_checked\":%zu,\"verify_bad\":%zu,",
+                            "\"verify\":\"%s\",\"verify_exact\":%s,\"verify_checked\":%zu,\"verify_bad\":%zu,",
                             ta.bytes + tb.bytes, ta.seconds + tb.seconds, tc.bytes, tc.seconds, e2e, o.verify.c_str(),
-                            v.checked, v.bad);
+                            (!dt.is_float() || o.float_exact || o.have_range) ? "true" : "false", v.checked, v.bad);
                 if (dt.is_float()) std::printf("\"max_rel_err\":%.3e,\"perf\":{", v.max_rel);
                 else std::printf("\"max_abs_err\":%.0f,\"perf\":{", v.max_rel);
                 bool first_m = true;

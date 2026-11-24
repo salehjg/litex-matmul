@@ -143,8 +143,27 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         passes. `int32_margin` (same array: aggressive preset at 200 MHz, and 180 MHz) is queued to confirm it.
         Lesson: STA "met" with tens of ps is not enough for heavy-activity datapaths, and exact full-range
         verification catches it. For floats, uniform(−1, 1) data with a relative tolerance would hide small errors.
-      - **float32 checked exactly** with the new integer-valued float mode (`gemm_runner --value-range` for float32,
-        exact comparison; 1024³ at ±100, ±127, 0…127): 0 bad. Earlier float results are not affected.
+      - float32 with integer-valued data (`--value-range` in float mode, exact; 1024³ at ±100, ±127, 0…127): 0 bad.
+        That data switches little, though. **Bit-exact check with random data** (`--float-exact`: fp32 reference
+        accumulated in the kernel's order, `c = c + a·b` over k) on the same build `a88777ec` finds **rare small
+        errors, all in PE 12** (rows ≡ 12 mod 32): one tile row (512 entries) per 1024³ run, and 1 entry per 4098
+        sampled at 4096³. They are ~4·10⁻⁶ relative, so the old tolerance check (4·K·eps·Σ|ab|) passed them. Correction
+        (07:00) to the "float unaffected" note above.
+      - **The headline float build `…225mhz_tA_aggressive-db5adf1c` (110.9 GFLOP/s) is bit-exact**: 0 bad over
+        2×1024³ full, 2048³ full (4.2 M entries, via `gemm_run.py`) and 2×4096³ sampled, max rel error 0.0. This also
+        confirms the reference model: the kernel's fp32 arithmetic matches the host bit for bit.
+      - **Full exact screens** (`screen.sh`: 2×2048³, full, full-range data, 8.4 M entries each): int8 PE 32×8, int16
+        PE 32×8, fixed16.8 PE 32×8 and **int8 PE 32×32 (the 379 GOP/s build): all 0 bad.**
+      - PE 12 fails in two different netlists, but its `aBuffer` sits at different BRAM sites (int32 X5Y56, float
+        X8Y76), so it isn't a weak site. What the two builds share is the 32-bit A distribution: 16 elements per
+        word, PE p takes lane p mod 16. The int32 failures are exactly lanes 6/10/12/14 (PEs p and p+16). int8 and
+        int16 distribute A differently and are clean. So the weak paths come from the RTL structure of the 32-bit
+        A feed, and switching activity decides whether they fail.
+      - **Flow changes from this:**
+        - `gemm_dse.py` and `gemm_run.py` pass `--float-exact` for float builds (bit-exact instead of tolerance).
+        - Rows carry `verify_exact`.
+        - New board lock `build/.board.lock` (flock): the DSE run stage, `gemm_run.py` and the misc scripts hold
+          it, so debug runs can't collide with a campaign.
       - Tools added: `gemm_runner --dump-bad FILE` (mismatches as `i j got ref`), `--value-range` for float32
         (integer values, exact check) and `--b-identity` (B = I, so C shows A as the kernel read it).
 - [x] **`int8_scale` done** (05:53–06:43, `results/int8_scale/`; 200 MHz, tA, default preset):
