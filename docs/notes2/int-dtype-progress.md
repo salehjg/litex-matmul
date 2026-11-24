@@ -352,8 +352,17 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         reset of the `ap_sync_reg_*_ap_ready` flops of every process in the dataflow region. 6 logic levels
         (CARRY4 ×2, LUT6), 81 % routing. With ~40 processes in one region (32 PEs plus the memory readers, converters and writer), that fanout grows with the array. Fixing
         it needs a kernel or HLS-directive change, not a flow setting. The HLS estimate (4.144 ns) does not see it.
-- [ ] Queued `int4_clock` (11:35, now after `int4_pe64`): int4 PE 32×64 at 225 MHz × default/explore preset (peak
-      921.6 GOP/s). Same 32-PE dataflow control as int8 PE 32×32, which met 225 MHz with the default preset.
+- [x] **`int4_clock` done** (21:12–21:48, `results/int4_clock/dse_2.log`): int4 PE 32×64, tile 512×2048, 225 MHz
+      (peak 921.6 GOP/s). Same 32-PE dataflow control as int8 PE 32×32, which met 225 MHz with the default preset.
+      Both builds meet timing and verify (sampled) at 2048³ and 4096³ with DDR load tuning (0 bad before and after):
+
+      | Preset | WNS / WHS ns | SoC LUT | FF | BRAM tiles | DSP | Build | 2048³ / 4096³ GOP/s |
+      |---|---|---|---|---|---|---|---|
+      | default | 0.037 / 0.021 | 117.5k | 104.0k | 414.5 | 39 | 17 min | 844.7 / **851.2** (92.4 %) |
+      | explore | 0.023 / 0.017 | 117.7k | 104.1k | 414.5 | 39 | 17 min | 844.7 / 851.2 |
+
+      - New int4 PE 32×64 best: 851.2 GOP/s, +12.5 % over 200 MHz (756.7), the clock ratio. The int8 PE 32×32 225 MHz
+        build had already shown that 32 PEs close at 225 MHz.
 - [x] `int4_wide` (started 11:45, stopped 15:45 (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
       and PE 48×64 (3072 MACs); at most 2 HLS jobs at once (RAM); DDR tuning on.
       - HLS done 13:02 (all ports 512 bits):
@@ -387,7 +396,7 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         is broken; PN 12 is fine when both hold). Every earlier board build met both rules.
       - Fix: both rules are errors in `config.py` `validate` (+3 cases in `test_rejected`; 37 tests pass). No existing campaign point
         other than the two `int4_wide` ones is affected.
-- [ ] 🟡 `int4_pe64` (started 15:46, HLS done 17:10, Vivado builds running): PE 64×64 now with **tile 512×4096** (tile_n/PN 8, tile_m/PM 64 = PN,
+- [x] **`int4_pe64` done** (15:46–21:12; round 2 below): PE 64×64 now with **tile 512×4096** (tile_n/PN 8, tile_m/PM 64 = PN,
       same per-PE C buffer as 1024×2048).
       - HLS (both clocks): est. 4.209 ns, 35 DSP, 1142 BRAM18 (as tile 1024×2048: the per-PE C buffer is the same),
         LUT 454k (HLS; Vivado was 2.6× lower for the 1024×2048 tile), ports 512 bits, under the resource gate.
@@ -405,9 +414,22 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         (`storage_25_reg_2`, 1.97 ns of BRAM clock-to-out and LUTs) into the PCIe hard block's TX throttle
         (`tready_thrtl_reg`, `TRNTCFGGNT`). This is the known PCIe-path failure that a rebuild with another preset fixes.
         The design is at 67 % LUT, so the PCIe logic gets worse placement.
-- [ ] 🟡 `int4_pe64` round 2 (18:45, `dse_2.log`, `--resume`): 180 MHz aggressive and explore (same HLS run), in
-      parallel with `int4_clock`'s HLS (memory: Vivado 7.2 GB peak plus HLS 3.9 GB, against 15 GB RAM and 50 GB swap).
-      The board lock serialises the card runs.
+- [x] **`int4_pe64` round 2 done** (rerun 20:23–21:12, `dse_3.log`; the first try at 18:45 was stopped, see below):
+      180 MHz aggressive and explore (same HLS run). **Both meet timing, PCIe clock included, and verify (sampled)
+      at 2048³ and 4096³** with DDR load tuning (0 bad before and after). Peak 1474.56 GOP/s.
+
+      | Preset | WNS / WHS ns | SoC LUT | FF | BRAM tiles | DSP | Build | 2048³ / 4096³ GOP/s |
+      |---|---|---|---|---|---|---|---|
+      | aggressive | 0.045 / 0.015 | 200.3k (67 %) | 134.8k | 652.5 | 38 | 24 min | 632.2 / **1281.0** (86.9 %) |
+      | explore | 0.018 / 0.014 | 199.5k | 134.6k | 654.5 | 38 | 23 min | 632.2 / 1281.0 |
+
+      - **New int4 best: 1281 GOP/s, 1.5× the PE 32×64 225 MHz build**, still with 38 DSPs (kernel 170.7k LUT,
+        509 RAMB36 + 69 RAMB18).
+      - 2048³ runs at 42.9 % because M = 2048 fills only half of a 4096-wide memory tile (the kernel always computes
+        whole tiles, as in `dtype_size_sweep`). On the padded work that is 85.7 %.
+      - 4096³ reaches 86.9 % of peak, below the ~92 % of the 32-PE builds. Not explained yet; 8192³ and a full
+        exact screen are next.
+      - 180 MHz default had failed only on the PCIe 250 MHz path (−0.447 ns); aggressive and explore close it.
 - [x] **Both campaigns stopped (~18:58) by Claude Code's memory guard**, not by a failure in the flow. `int4_clock`'s HLS
       finished sooner than expected (both 225 MHz points: est. 4.144 ns, 34 DSP, 662 BRAM18, stamped), and its first
       Vivado build started next to `int4_pe64`'s 180 MHz aggressive build. Two Vivado runs of this size (~7 GB each)
