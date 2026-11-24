@@ -82,6 +82,18 @@ switching activity. Builds with more slack or fewer MACs pass. The bad bits are 
 longest, and the global activity decides whether they fail. STA "met" by a few tens of ps is not a guarantee
 on this card. The DSE's exact full-range verification is what catches it (`int32_margin` tests the remedy).
 
+## Float builds, bit-exact (2026-11-24 07:00–07:23)
+`gemm_runner --float-exact` compares float32 bit for bit with an fp32 reference accumulated in the kernel's order
+(`c = c + a·b`, k = 0…K−1). The headline build (`…225mhz_tA_aggressive-db5adf1c`) matches exactly with uniform(−1, 1)
+data, so the model is right. `screen_all.sh` over all float builds (2×2048³ full each): 17 of 18 have 0 bad.
+`a88777ec` (PE 32×8, 200 MHz, default preset) has rare errors, all in **PE 12** (rows ≡ 12 mod 32): ~512 entries
+per 1024³ run at ~4·10⁻⁶ relative, which the old tolerance check passed. PE 12 is also the worst PE of the int32
+build at the same array. Its `aBuffer` is at different BRAM sites in the two builds (int32 RAMB18_X5Y56, float
+RAMB18_X8Y76; `abuf_sites.tcl`), so the shared factor is the 32-bit A distribution (16 lanes per word, PE p ←
+lane p mod 16), not a weak site.
+
+Screened exact with full-range data (`screen.sh`): int8 PE 32×8, int16 PE 32×8, fixed16.8 PE 32×8, int8 PE 32×32.
+
 ## Earlier suspect (ruled out)
 At first the lane pattern pointed at A's read path. The DRAM ports cross from the controller clock (`sys`) to
 `accel` through LiteDRAM's native-port CDC FIFOs, and the SoC declares those clocks asynchronous

@@ -159,6 +159,13 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         word, PE p takes lane p mod 16. The int32 failures are exactly lanes 6/10/12/14 (PEs p and p+16). int8 and
         int16 distribute A differently and are clean. So the weak paths come from the RTL structure of the 32-bit
         A feed, and switching activity decides whether they fail.
+      - **All earlier float builds screened bit-exactly** (07:13–07:23, `screen_all.sh`, 2×2048³ full,
+        `--float-exact`, 8.4 M entries each, `misc/int32_verify/logs/screen_all.log`). 17 of 18 have 0 bad, among
+        them the 225 MHz default and explore builds, both 250 MHz builds, every tile-size and PE 8×8 variant, and
+        the m000/m100 AXI variants. Together with the headline `db5adf1c`, every float data point in the report
+        is from a bit-exact build except **`a88777ec`** (PE 32×8, 200 MHz, default preset: rare PE 12 errors of
+        ~4·10⁻⁶ relative). Its GFLOP/s are unaffected, but it is not exact. The 18th directory
+        (`f32_pe8x8_t128x128-4e52e7f5`) predates the flow (no `config.resolved.json` or host tools) and was skipped.
       - **Flow changes from this:**
         - `gemm_dse.py` and `gemm_run.py` pass `--float-exact` for float builds (bit-exact instead of tolerance).
         - Rows carry `verify_exact`.
