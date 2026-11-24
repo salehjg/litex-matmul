@@ -352,7 +352,7 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         reset of the `ap_sync_reg_*_ap_ready` flops of every process in the dataflow region. 6 logic levels
         (CARRY4 ×2, LUT6), 81 % routing. With ~40 processes in one region (32 PEs plus the memory readers, converters and writer), that fanout grows with the array. Fixing
         it needs a kernel or HLS-directive change, not a flow setting. The HLS estimate (4.144 ns) does not see it.
-- [ ] Queued `int4_clock` (11:35, after `int4_wide`): int4 PE 32×64 at 225 MHz × default/explore preset (peak
+- [ ] Queued `int4_clock` (11:35, now after `int4_pe64`): int4 PE 32×64 at 225 MHz × default/explore preset (peak
       921.6 GOP/s). Same 32-PE dataflow control as int8 PE 32×32, which met 225 MHz with the default preset.
 - [ ] 🟡 `int4_wide` (started 11:45 (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
       and PE 48×64 (3072 MACs); at most 2 HLS jobs at once (RAM); DDR tuning on.
@@ -369,6 +369,13 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         would need ~1950–2170 of 1910. HLS LUT estimates are 2–3× Vivado for int4 (PE 32×64: 240k → 117k), so the
         LUTs of the 4096-MAC arrays may still fit.
       - PE 48×64 gets 252 DSPs: the non-power-of-two PN brings index multiplies.
+      - **PE 64×64 build (13:27): timing failed, WNS −0.215 ns** (TNS −4.9, 10 endpoints). SoC 199.1k LUT (67 %),
+        154.9k FF, 654.5 BRAM tiles, 40 DSP; kernel 170.5k LUT (HLS said 446k). The path is the same as
+        in `dtype_clock`: `ProcessingElement_38_U0/n0_fu_92_reg` → `ap_sync_reg_ProcessingElement_*_U0_ap_ready_reg/R`,
+        6 levels, 85 % routing, now fanning out to 64 PEs.
+- [ ] Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
+      and explore presets (one HLS run), and at 180 MHz default (peak 1475 GOP/s, 0.56 ns more period). It goes first:
+      4096 MACs at any of these clocks beats int4 PE 32×64 at 225 MHz (921.6 GOP/s peak).
 - [x] (stale queue notes, kept for the record) Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` →
       `fixed_point` → `dtype_clock`, all run; `dtype_size_sweep`, `int8_scale`, `int16_scale` done.
 - [x] **`dtype_size_sweep` done** (int8 PE 32×8 build, 45 sizes × 2 reps, all verified exactly,

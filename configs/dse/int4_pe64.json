@@ -1,0 +1,61 @@
+{
+  "campaign": "int4_pe64",
+  "comment": "docs/notes2: int4 PE 64x64 (4096 MACs) missed 200 MHz by 0.215 ns in int4_wide (default preset; 10 endpoints, the dataflow ap_sync control fanout from a PE loop counter, 85 % routing). Retry: 200 MHz aggressive and explore (same HLS run) and 180 MHz default (peak 1475 GOP/s). DDR read taps tuned under load.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@format": [
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 4
+      }
+    ],
+    "@array": [
+      {
+        "kernel.parallelism_n": 64,
+        "kernel.parallelism_m": 64,
+        "kernel.memory_tile_size_n": 1024,
+        "kernel.memory_tile_size_m": 2048
+      }
+    ],
+    "@impl": [
+      {
+        "clocks.accel_mhz": 200,
+        "vivado.preset": "aggressive"
+      },
+      {
+        "clocks.accel_mhz": 200,
+        "vivado.preset": "explore"
+      },
+      {
+        "clocks.accel_mhz": 180,
+        "vivado.preset": "default"
+      }
+    ]
+  },
+  "runtime_grid": {
+    "triples": [
+      [
+        2048,
+        2048,
+        2048
+      ],
+      [
+        4096,
+        4096,
+        4096
+      ]
+    ],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": [
+    "hls",
+    "build",
+    "run"
+  ],
+  "jobs": {
+    "hls": 1
+  },
+  "ddr_load_tune": true
+}
