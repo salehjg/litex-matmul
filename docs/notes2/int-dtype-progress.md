@@ -13,7 +13,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 3 | Host: `numeric.hpp`, `gemm_runner --dtype`, `make test`, float regression on the board | ✅ 2026-11-24 |
 | 4 | Result columns, scripts, port-width check, `sim` stage, report fallback | ✅ 2026-11-24 |
 | 5 | Campaign files, HLS-only probe `dtype_hls` | 🟡 files written, probe next |
-| 6 | Build and board campaigns (after "go") | ⬜ |
+| 6 | Build and board campaigns (after "go") | 🟡 go given 2026-11-24 ~04:05 |
 
 ## Phase 2: config schema ✅
 - [x] `flow/gemmflow/numeric.py`: `resolve()` / `parse_spec()` → `NumericFormat` (kind, bits, signed, frac_bits,
@@ -78,7 +78,15 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
       combinations recorded), `dtype_same_array` (5; float32 = existing build `a88777ec`), `int8_scale` (8),
       `int16_scale` (6), `int4_probe` (4), `fixed_point` (3), `dtype_clock` (6), `dtype_size_sweep` (run only).
       All dry-run clean.
-- [ ] HLS-only probe `dtype_hls` (stages sim, hls): started 2026-11-24 ~03:50, log `results/dtype_hls/dse.log`
+- [ ] HLS-only probe `dtype_hls` (stages sim, hls): started 2026-11-24 03:25 (an earlier note said ~03:50; the
+      record says 03:25), log `results/dtype_hls/dse.log`; at 04:01 the sims were done and 56 of 70 HLS runs finished.
+
+## Phase 6: FPGA campaigns 🟡
+User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, unattended overnight).
+- [ ] `dtype_same_array` (int8, int16, int32, fixed16.8 at PE 32×8, tile 1024×512, 200 MHz; float32 reused):
+      queued behind `dtype_hls` (Vivado needs the RAM the HLS jobs use), log `results/dtype_same_array/dse.log`.
+- Order after that, decided from the HLS probe and the first results: `int8_scale` / `int16_scale` (pruned),
+  `int4_probe` (only if the HLS ports are 512 bits), `fixed_point`, `dtype_clock`, `dtype_size_sweep`.
 
 ## Log
 
