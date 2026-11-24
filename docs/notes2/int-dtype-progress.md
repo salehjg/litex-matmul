@@ -78,7 +78,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
       combinations recorded), `dtype_same_array` (5; float32 = existing build `a88777ec`), `int8_scale` (8),
       `int16_scale` (6), `int4_probe` (4), `fixed_point` (3), `dtype_clock` (6), `dtype_size_sweep` (run only).
       All dry-run clean.
-- [ ] HLS-only probe `dtype_hls` (stages sim, hls)
+- [ ] HLS-only probe `dtype_hls` (stages sim, hls): started 2026-11-24 ~03:50, log `results/dtype_hls/dse.log`
 
 ## Log
 

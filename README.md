@@ -135,6 +135,10 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
 - **Timing:** a build that misses timing anywhere is recorded as `timing_failed` and never loaded. The PCIe Gen2 x8
   core (500 MHz, inside the hard block) has only tens of ps of margin in every build and failed alone once; if a build
   fails only there, rebuild with `vivado.preset: explore` or `aggressive`.
+- **Element formats** ([`docs/notes2/`](docs/notes2/int-dtype-plan.md)): `kernel.data_type` = `float` | `int` | `uint` |
+  `fixed` | `ufixed` with `data_bits` (8/16/32/64; 2/4 packed) and `frac_bits` (fixed point), no kernel change; the
+  kernel accumulates in the element type (integer results wrap). Rows carry `dtype`, `dtype_kind`, `dtype_bits`, … and
+  `gops`; `gemm_runner --dtype int8` etc. verifies exactly. Campaigns `configs/dse/dtype_*.json`, `int*_scale.json`.
 - **Sizes:** N, K, M must be whole bus words for the build (64-byte words: K and M multiples of 16 floats, N too with
   transposed A); `gemm_runner` rejects other sizes. The kernel computes whole memory tiles, so matrices smaller than
   the tile run at a fraction of the peak (size sweep in the progress file).
