@@ -952,12 +952,14 @@ in the plan). So the DSE can afford many builds.
 
 ## Open issues / decisions pending
 
-- `README.md` and `.gitignore` are in `FILES` of `setup.litex.du-pcb.py`. Phase 0 changed both but did **not** run
-  `--pack`, so `setup.litex.du-pcb.py --force` would revert them. Decide whether to pack them, or keep the GEMM flow
-  out of the setup bundle (the plan's default for all new GEMM files).
-- `scripts/env.sh` and `scripts/pcie_rescan.sh` (also packed files) were changed in phase 1 for the password-less
-  flow. The same `--pack` decision applies; the new `scripts/driver.sh` and `scripts/setup_permissions.sh` would have
-  to be added to `FILES` if the bundle should carry them.
+- ~~Setup bundle out of date~~ **Done (2026-11-24, on request):** `setup.litex.du-pcb.py` still held the versions
+  from the first commit, and 7 of its 15 files had changed since. Without the PHY fix a fresh unfold would bring back
+  the DMA stall, and `--force` would have reverted the fixes here. `FILES` gained the files the changed ones need:
+  `boards/dupcb/s7pciephy_rx_be.py` (imported by `target.py`), `scripts/driver.sh` (called by `pcie_rescan.sh`),
+  `scripts/setup_permissions.sh` and `scripts/iommu/step{1,2}_*.sh`. Then `--pack` (20 files). Checked: every
+  bundled file is byte-identical to the repo, and a fresh `--files-only` unfold gives identical files and modes,
+  `bash -n`/`py_compile` clean, and `target.py` imports `S7PCIEPHYRXBE`. The GEMM flow stays outside the bundle (git
+  repo only); the bundled README includes the GEMM section, which describes files a bare unfold doesn't have.
 - `/usr/local/sbin/litepcie-modctl` and the sudoers lines name the slot `0000:82:00.0`. Moving the card means
   re-running `sudo scripts/setup_permissions.sh`.
 - Risks are listed in plan §11.

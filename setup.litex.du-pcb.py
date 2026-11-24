@@ -47,6 +47,7 @@ FILES = [
     "boards/dupcb/target.py",
     "boards/dupcb/wl7ddrphy.py",
     "boards/dupcb/ddr_init.py",
+    "boards/dupcb/s7pciephy_rx_be.py",
     "scripts/env.sh",
     "scripts/build.sh",
     "scripts/load.sh",
@@ -56,6 +57,10 @@ FILES = [
     "scripts/status.sh",
     "scripts/sim.sh",
     "scripts/clean.sh",
+    "scripts/driver.sh",
+    "scripts/setup_permissions.sh",
+    "scripts/iommu/step1_iommu_on.sh",
+    "scripts/iommu/step2_after_reboot.sh",
 ]
 
 SELF        = os.path.abspath(__file__)
@@ -401,7 +406,8 @@ if __name__ == "__main__":
 #|scripts/load.sh                          # load over JTAG (volatile)
 #|scripts/pcie_rescan.sh                   # card in this PC: let Linux find it again
 #|scripts/status.sh                        # ident, measured clocks, LEDs
-#|scripts/ddr_init.sh                      # calibrate + test both DDR3 channels (after every load)
+#|scripts/ddr_init.sh                      # calibrate + test both DDR3 channels (after every load, and after
+#|                                         # scripts/driver.sh load: the driver's probe resets the SoC)
 #|scripts/console.sh                       # BIOS console (Ctrl-C to quit)
 #|scripts/sim.sh                           # SoC + firmware in Verilator (needs verilator)
 #|scripts/clean.sh
@@ -429,6 +435,74 @@ if __name__ == "__main__":
 #|- **Verified on this card (2026-11-20):** keep-alive, PCIe (Gen2, x4 in this PC's slot), both 200 MHz clocks and
 #|  the 50 MHz, both DDR3 channels (CH0 893 ps / CH1 1429 ps write window, 1 GB BIST clean, 7.2 GB/s).
 #|  DDR3 VDDQ (1.35 or 1.5 V) is unmeasured; I/O is SSTL15 like the MIG design that calibrated on this card.
+#|- **PCIe DMA (verified 2026-11-23):** `target.py` uses `S7PCIEPHYRXBE` (`boards/dupcb/s7pciephy_rx_be.py`), not
+#|  LitePCIe's `S7PCIEPHY`. The stock PHY takes the 128-bit RX byte enables from `tkeep`; with LitePCIe 2026.08 that
+#|  adds a garbage beat to every read completion and the DMA reader stalls after ~64 KB. With the fix:
+#|  `scripts/driver.sh dma-test` loopback 13.4 Gb/s (Gen2 x4), 0 errors. Driver: `scripts/driver.sh build|load`;
+#|  one-time `sudo scripts/setup_permissions.sh` for password-less use. Keep the IOMMU on (`scripts/iommu/`).
+#|
+#|## GEMM HLS accelerator
+#|
+#|An HLS GEMM kernel (float32, adapted from [spcl/gemm_hls](https://github.com/spcl/gemm_hls)) in a CPU-less variant of
+#|this SoC (`hw/gemm/gemm_soc.py`): the host sends A and B over PCIe DMA into the DDR3 channels, the kernel computes
+#|C = A·B at 200 MHz, the host reads C back together with performance counters (cycles, per-matrix AXI bursts, stalls,
+#|read latency). JSON-driven build and design-space exploration. Plan:
+#|[`docs/notes1/gemm-hls-plan.md`](docs/notes1/gemm-hls-plan.md), status and measurements:
+#|[`docs/notes1/gemm-hls-progress.md`](docs/notes1/gemm-hls-progress.md).
+#|
+#|Measured (kernel time, float32, all results verified against a host reference; 200 MHz unless noted):
+#|
+#|| Config | Peak | Best measured | LUT / DSP / BRAM tiles |
+#||---|---|---|---|
+#|| `default.json`: PE 8×8, tile 128 | 25.6 GFLOP/s | 23.4 (2048³, 91.5 %) | 64.6k / 383 / 238.5 |
+#|| PE 8×8, tile 256 | 25.6 | 24.6 (2048³, 95.9 %) | 64.7k / 383 / 239 |
+#|| PE 16×8, tile 256 | 51.2 | 47.2 (2048³, 92.2 %) | 94.6k / 703 / 303 |
+#|| `pe32x8_ta_t512.json`: PE 32×8, transposed A, tile 512×512 | 102.4 | 95.5 (8192³, 93.2 %) | 153.9k / 1320 / 430.5 |
+#|| `pe32x8_ta_t1024x512.json`: PE 32×8, transposed A, tile 1024×512 | 102.4 | 98.6 (8192³, 96.3 %) | 154.3k / 1320 / 654.5 |
+#|| `pe32x8_ta_t1024x512_225mhz.json`: the same at **225 MHz**, Vivado preset `aggressive` | 115.2 | **110.9** (8192³, 96.2 %) | 152.0k / 1320 / 654.5 |
+#|| `default.json` at 250 MHz (`clocks.accel_mhz`): PE 8×8, tile 128 | 32.0 | 29.0 (1024³, 90.7 %) | 67.1k / 383 / 231 |
+#|
+#|`transposed_a: true` means the host sends Aᵀ (`gemm_runner --transposed-a`, passed automatically from the build's
+#|config), so the kernel reads A in bursts instead of single strided words; this and larger tiles are what took PE 32×8
+#|from 82 to 98.6 GFLOP/s, and 225 MHz (which only the `explore`/`aggressive` presets close) to 110.9.
+#|
+#|```
+#|git submodule update --init --recursive                     # submodules/gemm_hls (+ hlslib): reference only
+#|sudo scripts/setup_permissions.sh                           # once: password-less board access
+#|misc/crash_debug/arm_crash_capture.sh                       # once per boot (see docs: host freezes)
+#|
+#|.venv/bin/python scripts/gemm_build.py configs/gemm/default.json          # HLS -> Vivado -> host tools (~15 min;
+#|                                                                          #  PE 32x8 builds ~25 min)
+#|.venv/bin/python scripts/gemm_run.py build/gemm/soc/<build_id> --program \
+#|        --sizes 1024x1024x1024 2048x2048x2048 --reps 3 --verify sampled  # load + bring-up + runs
+#|.venv/bin/python scripts/gemm_dse.py configs/dse/pe_sweep.json            # sweep: builds + runs -> results/<campaign>/
+#|```
+#|
+#|- **Order on the card:** load → `scripts/pcie_rescan.sh` → `scripts/driver.sh load` → `scripts/ddr_init.sh` →
+#|  runs. The driver's probe resets the SoC, which clears the DDR calibration; `gemmflow.board.Board.bring_up()`
+#|  (used by `gemm_run.py --program` and `gemm_dse.py`) does it in that order.
+#|- **Config:** `configs/gemm/*.json` (PE counts, tiles, bus widths, FIFO depths, m_axi bursts, memory map, accel clock,
+#|  Vivado preset/directives/threads). Checked against every gemm_hls rule before any tool runs (`flow/gemmflow/config.py`).
+#|- **Timing:** a build that misses timing anywhere is recorded as `timing_failed` and never loaded. The PCIe Gen2 x8
+#|  core (500 MHz, inside the hard block) has only tens of ps of margin in every build and failed alone once; if a build
+#|  fails only there, rebuild with `vivado.preset: explore` or `aggressive`.
+#|- **Sizes:** N, K, M must be whole bus words for the build (64-byte words: K and M multiples of 16 floats, N too with
+#|  transposed A); `gemm_runner` rejects other sizes. The kernel computes whole memory tiles, so matrices smaller than
+#|  the tile run at a fraction of the peak (size sweep in the progress file).
+#|- **Host ↔ DDR transfers:** H2C 0.82 GB/s, C2H 1.49 GB/s (the driver's DMA stop costs 1 ms per 2 MB chunk on H2C).
+#|- **DDR placement** (default `memory_map` a=ch0, b=ch1, c=ch1): A at CH0 0x0, B at CH1 0x0, C at CH1 0x4000_0000;
+#|  limits A ≤ 2 GB, B ≤ 1 GB, C ≤ 1 GB, checked by `gemm_runner` (details in the progress file, "DDR memory map").
+#|- **Tests (no tools, no card):** `.venv/bin/python -m unittest discover -s flow/tests` (config rules, size rules,
+#|  names, golden build ids, results, campaign expansion; < 1 s); gateware simulations
+#|  `.venv/bin/python hw/gemm/tests/test_axi_native.py` and `hw/gemm/tests/test_ddr_dma.py` (Migen, ~1 min).
+#|- **Outputs:** `build/gemm/hls/<hls_hash>/`, `build/gemm/soc/<build_id>/` (config, manifest, reports/summary.json,
+#|  logs; `gemm_build.py <config> --report-only` rewrites the summary), `results/<campaign>/` (JSONL + CSV with build id,
+#|  config hash, git sha, sizes, timing, counters; `invocations.jsonl`; `gemm_dse.py --resume` continues an interrupted
+#|  campaign). All git-ignored.
+#|- **Layout:** `kernels/gemm/` (adapted HLS C++, changes in `ORIGIN.md`), `hw/gemm/` (SoC, DMA↔DDR bridge, kernel
+#|  wrapper, AXI perf counters, tests), `tcl/` (HLS flow, Vivado hooks, JTAG program), `sw/gemm_host/` (C++: DMA,
+#|  kernel control, `gemm_runner`, `ddr_dma_test`), `flow/gemmflow/` (Python package), `scripts/gemm_*.py`,
+#|  `configs/{gemm,dse}/`, `misc/` (debug cases).
 #@@ END
 #@@ FILE .gitignore 644
 #|# Created by setup.litex.du-pcb.py
@@ -443,6 +517,26 @@ if __name__ == "__main__":
 #|.Xil/
 #|__pycache__/
 #|*.pyc
+#|# GEMM HLS flow (docs/notes1/gemm-hls-plan.md)
+#|results/
+#|*.hls/
+#|vitis_hls.log
+#|vitis-run*.log
+#|hls_*.log
+#|.ipcache/
+#|*.backup.jou
+#|*.backup.log
+#|webtalk*
+#|usage_statistics_webtalk.*
+#|.ipynb_checkpoints/
+#|.pytest_cache/
+#|# host software binaries/objects
+#|sw/gemm_host/bin/
+#|sw/gemm_host/*.o
+#|# misc/ debug cases: generated logs
+#|misc/**/logs/
+#|# misc/ debug cases: keep the tools, not their output
+#|misc/**/logs/
 #@@ END
 #@@ FILE boards/dupcb/dupcb_platform.py 644
 #|#
@@ -642,6 +736,7 @@ if __name__ == "__main__":
 #|sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 #|import dupcb_platform  # noqa: E402  (boards/dupcb/dupcb_platform.py)
 #|from wl7ddrphy import DDRClocks, WL7DDRPHY  # noqa: E402
+#|from s7pciephy_rx_be import S7PCIEPHYRXBE  # noqa: E402  (S7PCIEPHY with correct 128-bit RX byte enables)
 #|
 #|# CRG ----------------------------------------------------------------------------------------------
 #|
@@ -742,7 +837,10 @@ if __name__ == "__main__":
 #|
 #|        # PCIe Gen2 x8 -----------------------------------------------------------------------------
 #|        if with_pcie:
-#|            self.pcie_phy = S7PCIEPHY(platform, platform.request("pcie_x8"),
+#|            # S7PCIEPHYRXBE, not LitePCIe's S7PCIEPHY: the stock PHY takes the 128-bit RX byte enables from tkeep,
+#|            # and with LitePCIe 2026.08 that adds a garbage beat to completions and stalls the DMA reader
+#|            # (s7pciephy_rx_be.py; docs/notes1/gemm-hls-progress.md, phase 1).
+#|            self.pcie_phy = S7PCIEPHYRXBE(platform, platform.request("pcie_x8"),
 #|                data_width = 128,
 #|                bar0_size  = 0x20000)
 #|            self.pcie_phy.update_config({"PCIe_Blk_Locn": "X0Y0"})
@@ -1214,7 +1312,11 @@ if __name__ == "__main__":
 #|import sys
 #|import time
 #|
+#|import fcntl
+#|import struct
+#|
 #|from litex.tools.remote.comm_pcie import CommPCIe
+#|from litex.tools.remote.csr_builder import CSRBuilder
 #|
 #|MODULES   = 8               # Byte lanes (x8 chips) used per channel.
 #|DATABITS  = 64
@@ -1238,6 +1340,36 @@ if __name__ == "__main__":
 #|
 #|    def write(self, addr, data):
 #|        CommPCIe.write(self, addr - self.offset, data)
+#|
+#|class Driver(CSRBuilder):
+#|    """CSRs through the LitePCIe driver (/dev/litepcieN, LITEPCIE_IOCTL_REG), for when the driver is loaded: the
+#|    kernel then refuses a BAR0 mmap. The driver's probe resets the SoC (CSR_CTRL_RESET), which clears the DDR
+#|    calibration, so with the driver in use DDR has to be calibrated *after* loading it. csr.csv addresses are
+#|    absolute; the driver subtracts the CSR base itself."""
+#|    IOCTL_REG = (3 << 30) | (12 << 16) | (ord("S") << 8) | 0  # _IOWR('S', 0, struct litepcie_ioctl_reg)
+#|
+#|    def __init__(self, dev, csr_csv):
+#|        CSRBuilder.__init__(self, comm=self, csr_csv=csr_csv)
+#|        self.dev = dev
+#|
+#|    def open(self):
+#|        self.fd = os.open(self.dev, os.O_RDWR)
+#|
+#|    def close(self):
+#|        os.close(self.fd)
+#|
+#|    def _io(self, addr, value, is_write):
+#|        buf = bytearray(struct.pack("<IIB3x", addr, value, is_write))
+#|        fcntl.ioctl(self.fd, self.IOCTL_REG, buf)
+#|        return struct.unpack("<IIB3x", buf)[1]
+#|
+#|    def read(self, addr, length=None, burst="incr"):
+#|        values = [self._io(addr + 4*i, 0, 0) for i in range(1 if length is None else length)]
+#|        return values[0] if length is None else values
+#|
+#|    def write(self, addr, data):
+#|        for i, value in enumerate(data if isinstance(data, list) else [data]):
+#|            self._io(addr + 4*i, value, 1)
 #|
 #|# One channel --------------------------------------------------------------------------------------
 #|
@@ -1521,7 +1653,9 @@ if __name__ == "__main__":
 #|
 #|def main():
 #|    parser = argparse.ArgumentParser(description="Calibrate and test the DDR3 channels over PCIe.")
-#|    parser.add_argument("--bar",       required=True, help="BAR0 file: /sys/bus/pci/devices/<bdf>/resource0.")
+#|    where = parser.add_mutually_exclusive_group(required=True)
+#|    where.add_argument("--bar",        help="BAR0 file: /sys/bus/pci/devices/<bdf>/resource0 (driver not loaded).")
+#|    where.add_argument("--dev",        help="LitePCIe device, e.g. /dev/litepcie0 (driver loaded).")
 #|    parser.add_argument("--channel",   default="all", choices=["all", "0", "1"], help="Channel(s) (default all).")
 #|    parser.add_argument("--build-dir", default="build/dupcb", help="Build directory (csr.csv, sdram_init.py).")
 #|    parser.add_argument("--stride",    default=2, type=int, help="CK phase scan step, fine steps (default 2).")
@@ -1530,7 +1664,8 @@ if __name__ == "__main__":
 #|    parser.add_argument("--bist-size", default=0x4000_0000, type=lambda x: int(x, 0), help="Final BIST size, bytes (default 1 GB).")
 #|    args = parser.parse_args()
 #|
-#|    bus = Bar(args.bar, os.path.join(args.build_dir, "csr.csv"))
+#|    csr_csv = os.path.join(args.build_dir, "csr.csv")
+#|    bus = Bar(args.bar, csr_csv) if args.bar else Driver(args.dev, csr_csv)
 #|    bus.open()
 #|    try:
 #|        chans = [0, 1] if args.channel == "all" else [int(args.channel)]
@@ -1544,6 +1679,59 @@ if __name__ == "__main__":
 #|
 #|if __name__ == "__main__":
 #|    main()
+#@@ END
+#@@ FILE boards/dupcb/s7pciephy_rx_be.py 644
+#|#
+#|# s7pciephy_rx_be.py - S7PCIEPHY with correct RX byte enables on the 128-bit interface.
+#|#
+#|# LitePCIe 2026.08's S7PCIEPHY feeds the RX byte enables from the core's m_axis_rx_tkeep and uses rx_is_eof only for
+#|# "last". On the 7-series 128-bit interface the end position of a TLP is in rx_is_eof[3:0], not in tkeep, so the last
+#|# beat claims all 4 DWs valid. Since LitePCIe commit f4dbb63 the header extracter emits a "tail" beat whenever DW3 of
+#|# the last beat is valid, so every TLP whose last beat is not full gets one extra beat carrying a garbage DW: on this
+#|# host each 256 B completion arrives as 17 beats instead of 16. The DMA reader then dequeues more beats than it
+#|# queued (pending_words wraps after ~128 requests and the reader stops for good), and on equal PHY/DMA widths the
+#|# garbage DW reaches the DMA stream. Measured with misc/dma_debug (docs/notes1/gemm-hls-progress.md, phase 1).
+#|#
+#|# Fix: derive the byte enables of an EOF beat from rx_is_eof (DWs up to the end position) and, when the next TLP
+#|# starts in the same beat (straddle, rx_is_sof at DW2), keep its DWs valid too. Other beats keep tkeep unchanged.
+#|#
+#|# 7-series 128-bit m_axis_rx_tuser: [14:10] is_sof = {valid, byte position}, [21:17] is_eof = {valid, byte position
+#|# of the last byte}; the DW index is bits [3:2] of the position.
+#|#
+#|
+#|from migen import *
+#|
+#|from litepcie.phy.s7pciephy import S7PCIEPHY
+#|
+#|
+#|def rx_be_from_tuser(be, tkeep, tuser):
+#|    """Statements driving the 16-bit RX byte enables `be` of one 128-bit beat from tuser (and tkeep off-EOF)."""
+#|    is_sof = tuser[10:15]
+#|    is_eof = tuser[17:22]
+#|    sof_dw = is_sof[2:4]
+#|    eof_dw = is_eof[2:4]
+#|    straddle = is_sof[4] & (sof_dw > eof_dw)  # Next TLP starts after the end of this one, in the same beat.
+#|    stmts = []
+#|    for dw in range(4):
+#|        valid = Mux(is_eof[4],
+#|            (eof_dw >= dw) | (straddle & (sof_dw <= dw)),
+#|            tkeep[4*dw])
+#|        stmts.append(be[4*dw:4*(dw + 1)].eq(Replicate(valid, 4)))
+#|    return stmts
+#|
+#|
+#|class S7PCIEPHYRXBE(S7PCIEPHY):
+#|    def __init__(self, platform, pads, data_width=64, **kwargs):
+#|        S7PCIEPHY.__init__(self, platform, pads, data_width=data_width, **kwargs)
+#|        if self.pcie_data_width != 128:
+#|            return  # 64-bit uses tlast/tkeep correctly.
+#|
+#|        # The core Instance is created in do_finalize() from pcie_phy_params: take tkeep away from rx_datapath.sink.be
+#|        # and drive the byte enables here instead (combinational, "pcie" domain like the AXI stream itself).
+#|        tkeep = Signal(16)
+#|        tuser = self.pcie_phy_params["o_m_axis_rx_tuser"]
+#|        self.pcie_phy_params["o_m_axis_rx_tkeep"] = tkeep
+#|        self.comb += rx_be_from_tuser(self.rx_datapath.sink.be, tkeep, tuser)
 #@@ END
 #@@ FILE scripts/env.sh 755
 #|# env.sh - sourced by the other scripts: Python venv, Vivado, RISC-V GCC, paths and helpers.
@@ -1564,15 +1752,20 @@ if __name__ == "__main__":
 #|BUILD="$ROOT/build/dupcb"
 #|# PCI address of the card (empty if not enumerated). LitePCIe uses Xilinx vendor ID 10ee.
 #|pcie_bdf() { lspci -D -d 10ee: | head -n1 | cut -d' ' -f1; }
-#|# Path of the card's BAR0 file, after making sure Linux has the device enabled (needs sudo).
+#|# Installed by scripts/setup_permissions.sh: password-less litepcie.ko load/unload.
+#|MODCTL=/usr/local/sbin/litepcie-modctl
+#|# Write "1" to a sysfs file: directly if the kernel lets us (scripts/setup_permissions.sh), else through sudo.
+#|sysfs_write1() { { echo 1 > "$1"; } 2> /dev/null || echo 1 | sudo tee "$1" > /dev/null; }
+#|# Path of the card's BAR0 file, after making sure Linux has the device enabled.
+#|# Without scripts/setup_permissions.sh this asks for the sudo password.
 #|pcie_bar() {
 #|    local bdf dev
 #|    bdf="$(pcie_bdf)"
 #|    [[ -n "$bdf" ]] || { echo "Card not on the PCIe bus (try scripts/pcie_rescan.sh)." >&2; return 1; }
 #|    dev="/sys/bus/pci/devices/$bdf"
-#|    sudo -v   # The LiteX tools run "sudo chmod" on the BAR file.
-#|    # Linux leaves a driverless device disabled; only root may enable it.
-#|    [[ "$(cat "$dev/enable")" != 0 ]] || echo 1 | sudo tee "$dev/enable" > /dev/null
+#|    [[ -x "$MODCTL" ]] || sudo -v   # LiteX runs "sudo chmod" on BAR0 (no password after the setup).
+#|    # Linux leaves a driverless device disabled (the udev rule from the setup enables it).
+#|    [[ "$(cat "$dev/enable")" != 0 ]] || sysfs_write1 "$dev/enable"
 #|    echo "$dev/resource0"
 #|}
 #|# Start litex_server on BAR0 in the background (stopped when the script exits).
@@ -1614,16 +1807,25 @@ if __name__ == "__main__":
 #@@ END
 #@@ FILE scripts/pcie_rescan.sh 755
 #|#!/usr/bin/env bash
-#|# pcie_rescan.sh - make Linux see the card again after a JTAG reload (needs sudo).
+#|# pcie_rescan.sh - make Linux see the card again after a JTAG reload.
+#|# No sudo needed after scripts/setup_permissions.sh (otherwise it asks for the password).
 #|# If the card still does not show up, reboot the PC (warm reboot keeps the FPGA loaded).
 #|set -euo pipefail
 #|source "$(dirname "$0")/env.sh"
 #|bdf="$(pcie_bdf)"
-#|[[ -n "$bdf" ]] && echo 1 | sudo tee "/sys/bus/pci/devices/$bdf/remove" > /dev/null
-#|echo 1 | sudo tee /sys/bus/pci/rescan > /dev/null
+#|if [[ -n "$bdf" ]]; then
+#|    grep -q '^litepcie ' /proc/modules && "$ROOT/scripts/driver.sh" unload   # The driver must let go first.
+#|    sysfs_write1 "/sys/bus/pci/devices/$bdf/remove"
+#|fi
+#|sysfs_write1 /sys/bus/pci/rescan
 #|sleep 1
-#|sudo lspci -vv -d 10ee: | grep -E "^[0-9a-f]|Region 0|LnkCap:|LnkSta:" || echo "Card not found on the PCIe bus."
-#|# LiteX design: Region 0 size=128K. LnkSta shows the link we got (Gen2 = 5GT/s, width x8 or less).
+#|bdf="$(pcie_bdf)"
+#|[[ -n "$bdf" ]] || { echo "Card not found on the PCIe bus."; exit 1; }
+#|dev="/sys/bus/pci/devices/$bdf"
+#|lspci -s "$bdf"
+#|echo "BAR0 size: $(( $(stat -c %s "$dev/resource0") / 1024 )) KB (LiteX design: 128 KB)"
+#|echo "Link: $(cat "$dev/current_link_speed") x$(cat "$dev/current_link_width")" \
+#|     "(card max: $(cat "$dev/max_link_speed") x$(cat "$dev/max_link_width"))"
 #@@ END
 #@@ FILE scripts/console.sh 755
 #|#!/usr/bin/env bash
@@ -1635,12 +1837,20 @@ if __name__ == "__main__":
 #@@ END
 #@@ FILE scripts/ddr_init.sh 755
 #|#!/usr/bin/env bash
-#|# ddr_init.sh - calibrate both DDR3 channels from the host and test them (~1-2 min).
-#|# Run after every bitstream load. Options: --channel 0|1, --stride N, --bist-size BYTES (see -h).
+#|# ddr_init.sh - calibrate both DDR3 channels from the host and test them (~15 s).
+#|# Run after every bitstream load, and *after* loading the LitePCIe driver if you use it: its probe resets the SoC
+#|# (CSR_CTRL_RESET), which clears the calibration. With the driver loaded the CSRs go through /dev/litepcie0 (BAR0
+#|# mmap is refused then), otherwise through BAR0.
+#|# Options: --channel 0|1, --stride N, --bist-size BYTES (see -h). BUILD_DIR=... selects another build.
 #|set -euo pipefail
 #|source "$(dirname "$0")/env.sh"
-#|bar="$(pcie_bar)"
-#|python3 "$ROOT/boards/dupcb/ddr_init.py" --bar "$bar" --build-dir "$BUILD" "$@"
+#|BUILD="${BUILD_DIR:-$BUILD}"
+#|if [[ -e /dev/litepcie0 ]]; then
+#|    where=(--dev /dev/litepcie0)
+#|else
+#|    where=(--bar "$(pcie_bar)")
+#|fi
+#|python3 "$ROOT/boards/dupcb/ddr_init.py" "${where[@]}" --build-dir "$BUILD" "$@"
 #@@ END
 #@@ FILE scripts/status.sh 755
 #|#!/usr/bin/env bash
@@ -1669,4 +1879,238 @@ if __name__ == "__main__":
 #|#!/usr/bin/env bash
 #|# clean.sh - delete all build output.
 #|rm -rf "$(dirname "$0")/../build"
+#@@ END
+#@@ FILE scripts/driver.sh 755
+#|#!/usr/bin/env bash
+#|# driver.sh - LitePCIe Linux driver generated by build.sh --driver (into $BUILD/driver/).
+#|#   scripts/driver.sh build      compile kernel module + user tools (needs linux-headers for `uname -r`)
+#|#   scripts/driver.sh load       insmod litepcie.ko (no password after scripts/setup_permissions.sh)
+#|#   scripts/driver.sh unload     rmmod litepcie
+#|#   scripts/driver.sh info       litepcie_util info + scratch register test
+#|#   scripts/driver.sh dma-test   DMA loopback test (litepcie_util dma_test), litepcie_util options pass through
+#|# BUILD_DIR=... picks another build directory (default build/dupcb).
+#|set -euo pipefail
+#|source "$(dirname "$0")/env.sh"
+#|BUILD="${BUILD_DIR:-$BUILD}"
+#|DRV="$BUILD/driver"
+#|UTIL="$DRV/user/litepcie_util"
+#|[[ -d "$DRV" ]] || { echo "No driver in $DRV: run scripts/build.sh (it passes --driver)." >&2; exit 1; }
+#|
+#|case "${1:-}" in
+#|    build)
+#|        [[ -d "/lib/modules/$(uname -r)/build" ]] || {
+#|            echo "Kernel headers for $(uname -r) missing (Arch: sudo pacman -S linux-headers)." >&2; exit 1; }
+#|        make -C "$DRV/kernel" -s
+#|        make -C "$DRV/user" -s
+#|        ls -l "$DRV/kernel/litepcie.ko" "$UTIL"
+#|        ;;
+#|    load)
+#|        # Password-less through the wrapper from scripts/setup_permissions.sh, else plain sudo.
+#|        if [[ -x "$MODCTL" ]]; then
+#|            sudo -n "$MODCTL" load "$DRV/kernel/litepcie.ko"
+#|        else
+#|            grep -q '^litepcie ' /proc/modules && sudo rmmod litepcie
+#|            grep -q '^liteuart ' /proc/modules && sudo rmmod liteuart
+#|            sudo insmod "$DRV/kernel/litepcie.ko"
+#|        fi
+#|        for _ in $(seq 20); do ls /dev/litepcie* > /dev/null 2>&1 && break; sleep 0.1; done
+#|        ls -l /dev/litepcie* || { echo "No /dev/litepcie*: see dmesg | tail." >&2; exit 1; }
+#|        [[ -w /dev/litepcie0 ]] || sudo chmod 666 /dev/litepcie*   # udev rule from the setup makes this unneeded.
+#|        ;;
+#|    unload)
+#|        if ! grep -q '^litepcie ' /proc/modules; then echo "litepcie not loaded."
+#|        elif [[ -x "$MODCTL" ]]; then sudo -n "$MODCTL" unload
+#|        else sudo rmmod litepcie; fi
+#|        ;;
+#|    info)
+#|        "$UTIL" info
+#|        "$UTIL" scratch_test
+#|        ;;
+#|    dma-test)
+#|        # Internal loopback in the FPGA, full 32-bit pattern check, 10 s unless options are given
+#|        # (litepcie_util options: -t seconds, -z zero-copy, -a RX-delay calibration, -w pattern bits).
+#|        shift
+#|        if [[ $# -eq 0 ]]; then set -- -w 32 -t 10; fi
+#|        "$UTIL" "$@" dma_test
+#|        ;;
+#|    *)
+#|        sed -n '2,8p' "$0"; exit 1 ;;
+#|esac
+#@@ END
+#@@ FILE scripts/setup_permissions.sh 755
+#|#!/usr/bin/env bash
+#|# setup_permissions.sh - let your user drive the card without typing a sudo password. Run once:
+#|#   sudo scripts/setup_permissions.sh              install (re-run if the card moves to another slot)
+#|#   sudo scripts/setup_permissions.sh --uninstall  remove everything it installed
+#|#
+#|# What it installs (all for the user who ran sudo, $SUDO_USER):
+#|#   /etc/udev/rules.d/60-litepcie.rules   /dev/litepcie* owned by you; each time the card appears: enable it
+#|#                                         (the kernel allows writing sysfs "enable" only with CAP_SYS_ADMIN,
+#|#                                         whatever the file mode) and give you its remove/resource0 files.
+#|#                                         (udev warns that OWNER= for a non-system user is deprecated; it still
+#|#                                         works on systemd 262)
+#|#   /etc/tmpfiles.d/litepcie.conf         /sys/bus/pci/rescan writable by you (re-applied at boot)
+#|#   /usr/local/sbin/litepcie-modctl       root-owned wrapper: load/unload litepcie.ko (and nothing else)
+#|#   /etc/sudoers.d/litepcie               NOPASSWD for that wrapper, and for the exact "chmod 666" on the card's
+#|#                                         enable/resource0 files that LiteX's CommPCIe always runs with sudo
+#|#
+#|# Loading a kernel module needs root, so module load/unload still goes through sudo, only without a
+#|# password. Note: whoever may load a litepcie.ko of their choosing can run anything as root, so this
+#|# is for a single-user workstation where that user already has sudo.
+#|set -euo pipefail
+#|
+#|UDEV_RULE=/etc/udev/rules.d/60-litepcie.rules
+#|TMPFILES=/etc/tmpfiles.d/litepcie.conf
+#|WRAPPER=/usr/local/sbin/litepcie-modctl
+#|SUDOERS=/etc/sudoers.d/litepcie
+#|
+#|[[ $EUID -eq 0 ]] || { echo "Run with sudo: sudo $0 $*" >&2; exit 1; }
+#|USER_NAME="${SUDO_USER:-}"
+#|[[ -n "$USER_NAME" && "$USER_NAME" != root ]] || { echo "Run via sudo from your own user account." >&2; exit 1; }
+#|
+#|if [[ "${1:-}" == "--uninstall" ]]; then
+#|    rm -f "$UDEV_RULE" "$TMPFILES" "$WRAPPER" "$SUDOERS"
+#|    udevadm control --reload
+#|    echo "Removed. Permissions already changed on /sys and /dev stay until the next reboot / card reload."
+#|    exit 0
+#|fi
+#|
+#|# 1. udev: device nodes + the card's sysfs files. LitePCIe uses Xilinx vendor 10ee, device IDs 0x70xx.
+#|cat > "$UDEV_RULE" << EOF
+#|# Installed by litex-matmul scripts/setup_permissions.sh - LitePCIe card usable by $USER_NAME without sudo.
+#|KERNEL=="litepcie[0-9]*", OWNER="$USER_NAME", MODE="0600"
+#|ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x10ee", ATTR{device}=="0x70??", \\
+#|  RUN+="/bin/sh -c 'cd /sys%p && chown $USER_NAME enable remove resource0; for i in 1 2 3 4 5 6 7 8 9 10; do echo 1 > enable 2> /dev/null && break; sleep 0.3; done'"
+#|EOF
+#|# The enable retry: on a rescan the "add" event comes before the kernel assigns BAR0, and enabling fails
+#|# ("BAR 0 not claimed; can't enable device") until it is assigned, a few hundred ms later.
+#|udevadm control --reload
+#|udevadm trigger --action=add --subsystem-match=pci --attr-match=vendor=0x10ee
+#|udevadm trigger --action=add --subsystem-match=litepcie 2> /dev/null || true
+#|
+#|# 2. tmpfiles: the global PCI rescan file (sysfs permissions do not survive a reboot).
+#|cat > "$TMPFILES" << EOF
+#|# Installed by litex-matmul scripts/setup_permissions.sh
+#|z /sys/bus/pci/rescan 0200 $USER_NAME root -
+#|EOF
+#|systemd-tmpfiles --create "$TMPFILES"
+#|
+#|# 3. Module wrapper: accepts only a file named litepcie.ko.
+#|cat > "$WRAPPER" << 'EOF'
+#|#!/bin/sh
+#|# litepcie-modctl - load/unload the LitePCIe kernel module. Installed by litex-matmul scripts/setup_permissions.sh.
+#|#   litepcie-modctl load /path/to/litepcie.ko | unload
+#|set -eu
+#|loaded() { grep -q "^$1 " /proc/modules; }
+#|case "${1:-}" in
+#|    load)
+#|        ko="${2:-}"
+#|        [ "$(basename "$ko")" = litepcie.ko ] && [ -f "$ko" ] || { echo "usage: $0 load /path/to/litepcie.ko" >&2; exit 1; }
+#|        if loaded litepcie; then rmmod litepcie; fi
+#|        if loaded liteuart; then rmmod liteuart; fi
+#|        insmod "$ko"
+#|        ;;
+#|    unload)
+#|        if loaded litepcie; then rmmod litepcie; fi
+#|        ;;
+#|    *) echo "usage: $0 load /path/to/litepcie.ko | unload" >&2; exit 1 ;;
+#|esac
+#|EOF
+#|chown root:root "$WRAPPER"
+#|chmod 0755 "$WRAPPER"
+#|
+#|# 4. sudoers: the wrapper, plus exact chmod commands for each LitePCIe card present now (no wildcards).
+#|CHMOD="$(command -v chmod)"
+#|tmp="$(mktemp)"
+#|{
+#|    echo "# Installed by litex-matmul scripts/setup_permissions.sh"
+#|    echo "$USER_NAME ALL=(root) NOPASSWD: $WRAPPER"
+#|    found=0
+#|    for dev in /sys/bus/pci/devices/*; do
+#|        [[ "$(cat "$dev/vendor")" == 0x10ee && "$(cat "$dev/device")" == 0x70* ]] || continue
+#|        found=1
+#|        bdf="${dev##*/}"; esc="${bdf//:/\\:}"
+#|        for f in enable resource0; do
+#|            echo "$USER_NAME ALL=(root) NOPASSWD: $CHMOD 666 /sys/bus/pci/devices/$esc/$f"
+#|        done
+#|    done
+#|    [[ $found -eq 1 ]] || echo "# (no LitePCIe card found when this was written: re-run once it enumerates)"
+#|} > "$tmp"
+#|visudo -cf "$tmp" > /dev/null || { echo "Generated sudoers file is invalid, not installed:" >&2; cat "$tmp" >&2; rm -f "$tmp"; exit 1; }
+#|install -m 0440 -o root -g root "$tmp" "$SUDOERS"
+#|rm -f "$tmp"
+#|
+#|echo "Installed for user $USER_NAME:"
+#|echo "  $UDEV_RULE  $TMPFILES  $WRAPPER  $SUDOERS"
+#|grep -q "no LitePCIe card" "$SUDOERS" && echo "WARNING: no card on the bus; re-run after scripts/pcie_rescan.sh shows it."
+#|ls -l /sys/bus/pci/rescan
+#|for dev in /sys/bus/pci/devices/*; do
+#|    [[ "$(cat "$dev/vendor")" == 0x10ee ]] || continue
+#|    ls -l "$dev/enable" "$dev/remove" "$dev/resource0"
+#|    echo "$dev/enable = $(cat "$dev/enable") (expected 1)"
+#|done
+#|exit 0
+#@@ END
+#@@ FILE scripts/iommu/step1_iommu_on.sh 755
+#|#!/usr/bin/env bash
+#|# step1_iommu_on.sh - turn the Intel IOMMU (DMA remapping) on, so a stray FPGA DMA access becomes a logged
+#|# DMAR fault instead of host memory corruption. Part of litex-matmul phase 1 (docs/notes1/gemm-hls-progress.md).
+#|#   scripts/iommu/step1_iommu_on.sh            add intel_iommu=on, rebuild the UKIs, then reboot yourself
+#|#   scripts/iommu/step1_iommu_on.sh --revert   take it out again, rebuild the UKIs, then reboot yourself
+#|# The kernel command line is baked into the UKIs (/boot/EFI/Linux/arch-linux*.efi) from /etc/kernel/cmdline.
+#|# After the reboot run scripts/iommu/step2_after_reboot.sh.
+#|set -euo pipefail
+#|[[ $EUID -eq 0 ]] || exec sudo "$(readlink -f "$0")" "$@"
+#|
+#|CMDLINE=/etc/kernel/cmdline
+#|BACKUP=/etc/kernel/cmdline.bak-before-iommu
+#|
+#|echo "Before: $(cat "$CMDLINE")"
+#|if [[ "${1:-}" == "--revert" ]]; then
+#|    sed -i 's/ intel_iommu=on//g' "$CMDLINE"
+#|elif grep -q 'intel_iommu=on' "$CMDLINE"; then
+#|    echo "intel_iommu=on is already there."
+#|else
+#|    [[ -e "$BACKUP" ]] || cp "$CMDLINE" "$BACKUP"
+#|    sed -i '1s/$/ intel_iommu=on/' "$CMDLINE"
+#|fi
+#|echo "After:  $(cat "$CMDLINE")"
+#|
+#|mkinitcpio -P
+#|
+#|echo
+#|echo "Done. Reboot now (sudo reboot), then run: $(dirname "$(readlink -f "$0")")/step2_after_reboot.sh"
+#|echo "If the machine misbehaves: $(readlink -f "$0") --revert, then reboot (backup: $BACKUP)."
+#@@ END
+#@@ FILE scripts/iommu/step2_after_reboot.sh 755
+#|#!/usr/bin/env bash
+#|# step2_after_reboot.sh - run once after rebooting with intel_iommu=on (scripts/iommu/step1_iommu_on.sh).
+#|# Part of litex-matmul phase 1 (docs/notes1/gemm-hls-progress.md).
+#|#   1. checks the IOMMU is really on
+#|#   2. for this boot only: a hard/soft lockup becomes a panic, pstore keeps the log, the PC reboots itself after 10 s
+#|#   3. re-installs the card permissions (udev rule now also enables the card when it appears)
+#|# Run it again after every reboot in which you want to test DMA (the sysctls do not persist).
+#|set -euo pipefail
+#|[[ $EUID -eq 0 ]] || exec sudo "$(readlink -f "$0")" "$@"
+#|
+#|REPO="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+#|
+#|# 1. IOMMU check.
+#|n_groups=$(find /sys/kernel/iommu_groups -mindepth 1 -maxdepth 1 2> /dev/null | wc -l || true)
+#|if grep -q 'intel_iommu=on' /proc/cmdline && [[ $n_groups -gt 0 ]]; then
+#|    echo "IOMMU on: $n_groups IOMMU groups."
+#|else
+#|    echo "WARNING: IOMMU not active (cmdline: $(cat /proc/cmdline); groups: $n_groups)."
+#|    echo "         Run $REPO/scripts/iommu/step1_iommu_on.sh and reboot first. Do not run DMA tests like this."
+#|    exit 1
+#|fi
+#|
+#|# 2. Lockup -> panic -> pstore -> automatic reboot (until the next reboot).
+#|sysctl -w kernel.hardlockup_panic=1 kernel.softlockup_panic=1 kernel.panic=10
+#|
+#|# 3. Card permissions for your user (setup_permissions.sh uses $SUDO_USER, set by sudo above).
+#|"$REPO/scripts/setup_permissions.sh"
+#|
+#|echo
+#|echo "Ready. Tell Claude to run the DMA retest."
 #@@ END
