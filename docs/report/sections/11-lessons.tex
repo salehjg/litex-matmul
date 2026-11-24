@@ -22,6 +22,14 @@
   \item \textbf{Traceability pays off.} Because every row carries the build id, the configuration hash and the git
         state, two real bugs in the result handling were found and fixed afterwards: a run-row id that broke
         \code{--resume}, and kernel utilisation columns read one position off.
+  \item \textbf{Check exactly, with data that switches.} A relative tolerance and small float values hid DDR3 read
+        errors that exact integer checks over the full code range exposed (\cref{sec:formats:ddr}). Timing met in
+        STA is not proof that a design computes correctly on the card.
+  \item \textbf{Validate the kernel's own assumptions.} Two tile rules in \code{gemm\_hls} were implicit; a build
+        that broke one met timing and produced wrong results, then hung. A ten-case g++ simulation confirmed both
+        rules in seconds; they are now validation errors (\cref{sec:formats:tiles}).
+  \item \textbf{Narrow formats move the limit.} Without the DSP bottleneck, the C-tile BRAM, the LUTs and the fan-out
+        of the HLS dataflow control decide how large and how fast an array can be (\cref{sec:formats:wide}).
 \end{enumerate}
 
 \subsection{Open points}
@@ -32,7 +40,13 @@
         and careful testing.
   \item \textbf{PCIe core timing}: build the PHY as Gen2 x4 (the slot's width here), or keep x8 and rebuild with
         another preset when only that path fails.
-  \item \textbf{Clock beyond 225\,MHz} needs kernel changes (registering the dataflow control and the C-pipe enables).
+  \item \textbf{Clock beyond 225\,MHz} (180\,MHz for 64 PEs) needs kernel changes (registering the dataflow control
+        and the C-pipe enables).
+  \item \textbf{A wider accumulator} (e.g.\ int8 inputs, int32 sums) and power-of-two weights (DenseShift) need
+        separate A/B/C types in the kernel; the flow's configuration and result columns are prepared for them.
+  \item \textbf{DDR3 read margin}: the host-side tuning works, but a permanent fix belongs in the PHY (per-bit
+        delays, DQS capture) or in a calibration under load; either rebuilds every bitstream.
+  \item \textbf{The fixed loss per k step} (\cref{sec:formats:kstep}) is not yet located in the kernel.
   \item \textbf{Memory map at PE 32\x8} was not measured; it should matter more there than at PE 8\x8.
   \item \textbf{Overlap of transfers and compute} (double-buffering matrices in DDR) would hide most of the transfer
         time for streams of GEMMs.
@@ -44,4 +58,6 @@ with PCIe DMA into two DDR3 channels, an adapted \code{gemm\_hls} kernel with pe
 runtime, and a JSON-driven flow whose DSE driver built, loaded and benchmarked twenty configurations unattended. The
 best configuration, a 32\x8 PE array with transposed A, 1024\x512 tiles and a 225\,MHz clock closed by Vivado's
 \code{aggressive} strategy, computes float32 GEMM at \textbf{\gflops{110.9}}, \SI{96.2}{\percent} of its peak, with
-every result verified and traceable to the bitstream and source that produced it.
+every result verified and traceable to the bitstream and source that produced it. With the element format as one
+more configuration key, the same kernel source computes int8 GEMM at \SI{426.6}{GOP/s} and int4 at
+\textbf{\SI{1290.1}{GOP/s}}, exactly checked on the card.

@@ -10,7 +10,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # docs/report
 OUT="$HERE/../images"
-TMP="$HERE/build/figures"
+TMP="$HERE/build/export"   # not build/figures: latexmk -outdir=build would pick the wrappers up as figures/*.tex
 DPI=${DPI:-180}
 names=("$@")
 [[ ${#names[@]} -gt 0 ]] || names=(figures/system plots/progress plots/roofline plots/clock plots/e2e)

@@ -1,0 +1,259 @@
+\section{Integer and fixed-point formats}
+\label{sec:formats}
+
+The float32 exploration ended with the DSPs nearly used up: each float multiply-add takes five DSP48E1 slices
+(\cref{sec:eval}). Narrower element formats need fewer of them, so the same device can hold far larger arrays. This
+section describes how the flow was extended to integer and fixed-point formats \emph{without rewriting the kernel},
+and what twelve more campaigns measured on the card (24 November 2026, \cref{tab:fmt-campaigns}). The dated record
+is in \file{docs/notes2/}.
+
+\subsection{One element type, no kernel change}
+\label{sec:formats:approach}
+\code{gemm\_hls} takes its element type from one line of \file{Config.h} (\code{using Data\_t = ...}), and uses it for
+A, B, C \emph{and the accumulation}: the product and the running sum have the same type. An integer GEMM therefore
+wraps at the element width, as C integer arithmetic does. That makes the results exactly checkable, and it measures
+what the hardware costs and how fast it runs. A quantised network would also need a wider accumulator, which
+is a kernel change (\cref{sec:lessons}). \Cref{tab:tiers} lists what works through the generated \file{Config.h} alone.
+
+\begin{table}[ht]
+\centering\small
+\caption{Element formats by how much they need. \(W\): bits per element, \(F\): fractional bits. Elements per
+  64-byte bus word follow from \(W\), since every m\_axi port of the kernel must stay 512 bits wide.}
+\label{tab:tiers}
+\begin{tabular}{@{}llllp{5.2cm}@{}}
+\toprule
+Tier & Formats & C type & Per word & Status \\
+\midrule
+T0 & float32 & \code{float} & 16 & \cref{sec:eval} \\
+T1 & int/uint, \(W\) = 8, 16, 32, 64 & \code{int8\_t} \dots{} \code{uint64\_t} & 64 \dots{} 8 & unchanged kernel; int64 synthesised only \\
+T2 & fixed/ufixed, \(W\) = 16, 32 & \code{ap\_fixed<W,W-F>} & 32, 16 & \code{\#include <ap\_fixed.h>} added to the generated header; 8-bit fixed point crashes Vitis HLS 2026.1 \\
+T3 & int/uint, \(W\) = 2, 4 & \code{ap\_int<W>} & 256, 128 & packed lanes; the kernel is given a \emph{logical} bus width of \(512/W\) bytes \\
+\midrule
+-- & \(W\) = 12, 24, \dots & & & port width \(\ne\) 512: the kernel would have to count elements by bits \\
+-- & wider accumulator, pow2 & & & separate A/B/C types and a shift operator (DenseShift~\cite{denseshift}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Tier T3 rests on a detail of hlslib: \code{DataPack} packs \code{ap\_int} elements densely by their exact bit width,
+while the kernel counts elements per bus word from \code{sizeof(Data\_t)}, which is one byte for a 4-bit type.
+Telling the kernel that the bus is \(512/W\) bytes wide makes the two agree: 128 int4 elements per 512-bit word, which
+HLS confirmed for every 4-bit point.
+
+\subsection{Flow and host support}
+\begin{itemize}
+  \item \textbf{Configuration.} \code{kernel.data\_type} is a format family (\code{float}, \code{int}, \code{uint},
+        \code{fixed}, \code{ufixed}) with \code{data\_bits} and \code{frac\_bits}; \code{accum\_bits} is reserved.
+        The new fields enter the build hash only when they are set, so all 24 existing configurations kept their build
+        ids, HLS hashes and a byte-identical \file{Config.h}: no float build was invalidated. Validation, size multiples
+        and \file{Config.h} widths all work in elements, and unsupported formats are rejected with the reason.
+  \item \textbf{Checks in the flow.} The HLS stage fails a point whose m\_axi ports are not 512 bits wide, and a
+        resource gate records a point as \code{over\_budget} without a Vivado run when the HLS estimate needs more
+        than 1910 BRAM18 (with 150 for the SoC) or 1920 DSPs. Linked grid axes (\code{"@format"}, \code{"@array"})
+        keep format and array sweeps free of meaningless combinations.
+  \item \textbf{Host.} \code{gemm\_runner --dtype int4} (also \code{fixed16.8}, \code{uint8}, \dots) draws data over the
+        full code range, packs it in \code{DataPack}'s bit order, and checks every result exactly against a model of the
+        kernel's arithmetic: products and sums wrap at \(W\) bits; fixed-point products are floored by \(2^F\)
+        (\code{AP\_TRN}, \code{AP\_WRAP}). The model matched Vitis' own \code{ap\_int}/\code{ap\_fixed} on 2000 random
+        16-term dot products in each of 11 formats.
+  \item \textbf{Results.} Every build and run row carries the format (\code{dtype}, kind, bits, signedness,
+        fractional bits, elements per word, and A/B/C and accumulator types, which are all equal for now) and
+        \code{gops}/\code{peak\_gops}.
+\end{itemize}
+
+\subsection{Cost of a format at equal throughput}
+The HLS probe (70 valid points, PE 16\x{}8 to 16\x{}128) showed every format with 512-bit ports, and gave two negative
+results. \code{mult\_resource: fabric} (\code{config\_op mul -impl fabric}) also moves the kernel's 32-bit address
+multiplies into LUTs, and the clock estimate jumps to 7.6\,ns, so it was dropped. 8-bit \code{ap\_fixed} makes Vitis
+HLS crash, so the flow rejects it.
+
+\Cref{tab:same,fig:formats_cost} compare the formats on the array of the best float build, PE 32\x8 with tile
+1024\x512 at 200\,MHz. The throughput is the same for every format: the array, not the format, sets the rate. The cost
+falls sharply with width. Vivado maps the 8-bit multiplies to LUTs, so int8 needs 40 DSPs (address logic only)
+against float's 1320, and under half of float's LUTs and BRAM. int16 needs one DSP per MAC. fixed32.16 needs 1064 DSPs
+against int32's 808, because the full 64-bit product is formed before the shift by 16.
+
+\begin{table}[ht]
+\centering\small
+\caption{One array in five formats: PE 32\x8, tile 1024\x512, transposed A, 200\,MHz, default preset
+  (\file{data/formats\_same.csv}). Peak 102.4\,GOP/s for all.}
+\label{tab:same}
+\begin{tabular}{@{}lrrrrrrl@{}}
+\toprule
+Format & DSP & LUT & FF & BRAM tiles & kernel LUT & GOP/s at \(8192^3\) & Verification \\
+\midrule
+float32 & 1320 & 154.3\,k & 225.4\,k & 654.5 & 125.6\,k & 98.59 & exact after DDR tuning \\
+int8 & \textbf{40} & 69.4\,k & 75.7\,k & 299.5 & 40.8\,k & 98.64 & exact \\
+int16 & 296 & 67.0\,k & 83.0\,k & 428.0 & 38.3\,k & 98.64 & exact \\
+fixed16.8 & 296 & 67.3\,k & 79.0\,k & 428.5 & 38.6\,k & 98.64 & exact \\
+int32 & 808 & 81.4\,k & 102.2\,k & 654.5 & 52.6\,k & 98.59 & exact after DDR tuning \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/formats_cost}
+  \caption{Resources of the same array (PE 32\x8, tile 1024\x512, 200\,MHz) in each format, in \% of the float32
+    build.}
+  \label{fig:formats_cost}
+\end{figure}
+
+\subsection{Wider arrays}
+\label{sec:formats:wide}
+With the DSPs freed, the arrays could grow until BRAM, LUTs or timing stopped them (\cref{tab:formats,fig:formats_best}):
+\begin{itemize}
+  \item \textbf{int8:} PE 32\x32 (1024 MACs) reaches \SI{379.4}{GOP/s} at 200\,MHz and \textbf{\SI{426.6}{GOP/s} at
+        225\,MHz}, 3.8 times the best float result, with 40 DSPs and \SI{44}{\percent} of the LUTs.
+  \item \textbf{int16:} PE 32\x16 (\SI{190.9}{GOP/s}). PE 32\x32 needs 2045 BRAM18 by the HLS estimate, because the
+        C tile is twice as wide per element as int8's. The resource gate stopped it before Vivado.
+  \item \textbf{int4:} PE 32\x64 (2048 MACs) reaches \SI{756.7}{GOP/s} at 200\,MHz and \SI{854.1}{GOP/s} at 225\,MHz.
+        PE 32\x128 is over the BRAM budget (2045 BRAM18). \textbf{PE 64\x64 (4096 MACs) reaches \SI{1290.1}{GOP/s}
+        at 180\,MHz}, 11.6 times the best float result, with 38 DSPs, \SI{67}{\percent} of the LUTs and
+        \SI{68}{\percent} of the BRAM. HLS overestimates LUTs for the 4-bit arrays by 2--3\x{} (PE 32\x64: 240\,k
+        estimated, 117\,k placed).
+\end{itemize}
+
+\paragraph{Timing.} With 32 PEs, int8 and int4 both close 225\,MHz with the default preset; int8 misses 250\,MHz
+by 0.365\,ns. The limiting path is no longer in the PEs. It is the control of the HLS dataflow region:
+a PE's loop counter drives the reset of the \code{ap\_sync\_reg\_*\_ap\_ready} flops of every process in the region
+(6 logic levels, \SI{81}{\percent} routing), and that fan-out grows with the number of PEs. The three PE 64\x64
+builds at 200\,MHz missed by 0.215, 0.051 and 0.336\,ns on this path. At 180\,MHz the default preset met the accel
+clock but failed the PCIe \SI{250}{MHz} user clock by 0.447\,ns: the path from a LitePCIe FIFO in block RAM into the
+PCIe block's transmit throttle, displaced by the congested design. The \code{aggressive} and \code{explore} presets
+close both, with +0.045 and +0.018\,ns. Going faster with 64 PEs needs a kernel or directive change in the
+dataflow control (\cref{sec:lessons}).
+
+\begin{table}[ht]
+\centering\small
+\caption{Best verified build per format (kernel time). Peak = \(2 P_N P_M f\). Every run is checked exactly
+  (float32: bit for bit). The int32, fixed32.16 and both int4 builds also passed a full screen (\(2\times2048^3\), every
+  entry), the int8 build a full \(1024^3\) check.}
+\label{tab:formats}
+\begin{tabular}{@{}lllrrrl@{}}
+\toprule
+Format & Array, tile & Clock, preset & Peak & Best (size) & \% & LUT / DSP / BRAM tiles \\
+\midrule
+float32 & PE 32\x8, 1024\x512 & 225\,MHz, aggr. & 115.2 & 110.9 (\(8192^3\)) & 96.2 & 152.0\,k / 1320 / 654.5 \\
+fixed32.16 & PE 32\x8, 1024\x512 & 200\,MHz, aggr. & 102.4 & 98.6 (\(8192^3\)) & 96.3 & 79.2\,k / 1064 / 654.5 \\
+int32 & PE 32\x8, 1024\x512 & 200\,MHz, aggr. & 102.4 & 98.2 (\(4096^3\)) & 95.9 & 81.3\,k / 808 / 654.5 \\
+int16 & PE 32\x16, 512\x1024 & 200\,MHz & 204.8 & 190.9 (\(8192^3\)) & 93.2 & 85.7\,k / 552 / 414.5 \\
+int8 & PE 32\x32, 512\x1024 & 225\,MHz & 460.8 & 426.6 (\(8192^3\)) & 92.6 & 131.3\,k / 40 / 414.5 \\
+int4 & PE 32\x64, 512\x2048 & 225\,MHz & 921.6 & 854.1 (\(8192^3\)) & 92.7 & 117.5\,k / 39 / 414.5 \\
+\textbf{int4} & \textbf{PE 64\x64, 512\x4096} & \textbf{180\,MHz, aggr.} & 1474.6 & \textbf{1290.1} (\(8192^3\)) & 87.5 & 200.3\,k / 38 / 652.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \input{plots/formats_best}
+  \caption{Best kernel GOP/s per format (\file{data/formats\_best.csv}) against the peak of each build. The DSP count
+    of each build is under its label.}
+  \label{fig:formats_best}
+\end{figure}
+
+\subsection{Wrong results under load: DDR3 read margin}
+\label{sec:formats:ddr}
+Exact integer checks with full-range data exposed errors that the float tolerance had hidden. The int32 build of
+\cref{tab:same} returned 10--\SI{19}{\percent} wrong entries and int8 PE 16\x64 4--\SI{6}{\percent}, both with timing met.
+\begin{itemize}
+  \item \textbf{Symptoms.} Whole C rows (int32) or columns (int8 PE 16\x64) inside a tile were wrong. With B = I or
+        A = I, the results were exact. Errors needed both operands switching, which first suggested a timing failure
+        under heavy activity. But a lower clock (180\,MHz) did not help.
+  \item \textbf{Which bits.} Recovering the corrupted inputs from the dumped matrices showed single-bit flips at
+        word bit \(\equiv 5 \pmod{64}\): DDR3 data line DQ5 of channel 0, on the odd beats of a burst. The int8 and
+        float errors map to the same kind of lines and beats.
+  \item \textbf{Cause.} The DDR3 PHY samples the data lines with an internal clock (not DQS), with one delay tap per
+        byte lane. Calibration at bring-up finds a window of about 11 taps on an idle chip; under GEMM load it shrinks
+        to about 3, and the calibrated tap sits at its edge. Moving only that lane's tap changed the error rate from
+        \(\sim\)17\,k to 524\,k of 1\,M entries. DMA streaming at the same taps with an idle core is clean, so it is
+        the core's switching activity, not the traffic, that shifts the capture point.
+  \item \textbf{Fix (host only).} \code{gemmflow.ddr\_tune} keeps the bring-up calibration, then sweeps each lane's tap
+        around it while the build's own kernel runs an exact check, and takes the centre of the error-free run
+        (\code{gemm\_run.py --ddr-load-tune}, campaign key \code{"ddr\_load\_tune"}). All four failing builds became
+        exact (0 bad over \(2 \times 2048^3\), 8.4\,M entries each), with unchanged throughput. Every campaign started
+        after the fix ran with it. A permanent fix belongs in the PHY (per-bit delays, DQS capture) or the calibration (under load),
+        and would rebuild every bitstream.
+\end{itemize}
+Bit-exact screens (\code{--float-exact}, the host accumulating in the kernel's order) of all float builds then found
+one affected build: PE 32\x8 at 200\,MHz (\code{a88777ec}), with errors of \(\sim\)\(4\cdot10^{-6}\) relative,
+within the tolerance of \cref{sec:host}. Its throughput is unaffected, and it is exact after tuning. The headline
+225\,MHz build and 17 others are bit-exact without tuning. Float runs are now checked bit for bit.
+
+\subsection{Two tile rules the kernel does not check}
+\label{sec:formats:tiles}
+An int4 PE 48\x64 build with tile 768\x2048 met timing, returned \SI{94}{\percent} wrong entries on its first check,
+and then hung on every run. The cause is two assumptions in \code{gemm\_hls}'s \file{Compute.cpp} that neither the
+upstream build nor our flow checked:
+\begin{enumerate}
+  \item \textbf{\(T_M/P_M \ge P_N\).} During each outer product a PE passes the next A values down the chain in the slots
+        \(m_1 = \text{its index} \dots P_N-1\) of a loop that is only \(T_M/P_M\) long. If that is shorter than
+        \(P_N\), the PEs at the end never get their values: C is wrong, and the values left over block the feeder.
+        PE 48\x64 had \(2048/64 = 32 < 48\).
+  \item \textbf{\(T_M/P_M\) and \(T_N/P_N\) are powers of two.} The C write-back counts in
+        \code{ap\_uint<ConstLog2(x)>}, which rounds down.
+\end{enumerate}
+A g++ simulation of the upstream testbench on ten small arrays was wrong exactly when a rule was broken, including
+a non-power-of-two \(P_N\) = 12, which works when both rules hold. Both rules are now validation errors.
+Every earlier board build met both. PE 64\x64 then used tile 512\x4096 (\(T_M/P_M = 64 = P_N\)), the build in
+\cref{tab:formats}.
+
+\subsection{A fixed loss per k step}
+\label{sec:formats:kstep}
+PE 64\x64 reaches only \SI{87.5}{\percent} of its peak, against \SI{92}{\percent} for the 32-PE arrays, and the gap
+does not shrink from \(4096^3\) to \(8192^3\). So it is a cost per step of the k loop, not per tile. From the measured
+cycle counts, each build loses a roughly fixed number of cycles per k step and memory tile
+(\cref{tab:kstep}), where the ideal is \((T_N/P_N)(T_M/P_M)\) cycles. The float PE 32\x8 already showed this: doubling
+its tile raised it from 93.2 to \SI{96.3}{\percent} with about the same loss per step. Where those cycles go in the
+kernel is not yet known: pipeline fill of the PE loop or a restart of the A/B feed. Tiles with twice the work per
+k step are the next experiment for the int4 arrays.
+
+\begin{table}[ht]
+\centering\small
+\caption{Cycles lost per k step and memory tile, at the largest measured size.}
+\label{tab:kstep}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Build & Ideal cycles per k step & Lost per k step & \% of peak \\
+\midrule
+float32 PE 32\x8, tile 512\x512 & 1024 & 75 & 93.2 \\
+float32 / int8 PE 32\x8, tile 1024\x512 & 2048 & 79 & 96.3 \\
+int8 PE 32\x32, tile 512\x1024 & 512 & 41 & 92.6 \\
+int4 PE 32\x64, tile 512\x2048 & 512 & 41 & 92.7 \\
+int4 PE 64\x64, tile 512\x4096 & 512 & 73 & 87.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Sizes and transfers.} A size sweep on the int8 PE 32\x8 build showed the same whole-tile behaviour as float
+(\cref{sec:eval:sizes}). Narrow formats move fewer bytes: at \(1024^3\) the host spends 5.6\,ms on transfers and
+packing (\SI{20}{\percent} of the end-to-end time), against 15.5\,ms (\SI{41}{\percent}) for float32 on the same array.
+
+\subsection{Campaigns}
+\begin{table}[ht]
+\centering\small
+\caption{Integer and fixed-point campaigns, 24 November 2026 (\file{data/campaigns.csv}). Builds: new Vivado runs;
+  runs: result rows (15 of them with the DDR read errors of \cref{sec:formats:ddr}).}
+\label{tab:fmt-campaigns}
+\begin{tabular}{@{}lllrrrl@{}}
+\toprule
+Campaign & Time & Stages & Points & Builds & Runs & Question \\
+\midrule
+\code{dtype\_hls} & 03:25--04:53 & sim, hls & 70 & -- & -- & which formats synthesise, at what cost? \\
+\code{dtype\_same\_array} & 04:53--05:53 & all & 5 & 4 & 30 & each format on the same array \\
+\code{dtype\_size\_sweep} & 05:53 & run & 1 & -- & 90 & 45 matrix shapes in int8 \\
+\code{int8\_scale} & 05:53--06:42 & all & 3 & 3 & 18 & widest int8 array \\
+\code{int16\_scale} & 06:42--07:13 & all & 3 & 2 & 12 & widest int16 array \\
+\code{int32\_margin} & 07:13--07:47 & all & 2 & 2 & 8 & int32 errors: timing margin? \\
+\code{int4\_probe} & 07:46--09:07 & all & 4 & 4 & 16 & packed 4-bit lanes end to end \\
+\code{fixed\_point} & 09:07--11:38 & all & 2 & 2 & 6 & fixed32.16 \\
+\code{dtype\_clock} & 09:26--11:20 & all & 6 & 5 & 12 & int8 PE 32\x32 at 200/225/250\,MHz \\
+\code{int4\_wide} & 11:38--13:47 & all & 3 & 2 & 0 & 4096-MAC int4 arrays (stopped, \cref{sec:formats:tiles}) \\
+\code{int4\_pe64} & 15:33--21:12 & all & 5 & 5 & 8 & PE 64\x64 with a legal tile \\
+\code{int4\_clock} & 18:36--21:48 & all & 2 & 2 & 8 & int4 PE 32\x64 at 225\,MHz \\
+\midrule
+\multicolumn{3}{@{}l}{total} & & 31 & 208 & \\
+\bottomrule
+\end{tabular}
+\end{table}

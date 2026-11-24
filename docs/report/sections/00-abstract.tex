@@ -14,4 +14,11 @@ array at \SI{225}{MHz}. The steps that mattered were sending \(A\) transposed (t
 time), larger memory tiles (until BRAM ran out) and a higher clock that only Vivado's \code{explore}/\code{aggressive}
 presets closed. Host transfers run at \SI{0.82}{GB/s} (host to card) and \SI{1.49}{GB/s} (card to host); at
 \(8192^3\) the kernel is \SI{92}{\percent} of the end-to-end time.
+
+A second exploration added integer and fixed-point element formats without changing the kernel's source: the flow
+generates the element type, the host packs and checks the data exactly, and twelve more campaigns (31 builds) sized
+the arrays the freed DSPs allow. int8 reaches \SI{426.6}{GOP/s} (PE 32\x32, \SI{225}{MHz}) and int4
+\textbf{\SI{1290.1}{GOP/s}} (PE 64\x64, \SI{180}{MHz}, 38 DSPs), 11.6 times the float32 result. Exact checks
+also found DDR3 read errors under load, fixed by tuning the read delays under load at bring-up, and two tile rules
+that the upstream kernel assumes but does not check.
 \end{abstract}

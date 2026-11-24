@@ -1,6 +1,6 @@
 {
   "campaign": "int4_clock",
-  "comment": "docs/notes2: int4 PE 32x64 (757 GOP/s exact at 200 MHz, WNS 0.015) at 225 MHz. int8 PE 32x32 met 225 MHz with the default preset (dtype_clock); both have 32 PEs, and the limit there is the dataflow ap_sync control fanout, not the PEs. default and explore presets share one HLS run. DDR read taps tuned under load.",
+  "comment": "docs/notes2: int4 PE 32x64 (757 GOP/s exact at 200 MHz, WNS 0.015) at 225 MHz. int8 PE 32x32 met 225 MHz with the default preset (dtype_clock); both have 32 PEs, and the limit there is the dataflow ap_sync control fanout, not the PEs. default and explore presets share one HLS run. DDR read taps tuned under load. 8192^3 added afterwards (run-only --resume) for the report.",
   "base": "configs/gemm/pe32x8_ta_t1024x512.json",
   "build_grid": {
     "@format": [
@@ -36,6 +36,11 @@
         4096,
         4096,
         4096
+      ],
+      [
+        8192,
+        8192,
+        8192
       ]
     ],
     "repetitions": 2,

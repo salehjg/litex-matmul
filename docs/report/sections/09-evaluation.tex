@@ -9,6 +9,9 @@ All numbers come from the result records of the campaigns (\file{results/}, git-
         accel clock measured on the card. End-to-end times include the uploads and the download.
   \item Every row is verified (\cref{sec:host}); all 206 rows of the twelve campaigns passed. The memory-map campaign and the first build's
         bring-up checked every element; the other campaigns used the sampled check (4098 elements per run).
+        Bit-exact screens later found rare errors of \(\sim\)\(4\cdot10^{-6}\) relative in one build (PE 32\x8,
+        200\,MHz, default preset), within the tolerance: DDR3 read errors under load, gone after tuning
+        (\cref{sec:formats:ddr}). Its throughput is unaffected; the 225\,MHz builds are bit-exact.
   \item Repetitions of the same run agree to four or five significant digits (the kernel and the DDR controller are
         deterministic for a given size), so the plots show single values. Rebuilding and rerunning the best 200\,MHz
         configuration reproduced \gflops{98.59} exactly.

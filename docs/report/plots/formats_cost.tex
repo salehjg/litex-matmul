@@ -1,0 +1,11 @@
+% Resources of PE 32x8, tile 1024x512, 200 MHz in each element format, in % of the float32 build.
+\begin{tikzpicture}
+\begin{axis}[rbar, ybar=1pt, bar width=6.5pt, height=5.6cm, ymax=115, ylabel={\% of the float32 build},
+    xtick=data, xticklabels={float32, int8, int16, fixed16.8, int32}, enlarge x limits=0.13,
+    legend columns=4, legend style={at={(0.5,1.02)}, anchor=south}]
+  \addplot[s1] table[x expr=\coordindex, y=dsp_rel]  {data/formats_same.csv}; \addlegendentry{DSP}
+  \addplot[s2] table[x expr=\coordindex, y=lut_rel]  {data/formats_same.csv}; \addlegendentry{LUT}
+  \addplot[s3] table[x expr=\coordindex, y=ff_rel]   {data/formats_same.csv}; \addlegendentry{FF}
+  \addplot[s5] table[x expr=\coordindex, y=bram_rel] {data/formats_same.csv}; \addlegendentry{BRAM tiles}
+\end{axis}
+\end{tikzpicture}

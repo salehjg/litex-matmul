@@ -476,6 +476,16 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         point.
       - Restarted on the user's go (19:10), one after the other in one shell: `int4_pe64 --resume` (`dse_3.log`; 180 MHz
         aggressive, explore), then `int4_clock --resume` (225 MHz default, explore). Only one Vivado run at a time.
+- [x] **Report updated** (23:20, `docs/report/`, 28 pages, 0 warnings): new section 10 "Integer and fixed-point formats"
+      (tiers, flow and host support, same-array cost, wider arrays and timing, DDR read margin, tile rules, loss per
+      k step, campaigns), two plots (`formats_cost`, `formats_best`), appendix table of all 31 integer/fixed builds;
+      abstract, introduction, evaluation method, lessons, open points and conclusion updated. `extract_data.py`
+      keeps `builds.csv` float-only (the float plots index it by position) and writes `formats_*.csv`.
+      `export_figures.sh` now uses `build/export/` (its wrappers in `build/figures/` shadowed `figures/*.tex` in the
+      report build).
+      - Pending: the int4 8192³ numbers in the text (1290.1, 854.1) come from the screen runs above; 8192³ was added to
+        `int4_pe64`/`int4_clock`, to be recorded with a run-only `--resume` after `int4_tile` (JTAG programming
+        starts Vivado), then `extract_data.py` and a rebuild.
 - [x] (superseded: the tile broke rule 1) Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
       and explore presets (one HLS run), and at 180 MHz default (peak 1475 GOP/s, 0.56 ns more period). It goes first:
       4096 MACs at any of these clocks beats int4 PE 32×64 at 225 MHz (921.6 GOP/s peak).

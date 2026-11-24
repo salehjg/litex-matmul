@@ -1,0 +1,16 @@
+% Best verified GOP/s per element format, against the peak 2*PN*PM*f of each build.
+\begin{tikzpicture}
+\begin{axis}[rpt, ybar=0pt, bar width=16pt, height=6.4cm, ymin=0, ymax=1600,
+    ylabel={GOP/s (kernel)}, xtick=data, enlarge x limits=0.09,
+    x tick label style={align=center, font=\sffamily\tiny},
+    xticklabels={{float32\\PE 32\x8, 225\,MHz\\1320 DSP}, {fixed32.16\\PE 32\x8, 200\\1064 DSP},
+                 {int32\\PE 32\x8, 200\\808 DSP}, {int16\\PE 32\x16, 200\\552 DSP},
+                 {int8\\PE 32\x32, 225\\40 DSP}, {int4\\PE 32\x64, 225\\39 DSP}, {int4\\PE 64\x64, 180\\38 DSP}},
+    nodes near coords, nodes near coords style={font=\sffamily\scriptsize, /pgf/number format/.cd, fixed, precision=0},
+    legend style={at={(0.02,0.98)}, anchor=north west}]
+  \addplot[s7, fill=black!8, draw=black!45, bar shift=0pt, nodes near coords=\empty] table[x=i, y=peak] {data/formats_best.csv};
+  \addlegendentry{peak of the build}
+  \addplot[s1, bar shift=0pt, bar width=10pt] table[x=i, y=gops] {data/formats_best.csv};
+  \addlegendentry{best measured}
+\end{axis}
+\end{tikzpicture}

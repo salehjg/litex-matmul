@@ -41,11 +41,11 @@ def jsonl(path):
         return [json.loads(l) for l in f if l.strip()]
 
 
-def all_runs():
+def all_runs(statuses=("ok",)):
     rows = []
     for f in sorted(glob.glob(os.path.join(ROOT, "results", "*", "runs.jsonl"))):
         for r in jsonl(f):
-            if r.get("status", "ok") == "ok":
+            if r.get("status", "ok") in statuses:
                 r["_campaign"] = os.path.basename(os.path.dirname(f))
                 # Throughput: "gops" since the element-format columns (docs/notes2), "gflops" in earlier float rows.
                 r.setdefault("gflops", r.get("gops"))
@@ -179,9 +179,10 @@ def main():
         raise SystemExit("no results/ or build/gemm/soc/ data: nothing to extract (the committed CSVs stay)")
     print(f"{len(runs)} runs, {len(B)} builds")
 
-    # All builds: configuration, timing, resources, best result.
+    # All float32 builds: configuration, timing, resources, best result. The other formats are in formats_*.csv.
     rows = []
-    for h, b in sorted(B.items(), key=lambda kv: (kv[1]["k"]["parallelism_n"], kv[1]["mhz"], kv[1]["build_id"])):
+    FB = {h: b for h, b in B.items() if b["dtype"] == "float32"}
+    for h, b in sorted(FB.items(), key=lambda kv: (kv[1]["k"]["parallelism_n"], kv[1]["mhz"], kv[1]["build_id"])):
         g = best(runs, h)
         rows.append([h, label(b), b["k"]["parallelism_n"], b["k"]["parallelism_m"], b["k"]["memory_tile_size_n"],
                      b["k"]["memory_tile_size_m"], int(b["k"]["transposed_a"]), b["mhz"], b["preset"], b["map"],
@@ -194,7 +195,7 @@ def main():
                          "wns_accel", "wns_pcie", "wns_sys", "lut_k", "ff_k", "bram", "dsp", "klut_k", "kff_k",
                          "kbram36", "kbram18", "kdsp", "build_min", "hls_ns", "hls_ff_k", "gflops", "pct", "peak",
                          "dtype"],
-          rows, "every Vivado build: config, per-clock WNS (ns), resources (LUT/FF in thousands), best GFLOP/s")
+          rows, "every float32 Vivado build: config, per-clock WNS (ns), resources (LUT/FF in thousands), best GFLOP/s")
 
     # The same, pre-formatted for the appendix table (strings, "--" where a build was not run).
     def f(v, nd):
@@ -365,6 +366,61 @@ def main():
         rows.append([lab, r["n"]] + stall_row(r))
     write("stalls.csv", ["label", "n", "await", "bwait", "cstall", "alat", "blat"], rows,
           "memory waits in % of kernel cycles (r_wait: kernel ready, no data) and avg read latency (cycles)")
+
+    formats(B, runs, all_runs(("ok", "verify_failed")))
+
+
+# Integer and fixed-point formats (docs/notes2) ---------------------------------------------------------------------
+
+# Builds of the formats section that need a word in the appendix table.
+FORMAT_NOTES = {"c0ddddde": "DDR read errors (0 after tuning)", "032f4a87": "DDR read errors (0 after tuning)",
+                "a0f95453": "tile rule 1: wrong C then hang", "f3c7b241": "PCIe 250 MHz path",
+                "e61e6845": "default preset"}
+
+
+def formats(B, runs, runs_any):
+    # Same array, every format: PE 32x8, tile 1024x512, tA, 200 MHz (dtype_same_array; float32 = a88777ec).
+    same = [("float32", "a88777ec"), ("int8", "0c345ce9"), ("int16", "e441e4da"), ("fixed16.8", "1f08e157"),
+            ("int32", "c0ddddde")]
+    f = B["a88777ec"]
+    rows = []
+    for lab, h in same:
+        b = B[h]
+        g = max((r["gflops"] for r in runs_by(runs_any, h) if r["n"] == 8192), default=None)
+        rows.append([lab, b["dsp"], b["lut"] / 1000, b["ff"] / 1000, b["bram"], b["klut"] / 1000, g,
+                     pct(b["dsp"], f["dsp"]), pct(b["lut"], f["lut"]), pct(b["ff"], f["ff"]), pct(b["bram"], f["bram"])])
+    write("formats_same.csv", ["format", "dsp", "lut_k", "ff_k", "bram", "klut_k", "g8192", "dsp_rel", "lut_rel",
+                               "ff_rel", "bram_rel"], rows,
+          "PE 32x8 tile 1024x512 tA 200 MHz in every format: resources, GOP/s at 8192^3, resources in % of float32")
+
+    # Best verified build per format.
+    bests = [("float32", "PE 32x8 225 MHz", "db5adf1c"), ("fixed32.16", "PE 32x8 200 MHz", "73030689"),
+             ("int32", "PE 32x8 200 MHz", "9b529c7a"), ("int16", "PE 32x16 200 MHz", "66db0239"),
+             ("int8", "PE 32x32 225 MHz", "56e626ae"), ("int4", "PE 32x64 225 MHz", "9fd9e3a8"),
+             ("int4", "PE 64x64 180 MHz", "2b2028f3")]
+    rows = []
+    for i, (fmt_, arr, h) in enumerate(bests):
+        b = B[h]
+        g = best(runs, h)
+        rows.append([i, fmt_, arr, b["k"]["parallelism_n"] * b["k"]["parallelism_m"], b["mhz"], b["peak"], g,
+                     pct(g, b["peak"]), b["dsp"], b["lut"] / 1000, b["bram"]])
+    write("formats_best.csv", ["i", "format", "array", "macs", "mhz", "peak", "gops", "pct", "dsp", "lut_k", "bram"],
+          rows, "best verified build per element format: peak and best GOP/s, resources")
+
+    # Every non-float build, formatted for the appendix table.
+    def fm(v, nd):
+        return "--" if v is None else f"{v:.{nd}f}"
+    rows = []
+    for h, b in sorted(((h, b) for h, b in B.items() if b["dtype"] != "float32"),
+                       key=lambda kv: (kv[1]["dtype"].lstrip("u"), kv[1]["k"]["parallelism_n"] * kv[1]["k"]["parallelism_m"],
+                                       kv[1]["mhz"], kv[1]["preset"], kv[1]["build_id"])):
+        g = max((r["gflops"] for r in runs_by(runs_any, h)), default=None)
+        rows.append([f"{b['dtype']} {label(b)}", "yes" if b["met"] else "no", fm(b["wns_accel"], 3), fm(b["wns"], 3),
+                     fm(b["lut"] and b["lut"] / 1000, 1), fm(b["bram"], 1), fm(b["dsp"], 0), fm(b["build_min"], 0),
+                     fm(g, 1), fm(pct(g, b["peak"]) if g else None, 1), FORMAT_NOTES.get(h, "")])
+    write("formats_builds_table.csv", ["label", "met", "wns_accel", "wns", "lut_k", "bram", "dsp", "build_min", "gops",
+                                       "pct", "note"], rows,
+          "every integer/fixed-point Vivado build: timing (ns), resources, best GOP/s (rows with DDR read errors included)")
 
 
 if __name__ == "__main__":

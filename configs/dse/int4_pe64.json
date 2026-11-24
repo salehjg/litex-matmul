@@ -1,6 +1,6 @@
 {
   "campaign": "int4_pe64",
-  "comment": "docs/notes2: int4 PE 64x64 (4096 MACs). int4_wide's tile 1024x2048 breaks the A double buffering (tile_m/PM = 32 < 64 PEs: PEs 32-63 never get the next A values; PE 48x64 with the same tile gave wrong results and then hung), and missed 200 MHz by 0.215 ns. Tile 512x4096: tile_m/PM = 64 = PN, same per-PE C buffer (8x64 = 512 entries). 200 MHz aggressive and explore (one HLS run), 180 MHz default. DDR read taps tuned under load. Round 2 (18:45): 180 MHz default met the accel clock (+0.018 ns) but missed the PCIe 250 MHz user clock (-0.447 ns, LitePCIe BRAM FIFO -> PCIe TX throttle), so 180 MHz aggressive and explore were added (same HLS run).",
+  "comment": "docs/notes2: int4 PE 64x64 (4096 MACs). int4_wide's tile 1024x2048 breaks the A double buffering (tile_m/PM = 32 < 64 PEs: PEs 32-63 never get the next A values; PE 48x64 with the same tile gave wrong results and then hung), and missed 200 MHz by 0.215 ns. Tile 512x4096: tile_m/PM = 64 = PN, same per-PE C buffer (8x64 = 512 entries). 200 MHz aggressive and explore (one HLS run), 180 MHz default. DDR read taps tuned under load. Round 2 (18:45): 180 MHz default met the accel clock (+0.018 ns) but missed the PCIe 250 MHz user clock (-0.447 ns, LitePCIe BRAM FIFO -> PCIe TX throttle), so 180 MHz aggressive and explore were added (same HLS run). 8192^3 added afterwards (run-only --resume) for the report.",
   "base": "configs/gemm/pe32x8_ta_t1024x512.json",
   "build_grid": {
     "@format": [
@@ -51,6 +51,11 @@
         4096,
         4096,
         4096
+      ],
+      [
+        8192,
+        8192,
+        8192
       ]
     ],
     "repetitions": 2,

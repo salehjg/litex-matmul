@@ -1,13 +1,14 @@
 \section{All builds}
 \label{app:builds}
-\Cref{tab:builds} lists every Vivado build of the campaigns. WNS values are routed setup slack in ns, LUT and FF
+\Cref{tab:builds} lists every float32 Vivado build of the campaigns, \cref{tab:fmt-builds} every integer and
+fixed-point build. WNS values are routed setup slack in ns, LUT and FF
 are in thousands, and min is the Vivado build time in minutes. GFLOP/s is the best verified result of the build
 (-- where it was not run because timing failed). Source: \file{data/builds\_table.csv}, extracted from each build
 directory's summary and timing report.
 
 \begin{table}[ht]
 \centering\scriptsize\setlength{\tabcolsep}{3pt}
-\caption{Every build: configuration, timing per clock, resources and best result.}
+\caption{Every float32 build: configuration, timing per clock, resources and best result.}
 \label{tab:builds}
 \pgfplotstabletypeset[
   every column/.style={string type, column type=r},
@@ -28,6 +29,30 @@ directory's summary and timing report.
 ]{data/builds_table.csv}
 \end{table}
 
+\begin{table}[ht]
+\centering\scriptsize\setlength{\tabcolsep}{3pt}
+\caption{Every integer and fixed-point build (\file{data/formats\_builds\_table.csv}). WNS: accel clock and worst
+  over all clocks (ns); GOP/s: best result of the build, including the rows with DDR read errors
+  (\cref{sec:formats:ddr}), whose throughput is valid.}
+\label{tab:fmt-builds}
+\pgfplotstabletypeset[
+  every column/.style={string type, column type=r},
+  columns/label/.style={string type, column name={Build (format, \(P_N{\times}P_M\), tile, MHz, options)}, column type=l},
+  columns/met/.style={string type, column name={met}, column type=c},
+  columns/wns_accel/.style={column name={WNS accel}},
+  columns/wns/.style={column name={WNS all}},
+  columns/lut_k/.style={column name={LUT}},
+  columns/bram/.style={column name={BRAM}},
+  columns/dsp/.style={column name={DSP}},
+  columns/build_min/.style={column name={min}},
+  columns/gops/.style={column name={GOP/s}},
+  columns/pct/.style={column name={\% peak}},
+  columns/note/.style={string type, column name={note}, column type=l},
+  every head row/.style={before row=\toprule, after row=\midrule},
+  every last row/.style={after row=\bottomrule},
+]{data/formats_builds_table.csv}
+\end{table}
+
 \section{Reproducing the results}
 \label{app:repro}
 \begin{lstlisting}[language=bash, caption={From a clean checkout (Vivado/Vitis 2026.1, the card in a PCIe slot).}]
@@ -42,6 +67,7 @@ sudo scripts/setup_permissions.sh                  # once: password-less driver 
 
 # a whole campaign (builds are reused across campaigns), then this report
 .venv/bin/python scripts/gemm_dse.py configs/dse/pe32_ta_225_presets.json
+.venv/bin/python scripts/gemm_dse.py configs/dse/int4_pe64.json     # int4 PE 64x64 (kernel.data_type/data_bits)
 docs/report/build.sh
 \end{lstlisting}
 
@@ -55,5 +81,7 @@ docs/report/build.sh
   \item \file{flow/gemmflow/} and \file{flow/tests/}: the Python flow and its unit tests
   \item \file{scripts/}: \code{gemm\_build.py}, \code{gemm\_run.py}, \code{gemm\_dse.py} and the board scripts
   \item \file{configs/gemm/}, \file{configs/dse/}: build configurations and campaigns
-  \item \file{docs/notes1/}: plan and progress log (a dated record of every step); \file{docs/report/}: this report
+  \item \file{docs/notes1/}, \file{docs/notes2/}: plans and progress logs for float32 and for the integer and
+        fixed-point formats (a dated record of every step); \file{docs/report/}: this report
+  \item \file{misc/int32\_verify/}, \file{misc/pe\_forwarding/}: the DDR read-margin and tile-rule investigations
 \end{itemize}
