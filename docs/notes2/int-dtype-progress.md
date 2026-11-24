@@ -305,6 +305,15 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       - fixed32.16 needs 1064 DSPs against int32's 808: the 64-bit product before the shift by 16.
       - SoC: 79.3k LUT, 106.3k FF, 654.5 BRAM tiles. HLS estimate 4.209 ns, like int32.
       - Re-queued with `vivado.preset: aggressive` (which gave int32 at this array +0.044 ns), before `int4_wide`.
+- [x] **Flow bug found and fixed (09:27): concurrent HLS runs in one directory.** `dtype_clock` is the first
+      campaign whose points differ only in a Vivado setting (preset), so 225 MHz default and aggressive share an HLS
+      hash and directory. The parallel HLS stage started both, and one died (225 MHz default: `vitis-run` exit 1,
+      log cut off).
+      - Fix: `HlsRun.run` takes an flock on `build/gemm/hls/<hash>.lock` and re-checks the stamp after acquiring
+        it. `gemm_dse.py` schedules the first point of each HLS hash first; the rest wait and find it up to date.
+      - The campaign was stopped (09:30), the two unstamped HLS dirs (225/250 MHz) removed, and the queue
+        restarted: `dtype_clock --resume` → `fixed_point` (aggressive) → `int4_wide`. After the restart, one Vitis
+        run per hash, duplicates waiting on the lock.
 - [ ] Queued `int4_wide` (09:15, after `dtype_clock` and the fixed32.16 retry): int4 PE 32×128 and PE 64×64 (4096 MACs, peak 1638 GOP/s)
       and PE 48×64 (3072 MACs); at most 2 HLS jobs at once (RAM); DDR tuning on.
 - [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.

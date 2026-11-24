@@ -197,8 +197,14 @@ def main():
             except (ToolError, OSError) as e:
                 return cfg, "failed", {"reason": str(e)}
 
+        # One job per HLS hash (points that differ only in Vivado settings share the HLS run); the others wait on
+        # the HLS dir lock and find it up to date. Order: first point of each hash, then the rest.
+        seen, firsts, rest = set(), [], []
+        for c, _ in todo:
+            (rest if c.hls_hash() in seen else firsts).append(c)
+            seen.add(c.hls_hash())
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
-            for cfg, status, extra in pool.map(hls_one, [c for c, _ in todo]):
+            for cfg, status, extra in pool.map(hls_one, firsts + rest):
                 record(cfg, "hls", status, extra)
                 h = extra.get("hls", {})
                 print(f"  {cfg.build_id()}: {status}  est {h.get('estimated_clock_ns')} ns  DSP {h.get('dsp')}  "

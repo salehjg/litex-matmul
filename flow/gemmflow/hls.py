@@ -4,6 +4,7 @@
 # reuse it). Plan sections 4.5 and 7.
 #
 
+import fcntl
 import json
 import os
 import time
@@ -98,9 +99,19 @@ class HlsRun:
             json.dump(self.cfg.to_dict(), f, indent=2)
 
     def run(self, force=False, timeout=4 * 3600):
-        """Returns (seconds, skipped)."""
+        """Returns (seconds, skipped). One run per HLS dir at a time: builds that differ only outside the HLS hash
+        (e.g. the Vivado preset) share the dir, and two Vitis runs in it break each other (dtype_clock, 2026-11-24).
+        The second caller waits on <dir>.lock and then finds the dir up to date."""
         if not force and self.up_to_date():
             return 0.0, True
+        os.makedirs(os.path.dirname(self.dir), exist_ok=True)
+        with open(self.dir + ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if not force and self.up_to_date():
+                return 0.0, True
+            return self._run_locked(timeout)
+
+    def _run_locked(self, timeout):
         self.prepare()
         seconds = VitisHls().run_tcl(RUN_HLS_TCL, cwd=self.dir, log=self.log, timeout=timeout)
         summary = HlsReport(self.csynth_xml).summary()
