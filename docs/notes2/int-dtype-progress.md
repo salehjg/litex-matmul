@@ -459,10 +459,11 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       PE 64×64 tile 1024×4096 at 180 MHz aggressive (the clocks and presets of the best builds). One HLS run at a
       time, then one Vivado build at a time; 4096³ and 8192³, DDR tuning on.
       - HLS done (~23:05): **the same BRAM18 estimate as the half-size tiles** (662 and 1142), est. 4.209 ns, DSP 34/35,
-        LUT 244k/455k, ports 512 bits. The C buffer is split into one narrow memory per element of a PE
-        (4-bit lanes); a BRAM18 holds up to 4096 × 4 bits, so 512 or 1024 entries cost the same block. The +512 BRAM18
-        estimated above does not apply: for int4, deeper tiles are free in BRAM up to 4096 entries per PE.
-        Vivado builds running (PE 32×64 first).
+        LUT 244k/455k, ports 512 bits. Each PE has one C buffer of PM × 4 = 256 bits per word (`cBuffer`, 1R1W); HLS
+        counts it as 15 BRAM18 at both 512 and 1024 words (1024 × 18 mode). Vivado packed the 512-word buffer
+        into fewer blocks (512 × 72), so the real cost should still grow: about +4 RAMB36 per PE, +128 for PE 32×64
+        and +256 for PE 64×64 (~910 of 955 tiles). The HLS-based resource gate does not see this. Vivado builds
+        running (PE 32×64 first).
 - [x] **Both campaigns stopped (~18:58) by Claude Code's memory guard**, not by a failure in the flow. `int4_clock`'s HLS
       finished sooner than expected (both 225 MHz points: est. 4.144 ns, 34 DSP, 662 BRAM18, stamped), and its first
       Vivado build started next to `int4_pe64`'s 180 MHz aggressive build. Two Vivado runs of this size (~7 GB each)
