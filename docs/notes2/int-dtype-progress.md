@@ -392,6 +392,10 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
       - HLS (both clocks): est. 4.209 ns, 35 DSP, 1142 BRAM18 (as tile 1024×2048: the per-PE C buffer is the same),
         LUT 454k (HLS; Vivado was 2.6× lower for the 1024×2048 tile), ports 512 bits, under the resource gate.
         Builds in order: 200 MHz aggressive, 200 MHz explore, 180 MHz default.
+      - **200 MHz aggressive (17:43): timing failed, WNS −0.051 ns** (TNS −0.56, 11 endpoints; the default preset
+        at tile 1024×2048 missed by 0.215). Same path: `ProcessingElement_2_U0/n0_fu_98_reg` →
+        `ap_sync_reg_ProcessingElement_*_U0_ap_ready_reg/R`, 6 levels, 84 % routing. SoC 199.6k LUT, 134.9k FF,
+        654.5 BRAM tiles, 38 DSP; build 33 min.
 - [x] (superseded: the tile broke rule 1) Queued `int4_pe64` (13:35, after `int4_wide`, before `int4_clock`): PE 64×64 at 200 MHz with the aggressive
       and explore presets (one HLS run), and at 180 MHz default (peak 1475 GOP/s, 0.56 ns more period). It goes first:
       4096 MACs at any of these clocks beats int4 PE 32×64 at 225 MHz (921.6 GOP/s peak).
