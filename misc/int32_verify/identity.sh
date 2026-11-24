@@ -11,12 +11,12 @@ if [[ "${2:-}" != "--no-program" ]]; then
   .venv/bin/python scripts/gemm_run.py "$B" --program --sizes 512x512x512 --verify full --results "$OUT/bringup.jsonl" \
     2>&1 | grep -v "^\[bring-up\]" | tail -2
 fi
-ID=$(python3 -c "import json;print(json.load(open('$B/config.resolved.json'))['config_hash'][:8])")
 DT=$(python3 -c "import json,sys;sys.path.insert(0,'flow');from gemmflow.config import BuildCfg;print(BuildCfg.from_dict(json.load(open('$B/config.resolved.json'))['config']).numeric().spec)")
-R="$B/sw/gemm_runner --map a=ch0,b=ch1,c=ch1 --transposed-a --expect-build-id $ID --dtype $DT --multiples 1024,16,512"
+R=$(python3 misc/int32_verify/runner_cmd.py "$B")
+TAG=$(basename "$B" | cut -c1-24)
 for rep in 1 2 3; do
   echo "== identity rep $rep (seed 1)"
-  $R --n 1024 --k 1024 --m 1024 --verify full --b-identity --seed 1 --dump-bad "$OUT/id_${DT}_s1_r$rep.txt" 2>&1 | grep -o "verify.*" || true
+  $R --n 1024 --k 1024 --m 1024 --verify full --b-identity --seed 1 --dump-bad "$OUT/${TAG}_id_s1_r$rep.txt" 2>&1 | grep -o "verify.*" || true
 done
 echo "== identity seed 2"
-$R --n 1024 --k 1024 --m 1024 --verify full --b-identity --seed 2 --dump-bad "$OUT/id_${DT}_s2.txt" 2>&1 | grep -o "verify.*" || true
+$R --n 1024 --k 1024 --m 1024 --verify full --b-identity --seed 2 --dump-bad "$OUT/${TAG}_id_s2.txt" 2>&1 | grep -o "verify.*" || true

@@ -147,8 +147,39 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         exact comparison; 1024³ at ±100, ±127, 0…127): 0 bad. Earlier float results are not affected.
       - Tools added: `gemm_runner --dump-bad FILE` (mismatches as `i j got ref`), `--value-range` for float32
         (integer values, exact check) and `--b-identity` (B = I, so C shows A as the kernel read it).
+- [x] **`int8_scale` done** (05:53–06:43, `results/int8_scale/`; 200 MHz, tA, default preset):
+
+      | Array (tile) | MACs | DSP | SoC LUT | SoC FF | BRAM tiles | WNS ns | 2048³ / 4096³ / 8192³ GOP/s (% of peak) | Verify |
+      |---|---|---|---|---|---|---|---|---|
+      | 32×16 (512×1024) | 512 | 40 | 90.4k | 89.6k | 300.5 | 0.049 | 188.9 / 190.3 / **191.0** (93 %) | ok |
+      | 32×32 (512×1024) | 1024 | 40 | 130.1k | 119.0k | 414.5 | 0.038 | 375.5 / 378.3 / **379.4** (93 %) | ok |
+      | 16×64 (256×1024) | 1024 | 42 | 118.0k | 106.2k | 529.5 | 0.007 | 371.5 / 374.2 / 375.3 (92 %) | **failed** |
+
+      - **int8 PE 32×32 delivers 379 GOP/s, verified exactly: 3.4× the best float build** (110.9 GFLOP/s at
+        225 MHz aggressive). It uses 40 DSPs (all multiplies in LUTs) and 30 % of the device's LUTs, so wider arrays
+        are limited by LUTs and BRAM, not DSPs.
+      - **PE 16×64 fails exact verification** (4–6 % of sampled entries), the second build to do so. Same probes as
+        for int32 ([misc/int32_verify](../../misc/int32_verify/README.md)):
+        - Here whole *columns* of one N tile are wrong (j mod 64 ∈ {24, 25, 27, 40, 41, 43, 56, 57, 59}, bits 5–7),
+          i.e. a B element is seen wrong for a whole tile pass, by every PE.
+        - 0…3 and 0…1 data pass; −3…3, −3…0 and full-range data fail.
+        - **B = I is exact (A arrives intact), and A = I (C = B, A not toggling) is exact too**, over 3 runs. At the
+          random-A failure rate, about 6 bad entries per run would be expected.
+
+        So the failure needs both operands switching, the same signature as int32: a timing failure under heavy
+        switching in a build with almost no slack.
+      - Summary of exact checks so far:
+
+        | Build | MACs, multiplier | WNS ns | Result |
+        |---|---|---|---|
+        | int32 PE 32×8 | 256, 808 DSP | 0.028 | fails |
+        | int8 PE 16×64 | 1024, LUT | 0.007 | fails |
+        | int8 PE 32×32 | 1024, LUT | 0.038 | passes |
+        | int8 PE 32×8 | 256, LUT | 0.005 | passes |
+        | float32 PE 32×8 | 256 | 0.050 | passes |
 - [ ] Queue after `int16_scale` (06:15): `int32_margin` → `int4_probe` → `fixed_point` → `dtype_clock`.
-      `dtype_clock`'s array is set from the `int8_scale` results before it starts.
+      `dtype_clock` now uses the best verified int8 array, PE 32×32 tile 512×1024 (06:50); its 200 MHz default
+      point reuses that build.
 - [ ] Queued behind it (05:05): `dtype_size_sweep` (runs on the int8 build), `int8_scale`, `int16_scale`.
       `dtype_size_sweep` finished 05:53 (results below); `int8_scale` started 05:53 (HLS done for all 3 arrays).
 - [x] **`dtype_size_sweep` done** (int8 PE 32×8 build, 45 sizes × 2 reps, all verified exactly,

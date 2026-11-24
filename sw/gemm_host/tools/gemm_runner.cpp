@@ -12,7 +12,8 @@
 // --json. For float32, --value-range LO,HI draws integer values instead of uniform(-1, 1) and checks exactly (every
 // partial sum is an integer below 2^24, so the kernel's float result must equal the reference bit for bit): a
 // corrupted element is then visible instead of hidden by the relative tolerance. --dump-bad FILE writes the
-// mismatching entries as "i j got ref" lines; --b-identity (K == M) sets B = I, so C is A as the kernel read it.
+// mismatching entries as "i j got ref" lines; --b-identity (K == M) sets B = I, so C is A as the kernel read it;
+// --a-identity (N == K) sets A = I, so C is B.
 // Exit status: 0 = all repetitions verified (or --verify off), 1 = mismatch, 2 = usage, 3 = error.
 #include <algorithm>
 #include <array>
@@ -53,12 +54,13 @@ struct Options {
     int64_t lo = 0, hi = 0;
     std::string dump_bad;       // --dump-bad FILE: mismatches as "i j got ref" lines (debugging)
     bool b_identity = false;    // --b-identity (K == M): B = I, so C = A as the kernel read it (debugging)
+    bool a_identity = false;    // --a-identity (N == K): A = I, so C = B as the kernel read it (debugging)
 };
 
 [[noreturn]] void usage(const char *argv0) {
     std::fprintf(stderr, "usage: %s --n N --k K --m M [--reps R] [--warmup W] [--seed S] [--verify full|sampled|off]\n"
                          "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a]\n"
-                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--dump-bad FILE] [--b-identity] [--json]\n", argv0);
+                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--dump-bad FILE] [--a-identity] [--b-identity] [--json]\n", argv0);
     std::exit(2);
 }
 
@@ -98,6 +100,7 @@ Options parse(int argc, char **argv) {
             o.have_range = true; o.lo = lo; o.hi = hi;
         } else if (a == "--dump-bad") o.dump_bad = next();
         else if (a == "--b-identity") o.b_identity = true;
+        else if (a == "--a-identity") o.a_identity = true;
         else usage(argv[0]);
     }
     if (o.have_range && o.dt.is_float()) {
@@ -112,6 +115,7 @@ Options parse(int argc, char **argv) {
         std::exit(2);
     }
     if (o.b_identity && o.k != o.m) { std::fprintf(stderr, "error: --b-identity needs K == M\n"); std::exit(2); }
+    if (o.a_identity && o.n != o.k) { std::fprintf(stderr, "error: --a-identity needs N == K\n"); std::exit(2); }
     const uint32_t epw = o.dt.elems_per_word();
     if (o.mult[0] == 0) o.mult[0] = o.transposed_a ? epw : 1;
     if (o.mult[1] == 0) o.mult[1] = epw;
@@ -280,6 +284,7 @@ int main(int argc, char **argv) {
             for (auto &x : af) x = value();
             for (auto &x : bf) x = value();
             if (o.b_identity) for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bf[size_t(r) * o.m + col] = r == col;
+            if (o.a_identity) for (uint32_t r = 0; r < o.n; r++) for (uint32_t col = 0; col < o.k; col++) af[size_t(r) * o.k + col] = r == col;
             for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) btf[size_t(col) * o.k + r] = bf[size_t(r) * o.m + col];
             std::vector<float> a_send;
             if (o.transposed_a) {
@@ -298,6 +303,7 @@ int main(int argc, char **argv) {
             for (auto &x : ai) x = code();
             for (auto &x : bi) x = code();
             if (o.b_identity) for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bi[size_t(r) * o.m + col] = r == col;
+            if (o.a_identity) for (uint32_t r = 0; r < o.n; r++) for (uint32_t col = 0; col < o.k; col++) ai[size_t(r) * o.k + col] = r == col;
             for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bti[size_t(col) * o.k + r] = bi[size_t(r) * o.m + col];
             if (o.transposed_a) {
                 std::vector<int64_t> a_send(size_t(o.k) * o.n);

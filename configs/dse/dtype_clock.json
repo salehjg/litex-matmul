@@ -1,12 +1,20 @@
 {
   "campaign": "dtype_clock",
-  "comment": "docs/notes2: clock headroom of narrow datapaths. Set the array to the best int8_scale point before running.",
+  "comment": "docs/notes2: clock headroom of the best verified int8 array from int8_scale (PE 32x32, tile 512x1024, 379 GOP/s at 200 MHz). 200 MHz default reuses that build.",
   "base": "configs/gemm/pe32x8_ta_t1024x512.json",
   "build_grid": {
     "@format": [
       {
         "kernel.data_type": "int",
         "kernel.data_bits": 8
+      }
+    ],
+    "@array": [
+      {
+        "kernel.parallelism_n": 32,
+        "kernel.parallelism_m": 32,
+        "kernel.memory_tile_size_n": 512,
+        "kernel.memory_tile_size_m": 1024
       }
     ],
     "clocks.accel_mhz": [

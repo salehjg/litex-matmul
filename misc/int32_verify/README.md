@@ -1,4 +1,4 @@
-# int32_verify — wrong results from the int32 build at PE 32×8
+# int32_verify — builds that fail exact verification (int32 PE 32×8, int8 PE 16×64)
 
 **Case:** `dtype_same_array` (2026-11-24): the int32 build `i32_pe32x8_t1024x512_200mhz_tA-c0ddddde` (timing met,
 WNS 0.028 ns) fails exact verification at every size (10–19 % of sampled entries). int8, int16 and fixed16.8 at the
@@ -54,6 +54,33 @@ droop next to the busy DSP columns, which the averaged XADC reading cannot show)
 `configs/dse/int32_margin.json`: the same int32 array with the aggressive preset at 200 MHz, and at 180 MHz. If those
 verify, a slack guard band (or exact full-range verification of every build, which the DSE already does) is the
 remedy, not a design change.
+
+## Second case: int8 PE 16×64 (2026-11-24 06:45–07:00)
+`int8_scale` build `i8_pe16x64_t256x1024_200mhz_tA-032f4a87` (WNS 0.007 ns, 42 DSPs: the multiplies are in LUTs)
+fails at 4–6 % of sampled entries. The scripts now take any build (`runner_cmd.py` reads the runner arguments from
+`config.resolved.json`; file names start with the build name):
+
+| Test (1024³, full) | Bad |
+|---|---|
+| full range | 5 671 |
+| −3…3 | 13 730 |
+| 0…3, 0…1 | 0 |
+| −3…0 | 5 098 |
+| B = I (C = A), 3 runs + another seed | 0 |
+| **A = I (C = B), 3 seeds** (`--a-identity`) | **0** |
+| 512³ (bring-up) | 0 |
+
+- Errors are whole **columns** of one N tile: j mod 64 ∈ {24, 25, 27, 40, 41, 43, 56, 57, 59} (B lanes; PM = 64,
+  so a lane is a byte of B's 512-bit word), C off by multiples of 0x20/0x40, i.e. bits 5–7 of a B element.
+- A wrong B element seen by all 16 PEs means it was wrong on B's feed path before PE 0. But with A not toggling
+  (A = I) B arrives intact. At the full-range rate (~25 corrupted elements per run, a quarter of them landing on
+  the diagonal) about 6 bad entries per run would be expected. So, as for int32, the failure needs both operands
+  switching.
+
+**Conclusion so far:** two builds with little slack (0.028 and 0.007 ns) give wrong results only under heavy
+switching activity. Builds with more slack or fewer MACs pass. The bad bits are where the routed paths are
+longest, and the global activity decides whether they fail. STA "met" by a few tens of ps is not a guarantee
+on this card. The DSE's exact full-range verification is what catches it (`int32_margin` tests the remedy).
 
 ## Earlier suspect (ruled out)
 At first the lane pattern pointed at A's read path. The DRAM ports cross from the controller clock (`sys`) to
