@@ -351,6 +351,9 @@ class BuildCfg:
             name += "_tA"
         if self.vivado.preset != "default":
             name += f"_{self.vivado.preset}"
+        for res, tag in ((k.mult_resource, "mul"), (k.add_resource, "add")):  # operator binding, e.g. _mulfabric
+            if res:
+                name += f"_{tag}{res}"
         mm = self.memory_map
         if (mm.a, mm.b, mm.c) != ("ch0", "ch1", "ch1"):  # non-default map: channel digits of A, B, C
             name += f"_m{mm.a[-1]}{mm.b[-1]}{mm.c[-1]}"

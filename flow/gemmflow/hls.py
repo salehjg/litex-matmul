@@ -140,7 +140,17 @@ class HlsReport:
             "ff":                 self._text(r + "FF", int),
             "lut":                self._text(r + "LUT", int),
             "uram":               self._text(r + "URAM", int),
+            "axi_data_bits":      sorted(set(self.axi_data_bits().values())),
         }
+
+    def axi_data_bits(self):
+        """{bundle: data width in bits} of the m_axi masters (RDATA or WDATA), e.g. {"gmem0": 512, ...}."""
+        out = {}
+        for p in self.rtl_ports():
+            m = p["name"].split("_")
+            if len(m) >= 4 and m[0] == "m" and m[1] == "axi" and m[3] in ("RDATA", "WDATA"):
+                out[m[2]] = p["bits"]
+        return out
 
     def rtl_ports(self):
         """List of dicts: name, dir (in/out), bits, protocol, object (C argument or bundle)."""

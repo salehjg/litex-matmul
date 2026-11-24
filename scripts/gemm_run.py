@@ -4,7 +4,8 @@
 #   .venv/bin/python scripts/gemm_run.py build/gemm_soc_<build_id> --sizes 256x256x256 1024x1024x1024 --reps 3
 #   options: --program (JTAG load + rescan first), --no-bringup (driver/DDR/tools already done), --verify full|sampled|off
 # Brings the board up in the right order (gemmflow.board), then calls the build's gemm_runner with the build's memory
-# map and build id, and appends one JSON row per repetition (plus run metadata) to results/<build_id>/runs.jsonl.
+# map, element format (--dtype) and build id, and appends one JSON row per repetition (plus run metadata and the
+# element-format columns of docs/notes2) to results/<build_id>/runs.jsonl.
 #
 
 import argparse
@@ -66,23 +67,28 @@ def main():
     results = a.results or os.path.join(ROOT, "results", info["build_id"], "runs.jsonl")
     os.makedirs(os.path.dirname(results), exist_ok=True)
     sha, dirty = git_rev()
-    meta = {"schema_version": 1, "build_id": info["build_id"], "config_hash": info["config_hash"],
+    nf = cfg.numeric()
+    meta = {"schema_version": 2, "build_id": info["build_id"], "config_hash": info["config_hash"],
             "hls_hash": info["hls_hash"], "git_sha": sha, "git_dirty": dirty, "host": platform.node(),
             "kernel_release": platform.release(), "kernel": info["config"]["kernel"], "clocks": info["config"]["clocks"],
-            "memory_map": info["config"]["memory_map"]}
+            "memory_map": info["config"]["memory_map"], **nf.columns(), "peak_gops": cfg.peak_gops()}
     failures = 0
     for size in a.sizes:
         n, k, m = (int(x) for x in size.lower().split("x"))
         cmd = [runner, "--n", str(n), "--k", str(k), "--m", str(m), "--reps", str(a.reps), "--warmup", str(a.warmup),
                "--seed", str(a.seed), "--verify", a.verify, "--map", f"a={mm.a},b={mm.b},c={mm.c}",
-               "--expect-build-id", info["config_hash"][:8], "--json"] + \
+               "--expect-build-id", info["config_hash"][:8], "--dtype", nf.spec, "--json"] + \
               (["--transposed-a"] if cfg.kernel.transposed_a else []) + \
               ["--multiples", ",".join(map(str, cfg.size_multiples()))]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         for line in proc.stdout.splitlines():
             if line.startswith("{"):
                 row = json.loads(line)
+                if row.get("dtype", nf.spec) != nf.spec:
+                    print(f"[{size}] runner reports dtype {row.get('dtype')}, build is {nf.spec}", flush=True)
+                    failures += 1
                 row.update(meta)
+                row["pct_of_peak"] = round(100 * row.get("gops", row.get("gflops", 0)) / cfg.peak_gops(), 2)
                 row["timestamp"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
                 with open(results, "a") as f:
                     f.write(json.dumps(row) + "\n")

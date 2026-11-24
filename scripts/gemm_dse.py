@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 #
 # gemm_dse.py - design-space exploration and benchmarking (plan section 9).
-#   .venv/bin/python scripts/gemm_dse.py configs/dse/<campaign>.json [--stages hls,build,run] [--resume] [--dry-run]
+#   .venv/bin/python scripts/gemm_dse.py configs/dse/<campaign>.json [--stages sim,hls,build,run] [--resume] [--dry-run]
 #
-# A campaign has a base build config, a build grid (dotted config keys -> value lists, full cross product), a runtime
+# A campaign has a base build config, a build grid (dotted config keys -> value lists, full cross product; a key starting
+# with "@" is a linked axis whose values are objects of dotted keys set together, e.g. "@format": [{"kernel.data_type":
+# "int", "kernel.data_bits": 8}, ...] or a PE count with its matching tile), a runtime
 # grid (sizes, repetitions, warmup, verify) and stages:
+#   sim   : g++ simulation of the kernel per point (parallel, seconds; float32 and native ints, others "skipped")
 #   hls   : Vitis HLS of every valid point (parallel, sized by free RAM and cores) -> estimates, no Vivado
 #   build : LiteX + Vivado + host tools per point, one at a time (15 GB RAM)
 #   run   : per built point: JTAG load + bring-up, then gemm_runner for every size
@@ -12,6 +15,9 @@
 # argv, stages, git state), builds.jsonl/.csv (one row per point and stage), runs.jsonl/.csv (one row per point, size
 # and repetition; build_id = full build id, hw_build_id = the id read from the bitstream). Invalid points are
 # recorded with status "invalid" and the reason.
+# Element formats (docs/notes2): sweep kernel.data_type / data_bits / frac_bits like any key. Every row carries the
+# format columns (dtype, dtype_kind, dtype_bits, dtype_signed, dtype_frac_bits, a/b/c/acc_dtype, quant_*, pow2_*),
+# runs also gops / peak_gops / pct_of_peak (gflops / peak_gflops for float).
 # --resume skips stages/sizes already recorded as ok for a point (and the bring-up of a point with nothing left).
 # Each build also gets <build>/reports/summary.json (+ manifest.json when a step ran), as with gemm_build.py.
 #
@@ -33,7 +39,7 @@ from gemmflow.board import Board                       # noqa: E402
 from gemmflow.config import BuildCfg, ConfigError      # noqa: E402
 from gemmflow.manifest import manifest                 # noqa: E402
 from gemmflow.results import ResultStore               # noqa: E402
-from gemmflow.steps import HlsStep, SocStep, HostStep, write_build_reports  # noqa: E402
+from gemmflow.steps import HlsStep, SimStep, SocStep, HostStep, write_build_reports  # noqa: E402
 from gemmflow.tools import ToolError                   # noqa: E402
 
 
@@ -57,11 +63,17 @@ def expand(campaign):
     for values in itertools.product(*[grid[k] for k in keys]) if keys else [()]:
         d = copy.deepcopy(base)
         for k, v in zip(keys, values):
-            set_dotted(d, k, v)
+            if k.startswith("@"):  # linked axis: each value sets several dotted keys together
+                for kk, vv in v.items():
+                    set_dotted(d, kk, vv)
+            else:
+                set_dotted(d, k, v)
         try:
             d["name"] = BuildCfg.from_dict(d).auto_name()  # name from the actual parameters
-        except (ConfigError, KeyError, TypeError):
-            d["name"] = base.get("name", "gemm") + "_" + "_".join(f"{k.split('.')[-1]}{v}" for k, v in zip(keys, values))
+        except (ConfigError, KeyError, TypeError, ValueError):
+            label = lambda k, v: ("".join(f"{kk.split('.')[-1]}{vv}" for kk, vv in v.items()) if k.startswith("@")
+                                  else f"{k.split('.')[-1]}{v}")
+            d["name"] = base.get("name", "gemm") + "_" + "_".join(label(k, v) for k, v in zip(keys, values))
         points.append(d)
     return points
 
@@ -115,20 +127,45 @@ def main():
         except ConfigError as e:
             print(f"invalid point {d['name']}: {e}")
             if not a.dry_run:
+                k = d.get("kernel", {})
                 builds.append({"campaign": name, "status": "invalid", "stage": "config", "name": d["name"],
-                               "reason": str(e), "timestamp": now(), "config": d})
+                               "reason": str(e), "timestamp": now(), "data_type": k.get("data_type"),
+                               "data_bits": k.get("data_bits"), "frac_bits": k.get("frac_bits"), "config": d})
     print(f"campaign {name}: {len(cfgs)} valid point(s), stages {','.join(stages)}")
     done = {(r.get("build_id"), r.get("stage")) for r in builds.rows() if r.get("status") == "ok"} if a.resume else set()
     if a.dry_run:
         for cfg, w in cfgs:
-            print(f"  {cfg.build_id()}  peak {cfg.peak_gflops():.1f} GFLOP/s" + (f"  warnings: {w}" if w else ""))
+            print(f"  {cfg.build_id()}  {cfg.numeric().spec:<10s} peak {cfg.peak_gops():.1f} GOP/s"
+                  + (f"  warnings: {w}" if w else ""))
         return
 
     def record(cfg, stage, status, extra):
         builds.append({"campaign": name, "status": status, "stage": stage, "build_id": cfg.build_id(),
                        "config_hash": cfg.config_hash(), "hls_hash": cfg.hls_hash(), "timestamp": now(),
                        "git_sha": manifest()["git_sha"], "git_dirty": manifest()["git_dirty"],
-                       "config": cfg.to_dict(), **extra})
+                       **cfg.numeric().columns(), "peak_gops": cfg.peak_gops(), "config": cfg.to_dict(), **extra})
+
+    # Simulation (parallel, optional) ----------------------------------------------------------------------------
+    if "sim" in stages:
+        todo = [c for c, _ in cfgs if (c.build_id(), "sim") not in done]
+        print(f"sim: {len(todo)} point(s)")
+
+        def sim_one(cfg):
+            st = SimStep(cfg)
+            ok, why = st.supported()
+            if not ok:
+                return cfg, "skipped", {"reason": why}
+            try:
+                seconds, skipped = st.run()
+                return cfg, "ok", {"seconds": round(seconds, 1), "skipped": skipped, "sim": st.summary()}
+            except (ToolError, OSError, subprocess.TimeoutExpired) as e:
+                return cfg, "failed", {"reason": str(e)}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(8, (os.cpu_count() or 2) // 2))) as pool:
+            for cfg, status, extra in pool.map(sim_one, todo):
+                record(cfg, "sim", status, extra)
+                print(f"  {cfg.build_id()}: {status}  {extra.get('reason', '')}")
+        builds.write_csv()
 
     # HLS (parallel) ---------------------------------------------------------------------------------------------
     if "hls" in stages:
@@ -149,7 +186,8 @@ def main():
                 record(cfg, "hls", status, extra)
                 h = extra.get("hls", {})
                 print(f"  {cfg.build_id()}: {status}  est {h.get('estimated_clock_ns')} ns  DSP {h.get('dsp')}  "
-                      f"BRAM18 {h.get('bram_18k')}  LUT {h.get('lut')}")
+                      f"BRAM18 {h.get('bram_18k')}  LUT {h.get('lut')}  AXI {h.get('axi_data_bits')}"
+                      + (f"  {extra['reason'][:160]}" if "reason" in extra else ""))
         builds.write_csv()
 
     # Builds (sequential) ----------------------------------------------------------------------------------------
@@ -206,21 +244,27 @@ def main():
                 cmd = [os.path.join(bdir, "sw", "gemm_runner"), "--n", str(n), "--k", str(k), "--m", str(m),
                        "--reps", str(reps), "--warmup", str(rt.get("warmup", 0)),
                        "--verify", rt.get("verify", "sampled"), "--map", f"a={mm.a},b={mm.b},c={mm.c}",
-                       "--expect-build-id", cfg.config_hash()[:8], "--json"] + \
+                       "--expect-build-id", cfg.config_hash()[:8], "--dtype", cfg.numeric().spec, "--json"] + \
                       (["--transposed-a"] if cfg.kernel.transposed_a else []) + \
                       ["--multiples", ",".join(map(str, cfg.size_multiples()))]
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
                 for line in proc.stdout.splitlines():
                     if line.startswith("{"):
                         row = json.loads(line)
+                        nf = cfg.numeric()
+                        gops = row.get("gops", row.get("gflops"))
                         status = "ok" if row["verify_bad"] == 0 else "verify_failed"
+                        if row.get("dtype", nf.spec) != nf.spec:
+                            status = "dtype_mismatch"
+                        extra = {"peak_gflops": cfg.peak_gops()} if nf.kind == "float" else {}
                         runs.append({"campaign": name, "status": status, "config_hash": cfg.config_hash(),
                                      "hls_hash": cfg.hls_hash(), "timestamp": now(), "git_sha": manifest()["git_sha"],
-                                     "git_dirty": manifest()["git_dirty"], "peak_gflops": cfg.peak_gflops(),
-                                     "pct_of_peak": round(100 * row["gflops"] / cfg.peak_gflops(), 2),
-                                     "config": cfg.to_dict(), **row,
+                                     "git_dirty": manifest()["git_dirty"], "peak_gops": cfg.peak_gops(), **extra,
+                                     "pct_of_peak": round(100 * gops / cfg.peak_gops(), 2),
+                                     "config": cfg.to_dict(), **row, **nf.columns(),
                                      "build_id": cfg.build_id(), "hw_build_id": row.get("build_id")})
-                        print(f"  {n}x{k}x{m} rep {row['rep']}: {row['gflops']:.2f} GFLOP/s, verify {status}")
+                        unit = "GFLOP/s" if nf.kind == "float" else "GOP/s"
+                        print(f"  {n}x{k}x{m} {nf.spec} rep {row['rep']}: {gops:.2f} {unit}, verify {status}")
                 if proc.returncode not in (0, 1):
                     print(f"  {n}x{k}x{m}: gemm_runner error {proc.returncode}: {proc.stderr.strip()[-300:]}")
             runs.write_csv()

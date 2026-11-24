@@ -1,0 +1,98 @@
+{
+  "campaign": "dtype_hls",
+  "comment": "docs/notes2: which element formats synthesise (512-bit ports), DSP/LUT/BRAM per MAC, HLS clock estimate. PE N 16, tile N 256, transposed A; tile M grows with PM (double-buffering rule). sim = g++ check (float32, native ints).",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@format": [
+      {
+        "kernel.data_type": "float"
+      },
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 8
+      },
+      {
+        "kernel.data_type": "uint",
+        "kernel.data_bits": 8
+      },
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 16
+      },
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 32
+      },
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 64
+      },
+      {
+        "kernel.data_type": "fixed",
+        "kernel.data_bits": 8,
+        "kernel.frac_bits": 4
+      },
+      {
+        "kernel.data_type": "fixed",
+        "kernel.data_bits": 16,
+        "kernel.frac_bits": 8
+      },
+      {
+        "kernel.data_type": "fixed",
+        "kernel.data_bits": 32,
+        "kernel.frac_bits": 16
+      },
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 4
+      },
+      {
+        "kernel.data_type": "uint",
+        "kernel.data_bits": 4
+      }
+    ],
+    "@array": [
+      {
+        "kernel.parallelism_n": 16,
+        "kernel.parallelism_m": 8,
+        "kernel.memory_tile_size_n": 256,
+        "kernel.memory_tile_size_m": 512
+      },
+      {
+        "kernel.parallelism_n": 16,
+        "kernel.parallelism_m": 16,
+        "kernel.memory_tile_size_n": 256,
+        "kernel.memory_tile_size_m": 512
+      },
+      {
+        "kernel.parallelism_n": 16,
+        "kernel.parallelism_m": 32,
+        "kernel.memory_tile_size_n": 256,
+        "kernel.memory_tile_size_m": 512
+      },
+      {
+        "kernel.parallelism_n": 16,
+        "kernel.parallelism_m": 64,
+        "kernel.memory_tile_size_n": 256,
+        "kernel.memory_tile_size_m": 1024
+      },
+      {
+        "kernel.parallelism_n": 16,
+        "kernel.parallelism_m": 128,
+        "kernel.memory_tile_size_n": 256,
+        "kernel.memory_tile_size_m": 2048
+      }
+    ],
+    "kernel.mult_resource": [
+      null,
+      "fabric"
+    ]
+  },
+  "stages": [
+    "sim",
+    "hls"
+  ],
+  "jobs": {
+    "hls": "auto"
+  }
+}

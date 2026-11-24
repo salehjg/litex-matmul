@@ -240,9 +240,29 @@ class TestIntConfigs(unittest.TestCase):
         self.assertEqual(HlsRun(int_cfg(mult_resource="fulldsp")).op_bindings(), [("fmul", "fulldsp")])
 
 
+class TestSimStep(unittest.TestCase):
+    def test_supported_formats(self):
+        from gemmflow.steps import SimStep
+        self.assertTrue(SimStep(int_cfg(data_type="int", data_bits=8)).supported()[0])
+        self.assertTrue(SimStep(load("default.json")).supported()[0])
+        ok, why = SimStep(int_cfg(data_type="fixed", data_bits=16, frac_bits=8)).supported()
+        self.assertFalse(ok)
+        self.assertIn("native integers", why)
+        self.assertEqual(SimStep(int_cfg(data_type="int", data_bits=8)).size(), (64, 128, 64))
+
+
 class TestResults(unittest.TestCase):
     def test_flatten(self):
         self.assertEqual(flatten({"a": 1, "b": {"c": 2, "d": {"e": 3}}}), {"a": 1, "b.c": 2, "b.d.e": 3})
+
+    def test_dtype_columns_lead_the_csv(self):
+        with tempfile.TemporaryDirectory() as d:
+            st = ResultStore(os.path.join(d, "runs.jsonl"))
+            st.append({"zeta": 1, "build_id": "x", "n": 4, **resolve("int", 8).columns()})
+            st.write_csv()
+            with open(os.path.join(d, "runs.csv")) as f:
+                head = next(csv.reader(f))
+            self.assertEqual(head[:6], ["schema_version", "build_id", "dtype", "dtype_kind", "dtype_bits", "n"])
 
     def test_store_csv_union_and_order(self):
         with tempfile.TemporaryDirectory() as d:
@@ -278,6 +298,24 @@ class TestDse(unittest.TestCase):
         ids = [BuildCfg.from_dict(d).build_id() for d in self.dse.expand(camp)]
         self.assertEqual(ids[0], GOLDEN_BUILD_IDS["pe32x8_ta_t1024x512.json"])
         self.assertEqual(len(set(ids)), 3)
+
+    def test_linked_axes_for_formats(self):
+        with open(os.path.join(ROOT, "configs", "dse", "dtype_same_array.json")) as f:
+            camp = json.load(f)
+        pts = self.dse.expand(camp)
+        self.assertEqual([d["name"].split("_")[0] for d in pts], ["f32", "i8", "i16", "i32", "fx16f8"])
+        # The float point is the existing best 200 MHz build: nothing is rebuilt for it.
+        self.assertEqual(BuildCfg.from_dict(pts[0]).build_id(), GOLDEN_BUILD_IDS["pe32x8_ta_t1024x512.json"])
+        i8 = BuildCfg.from_dict(pts[1])
+        self.assertEqual((i8.kernel.data_type, i8.kernel.data_bits, i8.numeric().spec), ("int", 8, "int8"))
+
+    def test_invalid_format_points_are_named_and_rejected(self):
+        camp = {"base": "configs/gemm/pe32x8_ta_t1024x512.json",
+                "build_grid": {"@format": [{"kernel.data_type": "int", "kernel.data_bits": 12}]}}
+        (d,) = self.dse.expand(camp)
+        self.assertIn("data_typeint", d["name"])
+        with self.assertRaisesRegex(ConfigError, "count elements by bits"):
+            BuildCfg.from_dict(d).validate()
 
     def test_sizes_of(self):
         self.assertEqual(self.dse.sizes_of({"triples": [[1, 2, 3]]}), [(1, 2, 3)])

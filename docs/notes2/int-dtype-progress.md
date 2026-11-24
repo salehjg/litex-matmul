@@ -11,8 +11,8 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
 | 1 | Plan and progress files | ✅ 2026-11-24 |
 | 2 | Config schema, `numeric.py`, hash compatibility, rendering, operator binding, unit tests | ✅ 2026-11-24 |
 | 3 | Host: `numeric.hpp`, `gemm_runner --dtype`, `make test`, float regression on the board | ✅ 2026-11-24 |
-| 4 | Result columns, scripts, port-width check, `sim` stage, report fallback | ⬜ |
-| 5 | Campaign files, HLS-only probe `dtype_hls` | ⬜ |
+| 4 | Result columns, scripts, port-width check, `sim` stage, report fallback | ✅ 2026-11-24 |
+| 5 | Campaign files, HLS-only probe `dtype_hls` | 🟡 files written, probe next |
 | 6 | Build and board campaigns (after "go") | ⬜ |
 
 ## Phase 2: config schema ✅
@@ -50,6 +50,35 @@ Status legend: ✅ done · 🟡 in progress · ⬜ not started · ⛔ blocked
       `dtype_kind`, `dtype_bits`, `dtype_signed`, `gops` (and keeps `gflops` and `max_rel_err` for float).
 - [x] **Float regression on the card** (loaded build `…225mhz_tA_explore-8c43d008`): 2048³ 109.33 GFLOP/s, max rel
       1.30e-07 (identical to the campaign record, same seed); 1024³ full verification OK (1 048 576 entries).
+
+## Phase 4: rows, scripts, checks ✅
+- [x] Result rows: every build and run row of `gemm_dse.py` (and `gemm_run.py` meta) carries
+      `NumericFormat.columns()`: `dtype`, `dtype_kind`, `dtype_bits`, `dtype_signed`, `dtype_frac_bits`,
+      `elems_per_word`, `acc_dtype`, `acc_bits`, `a_dtype`, `b_dtype`, `c_dtype`, `quant_scale`, `quant_zero_point`,
+      `pow2_exp_bits`, `pow2_dense`, plus `peak_gops`; runs also `gops`, `pct_of_peak` from GOP/s (`gflops` and
+      `peak_gflops` kept for float). Invalid points record `data_type/data_bits/frac_bits`. `ResultStore`:
+      `SCHEMA_VERSION` 2, leading CSV columns `dtype, dtype_kind, dtype_bits`.
+- [x] `gemm_dse.py`: `--dtype` to the runner; status `dtype_mismatch` if the runner reports another format; prints
+      dtype and GOP/s; **linked grid axes** (`"@format": [{"kernel.data_type": "int", "kernel.data_bits": 8}, …]`,
+      `"@array": [{PE + matching tile}, …]`) so format and array sweeps contain no meaningless points.
+- [x] `gemm_run.py`, `gemm_build.py`: `--dtype`, columns, dtype and peak GOP/s in the output.
+- [x] Port-width check: `HlsReport.axi_data_bits()`; `HlsStep` fails a point whose m_axi data width is not 512
+      bits (before Vivado); `summary.json` records `axi_data_bits`.
+- [x] `sim` stage (`SimStep`, also `gemm_build.py --stages sim,...`): g++ build of the upstream testbench with the
+      rendered `Config.h` at one small legal size, results under `build/gemm/sim/<hls_hash>/`. Tried: float32, int8,
+      int16, uint8 on PE 8×8 pass in ~3.5 s each (integer results wrapped and compared exactly); fixed point is skipped
+      with the reason.
+- [x] `auto_name` adds the operator binding (`_mulfabric`, `_adddsp`); unchanged for all existing configs.
+- [x] Report: `extract_data.py` reads `gops` (fallback `gflops`) and adds a `dtype` column to `builds.csv`; the
+      report still builds (0 warnings).
+- [x] Tests: 34 pass (new: linked axes and float-build reuse, invalid format names, leading CSV columns, `SimStep`).
+
+## Phase 5: campaigns 🟡
+- [x] `configs/dse/`: `dtype_hls` (70 valid points: 11 formats × 5 PE widths × mult {default, fabric}; 40 invalid
+      combinations recorded), `dtype_same_array` (5; float32 = existing build `a88777ec`), `int8_scale` (8),
+      `int16_scale` (6), `int4_probe` (4), `fixed_point` (3), `dtype_clock` (6), `dtype_size_sweep` (run only).
+      All dry-run clean.
+- [ ] HLS-only probe `dtype_hls` (stages sim, hls)
 
 ## Log
 

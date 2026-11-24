@@ -1,0 +1,56 @@
+{
+  "campaign": "int4_probe",
+  "comment": "docs/notes2 tier T3: 4-bit lanes packed 128 per 64-byte word (logical bus width), end to end.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@format": [
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 4
+      },
+      {
+        "kernel.data_type": "uint",
+        "kernel.data_bits": 4
+      }
+    ],
+    "@array": [
+      {
+        "kernel.parallelism_n": 32,
+        "kernel.parallelism_m": 32,
+        "kernel.memory_tile_size_n": 512,
+        "kernel.memory_tile_size_m": 1024
+      },
+      {
+        "kernel.parallelism_n": 32,
+        "kernel.parallelism_m": 64,
+        "kernel.memory_tile_size_n": 512,
+        "kernel.memory_tile_size_m": 2048
+      }
+    ]
+  },
+  "runtime_grid": {
+    "triples": [
+      [
+        2048,
+        2048,
+        2048
+      ],
+      [
+        4096,
+        4096,
+        4096
+      ]
+    ],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": [
+    "hls",
+    "build",
+    "run"
+  ],
+  "jobs": {
+    "hls": "auto"
+  }
+}

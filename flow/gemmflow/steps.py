@@ -4,6 +4,7 @@
 #   HlsStep  : Vitis HLS of the kernel        -> build/gemm/hls/<hls_hash[:12]>/   (shared by all configs with that hash)
 #   SocStep  : LiteX + Vivado of GemmSoC       -> build/gemm/soc/<build_id>/
 #   HostStep : liblitepcie + sw/gemm_host tools -> build/gemm/soc/<build_id>/sw/
+#   SimStep  : g++ software simulation of the kernel (kernels/gemm/tb) -> build/gemm/sim/<hls_hash[:12]>/ (optional)
 # write_build_reports() writes <build>/reports/summary.json (and manifest.json) for gemm_build.py and gemm_dse.py.
 #
 
@@ -14,11 +15,11 @@ import subprocess
 import sys
 import time
 
-from .config import ROOT, tree_hash
-from .hls import HlsRun
+from .config import KERNEL_DIR, ROOT, tree_hash
+from .hls import HLSLIB_INCLUDE, HlsRun
 from .manifest import manifest
 from .reports import VivadoReport
-from .tools import Tool, ToolError
+from .tools import Tool, ToolError, read_config_sh
 
 SOC_SOURCES = [os.path.join(ROOT, d) for d in ("hw/gemm", "boards/dupcb", "tcl/vivado")]
 HOST_SOURCES = [os.path.join(ROOT, "sw/gemm_host")]
@@ -93,6 +94,12 @@ class HlsStep(Step):
 
     def run(self, force=False):
         seconds, skipped = self.hls.run(force=force)
+        # The SoC connects every kernel master to a 512-bit LiteDRAM port (hw/gemm/axi_native.py). Element formats
+        # whose packing does not fill 512 bits are caught here, before Vivado (docs/notes2 plan 2.1).
+        widths = self.hls.report().axi_data_bits()
+        bad = {b: w for b, w in widths.items() if w != 512}
+        if bad:
+            raise ToolError(f"m_axi data width {bad} != 512 bits for {self.cfg.numeric().spec}", self.hls.log)
         return seconds, skipped
 
     def summary(self):
@@ -154,6 +161,69 @@ class HostStep(Step):
                 p = subprocess.run(args, stdout=f, stderr=subprocess.STDOUT)
                 if p.returncode:
                     raise ToolError(f"{' '.join(args)} failed", log)
+
+
+
+class SimStep(Step):
+    """g++ simulation of the kernel with the upstream testbench (kernels/gemm/tb/test_gemm.cpp: integer data 1..10
+    with an exact compare, float with 1e-3 relative error) at one small size that satisfies the build's size rules.
+    Seconds per point, no Vivado or HLS. Only float32 and native integers: the testbench cannot instantiate ap_* types.
+    Results are shared by all configs with the same HLS hash."""
+    name = "sim"
+
+    def __init__(self, cfg, build_dir=None):
+        super().__init__(cfg, build_dir)
+        self.dir = os.path.join(ROOT, "build", "gemm", "sim", cfg.hls_hash()[:12])
+
+    def supported(self):
+        nf = self.cfg.numeric()
+        if nf.needs_ap_header or nf.family == "half":
+            return False, f"{nf.spec}: the testbench supports float32 and native integers only"
+        return True, ""
+
+    def size(self):
+        mn, mk, mm = self.cfg.size_multiples()
+        up = lambda x, m: -(-x // m) * m
+        return up(32, mn), 2 * mk, up(32, mm)
+
+    @property
+    def stamp_path(self):
+        return os.path.join(self.dir, "stamp.json")
+
+    def inputs(self):
+        return {"hls_hash": self.cfg.hls_hash(), "size": self.size()}
+
+    def outputs(self):
+        return [os.path.join(self.dir, "sim.log")]
+
+    def _run(self):
+        ok, why = self.supported()
+        if not ok:
+            raise ToolError(f"sim skipped: {why}", None)
+        os.makedirs(self.dir, exist_ok=True)
+        with open(os.path.join(self.dir, "Config.h"), "w") as f:
+            f.write(self.cfg.render_config_h())
+        settings = read_config_sh().get("VIVADO_SETTINGS", "")
+        vitis_inc = os.path.join(os.path.dirname(os.path.dirname(settings)), "Vitis", "include")
+        flags = ["-std=c++17", "-O2", "-DMM_DYNAMIC_SIZES", "-DHLSLIB_STREAM_TIMEOUT=16", "-DHLSLIB_LEGACY_SDX=0",
+                 f"-I{self.dir}", f"-I{os.path.join(KERNEL_DIR, 'include')}", f"-I{HLSLIB_INCLUDE}",
+                 "-isystem", vitis_inc, "-pthread", "-w"]
+        if self.cfg.kernel.transposed_a:
+            flags.append("-DMM_TRANSPOSED_A")
+        if self.cfg.kernel.data_type == "half":
+            flags.append("-DMM_HALF_PRECISION")
+        srcs = [os.path.join(KERNEL_DIR, "tb", "test_gemm.cpp")] + \
+               [os.path.join(KERNEL_DIR, "src", s) for s in ("Top.cpp", "Memory.cpp", "Compute.cpp")]
+        exe, log = os.path.join(self.dir, "test_gemm"), os.path.join(self.dir, "sim.log")
+        with open(log, "w") as f:
+            for args in (["g++", *flags, "-o", exe, *srcs], [exe, *map(str, self.size())]):
+                f.write("$ " + " ".join(args) + "\n"); f.flush()
+                p = subprocess.run(args, stdout=f, stderr=subprocess.STDOUT, timeout=1800)
+                if p.returncode:
+                    raise ToolError(f"{os.path.basename(args[0])} failed (exit {p.returncode})", log)
+
+    def summary(self):
+        return {"size": list(self.size()), "dir": os.path.relpath(self.dir, ROOT)}
 
 
 def write_build_reports(cfg, build_dir, steps):

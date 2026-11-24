@@ -1,0 +1,54 @@
+{
+  "campaign": "fixed_point",
+  "comment": "docs/notes2 tier T2: ap_fixed<W, W-F> (AP_TRN, AP_WRAP) against integers of the same width. Move to the best array after int8/int16_scale.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@format": [
+      {
+        "kernel.data_type": "fixed",
+        "kernel.data_bits": 8,
+        "kernel.frac_bits": 4
+      },
+      {
+        "kernel.data_type": "fixed",
+        "kernel.data_bits": 16,
+        "kernel.frac_bits": 8
+      },
+      {
+        "kernel.data_type": "fixed",
+        "kernel.data_bits": 32,
+        "kernel.frac_bits": 16
+      }
+    ]
+  },
+  "runtime_grid": {
+    "triples": [
+      [
+        2048,
+        2048,
+        2048
+      ],
+      [
+        4096,
+        4096,
+        4096
+      ],
+      [
+        8192,
+        8192,
+        8192
+      ]
+    ],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": [
+    "hls",
+    "build",
+    "run"
+  ],
+  "jobs": {
+    "hls": "auto"
+  }
+}

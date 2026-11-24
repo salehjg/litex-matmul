@@ -7,9 +7,9 @@ import csv
 import json
 import os
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: element-format columns (dtype, dtype_kind, dtype_bits, ...; docs/notes2)
 LEADING = ["schema_version", "campaign", "status", "build_id", "config_hash", "hls_hash", "timestamp", "git_sha",
-           "git_dirty", "n", "k", "m", "rep"]
+           "git_dirty", "dtype", "dtype_kind", "dtype_bits", "n", "k", "m", "rep"]
 
 
 def flatten(d, prefix=""):

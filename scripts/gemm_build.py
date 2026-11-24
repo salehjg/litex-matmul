@@ -15,16 +15,16 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(ROOT, "flow"))
 
 from gemmflow.config import BuildCfg, ConfigError   # noqa: E402
-from gemmflow.steps import HlsStep, SocStep, HostStep, write_build_reports  # noqa: E402
+from gemmflow.steps import HlsStep, SimStep, SocStep, HostStep, write_build_reports  # noqa: E402
 from gemmflow.tools import ToolError                # noqa: E402
 
-STAGES = {"hls": HlsStep, "soc": SocStep, "host": HostStep}
+STAGES = {"sim": SimStep, "hls": HlsStep, "soc": SocStep, "host": HostStep}  # sim: optional g++ check of the kernel
 
 
 def main():
     p = argparse.ArgumentParser(description="Build HLS kernel, SoC bitstream and host tools for one config.")
     p.add_argument("config")
-    p.add_argument("--stages", default="hls,soc,host", help="Comma list of hls, soc, host (in this order).")
+    p.add_argument("--stages", default="hls,soc,host", help="Comma list of sim, hls, soc, host (in this order).")
     p.add_argument("--force", action="store_true", help="Rerun the selected stages even if up to date.")
     p.add_argument("--dry-run", action="store_true", help="Show what would run.")
     p.add_argument("--report-only", action="store_true",
@@ -41,9 +41,10 @@ def main():
     stages = [s.strip() for s in a.stages.split(",") if s.strip()]
     for s in stages:
         if s not in STAGES:
-            sys.exit(f"unknown stage {s!r} (hls, soc, host)")
-    print(f"build {cfg.build_id()}  hls {cfg.hls_hash()[:12]}  peak {cfg.peak_gflops():.1f} GFLOP/s  -> "
-          f"{os.path.relpath(build_dir, ROOT)}")
+            sys.exit(f"unknown stage {s!r} (sim, hls, soc, host)")
+    nf = cfg.numeric()
+    print(f"build {cfg.build_id()}  {nf.spec} ({nf.c_type})  hls {cfg.hls_hash()[:12]}  peak {cfg.peak_gops():.1f} "
+          f"{'GFLOP/s' if nf.kind == 'float' else 'GOP/s'}  -> {os.path.relpath(build_dir, ROOT)}")
 
     if a.report_only and not os.path.isdir(build_dir):
         sys.exit(f"no build at {os.path.relpath(build_dir, ROOT)}")

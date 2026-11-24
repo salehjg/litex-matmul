@@ -16,6 +16,10 @@ import math
 import os
 import re
 import statistics
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "flow"))
+from gemmflow.numeric import NumericError, resolve  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 OUT = os.path.join(ROOT, "docs", "report", "data")
@@ -43,6 +47,8 @@ def all_runs():
         for r in jsonl(f):
             if r.get("status", "ok") == "ok":
                 r["_campaign"] = os.path.basename(os.path.dirname(f))
+                # Throughput: "gops" since the element-format columns (docs/notes2), "gflops" in earlier float rows.
+                r.setdefault("gflops", r.get("gops"))
                 rows.append(r)
     return rows
 
@@ -86,7 +92,12 @@ def builds():
             build_s = None
         wns = clock_wns(os.path.join(d, "gateware"))
         c = s["config"]
-        out[s["config_hash"][:8]] = dict(
+        k = c["kernel"]
+        try:
+            dtype = resolve(k["data_type"], k.get("data_bits"), k.get("frac_bits")).spec
+        except NumericError:
+            dtype = k["data_type"]
+        out[s["config_hash"][:8]] = dict(dtype=dtype,
             id=s["config_hash"][:8], build_id=s["build_id"], cfg=c, k=c["kernel"],
             mhz=c["clocks"]["accel_mhz"], preset=c["vivado"]["preset"],
             map="".join(c["memory_map"][m][-1] for m in "abc"),
@@ -178,10 +189,11 @@ def main():
                      b["lut"] and b["lut"] / 1000, b["ff"] and b["ff"] / 1000, b["bram"], b["dsp"],
                      b["klut"] and b["klut"] / 1000, b["kff"] and b["kff"] / 1000, b["kbram36"], b["kbram18"],
                      b["kdsp"], b["build_min"], b["hls_ns"], b["hls_ff"] and b["hls_ff"] / 1000, g,
-                     pct(g, b["peak"]) if g else None, b["peak"]])
+                     pct(g, b["peak"]) if g else None, b["peak"], b["dtype"]])
     write("builds.csv", ["id", "label", "pn", "pm", "tn", "tm", "ta", "mhz", "preset", "map", "met", "wns", "whs",
                          "wns_accel", "wns_pcie", "wns_sys", "lut_k", "ff_k", "bram", "dsp", "klut_k", "kff_k",
-                         "kbram36", "kbram18", "kdsp", "build_min", "hls_ns", "hls_ff_k", "gflops", "pct", "peak"],
+                         "kbram36", "kbram18", "kdsp", "build_min", "hls_ns", "hls_ff_k", "gflops", "pct", "peak",
+                         "dtype"],
           rows, "every Vivado build: config, per-clock WNS (ns), resources (LUT/FF in thousands), best GFLOP/s")
 
     # The same, pre-formatted for the appendix table (strings, "--" where a build was not run).
@@ -190,7 +202,7 @@ def main():
     trows = []
     for r in rows:
         (h, lab, pn, pm, tn, tm, ta, mhz, preset, mp, met, wns, whs, wa, wp, ws, lut, ff, bram, dsp, klut, kff,
-         kb36, kb18, kdsp, bmin, hns, hff, g, pc, peak) = r
+         kb36, kb18, kdsp, bmin, hns, hff, g, pc, peak, dtype) = r
         trows.append([lab, "yes" if met else "no", f(wa, 3), f(wp, 3), f(ws, 3), f(lut, 1), f(ff, 1), f(bram, 1),
                       f(dsp, 0), f(bmin, 0), f(g, 2), f(pc, 1)])
     write("builds_table.csv", ["label", "met", "wns_accel", "wns_pcie", "wns_sys", "lut_k", "ff_k", "bram", "dsp",

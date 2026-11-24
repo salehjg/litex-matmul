@@ -1,0 +1,39 @@
+{
+  "campaign": "dtype_size_sweep",
+  "comment": "docs/notes2: whole-tile effect and DMA share with 1-byte elements (int8, PE 32x8, tile 1024x512).",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@format": [
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 8
+      }
+    ]
+  },
+  "runtime_grid": {
+    "n": [
+      256,
+      512,
+      1024,
+      2048,
+      4096
+    ],
+    "k": [
+      256,
+      1024,
+      4096
+    ],
+    "m": [
+      256,
+      1024,
+      4096
+    ],
+    "repetitions": 2,
+    "warmup": 1,
+    "verify": "sampled"
+  },
+  "stages": [
+    "build",
+    "run"
+  ]
+}

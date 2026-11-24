@@ -1,0 +1,47 @@
+{
+  "campaign": "dtype_clock",
+  "comment": "docs/notes2: clock headroom of narrow datapaths. Set the array to the best int8_scale point before running.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@format": [
+      {
+        "kernel.data_type": "int",
+        "kernel.data_bits": 8
+      }
+    ],
+    "clocks.accel_mhz": [
+      200,
+      225,
+      250
+    ],
+    "vivado.preset": [
+      "default",
+      "aggressive"
+    ]
+  },
+  "runtime_grid": {
+    "triples": [
+      [
+        4096,
+        4096,
+        4096
+      ],
+      [
+        8192,
+        8192,
+        8192
+      ]
+    ],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": [
+    "hls",
+    "build",
+    "run"
+  ],
+  "jobs": {
+    "hls": "auto"
+  }
+}
