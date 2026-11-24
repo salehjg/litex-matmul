@@ -427,9 +427,37 @@ User: "start DSE on the fpga with our script. keep going" (2026-11-24 ~04:05, un
         509 RAMB36 + 69 RAMB18).
       - 2048³ runs at 42.9 % because M = 2048 fills only half of a 4096-wide memory tile (the kernel always computes
         whole tiles, as in `dtype_size_sweep`). On the padded work that is 85.7 %.
-      - 4096³ reaches 86.9 % of peak, below the ~92 % of the 32-PE builds. Not explained yet; 8192³ and a full
-        exact screen are next.
       - 180 MHz default had failed only on the PCIe 250 MHz path (−0.447 ns); aggressive and explore close it.
+- [x] **Full exact screen and 8192³ of both new int4 builds** (21:50–22:05, `misc/int32_verify/screen.sh` after a
+      bring-up with `--ddr-load-tune`, 0 bad taps before and after):
+
+      | Build | 2048³ full, seeds 1 and 2 | 8192³ (2 reps, sampled) | Kernel cycles at 8192³ |
+      |---|---|---|---|
+      | PE 64×64, 512×4096, 180 MHz aggressive | 0 bad of 4 194 304, both | **1290.1 GOP/s** (87.5 %) | 153.41 M (ideal 134.22 M) |
+      | PE 32×64, 512×2048, 225 MHz default | 0 bad of 4 194 304, both | **854.1 GOP/s** (92.7 %) | 289.65 M (ideal 268.44 M) |
+
+      - The PE 64×64 gap does not close with size (86.9 % at 4096³, 87.5 % at 8192³), so it is a cost per k step,
+        not per tile. Lost cycles per k step and memory tile, from the measured cycles (ideal per k step =
+        tile_n/PN · tile_m/PM):
+
+        | Build | Ideal cycles per k step | Lost per k step | % of peak |
+        |---|---|---|---|
+        | float32 PE 32×8, 512×512 | 1024 | 75 | 93.2 |
+        | float32/int8 PE 32×8, 1024×512 | 2048 | 79 | 96.3 |
+        | int8 PE 32×32, 512×1024 | 512 | 41 | 92.6 |
+        | int4 PE 32×64, 512×2048 | 512 | 41 | 92.7 |
+        | int4 PE 64×64, 512×4096 | 512 | 73 | 87.5 |
+
+        The loss is a roughly fixed 40–80 cycles per k step, so it shrinks as a share when each k step has more work:
+        PE 32×8 went from 93.2 % to 96.3 % when the tile doubled from 512×512 to 1024×512. Its source in the kernel
+        is not pinned down (pipeline fill of the PE loop per k step, or the A/B feed restarting).
+      - Doubling the work per k step needs twice the per-PE C buffer (tile_n/PN · tile_m/PM entries of PM elements).
+        For int4 PE 64×64 that is tile 1024×4096, about +512 BRAM18 by the HLS estimate (1142 → ~1650, under the
+        1760 gate). If the 73 lost cycles stay fixed: 1024/1097 = 93 % → ~1375 GOP/s at 180 MHz. For PE 32×64 at
+        225 MHz, tile 1024×2048: 1024/1065 = 96 % → ~886 GOP/s. 
+- [ ] 🟡 `int4_tile` (started 22:10, `results/int4_tile/dse.log`): int4 PE 32×64 tile 1024×2048 at 225 MHz default and
+      PE 64×64 tile 1024×4096 at 180 MHz aggressive (the clocks and presets of the best builds). One HLS run at a
+      time, then one Vivado build at a time; 4096³ and 8192³, DDR tuning on.
 - [x] **Both campaigns stopped (~18:58) by Claude Code's memory guard**, not by a failure in the flow. `int4_clock`'s HLS
       finished sooner than expected (both 225 MHz points: est. 4.144 ns, 34 DSP, 662 BRAM18, stamped), and its first
       Vivado build started next to `int4_pe64`'s 180 MHz aggressive build. Two Vivado runs of this size (~7 GB each)

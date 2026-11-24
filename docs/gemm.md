@@ -2,7 +2,7 @@
 
 An HLS GEMM kernel (float32 and integer/fixed-point formats, adapted from [spcl/gemm_hls](https://github.com/spcl/gemm_hls))
 in a CPU-less variant of the base SoC ([soc.md](soc.md); `hw/gemm/gemm_soc.py`): the host sends A and B over PCIe DMA
-into the DDR3 channels, the kernel computes C = A·B at 200–225 MHz, the host reads C back together with performance
+into the DDR3 channels, the kernel computes C = A·B at 180–225 MHz, the host reads C back together with performance
 counters (cycles, per-matrix AXI bursts, stalls, read latency). JSON-driven build and design-space exploration. Plan:
 [`docs/notes1/gemm-hls-plan.md`](notes1/gemm-hls-plan.md), status and measurements:
 [`docs/notes1/gemm-hls-progress.md`](notes1/gemm-hls-progress.md).
@@ -24,7 +24,8 @@ best builds so far, all verified exactly on the card:
 
 | Format | Array, tile, clock | Peak | Best measured | LUT / DSP / BRAM tiles |
 |---|---|---|---|---|
-| int4 | PE 32×64, 512×2048, 200 MHz | 819.2 GOP/s | **756.7** (4096³, 92.4 %) | 116.9k / 39 / 414.5 |
+| int4 | PE 64×64, 512×4096, 180 MHz, `aggressive` | 1474.6 GOP/s | **1290.1** (8192³, 87.5 %) | 200.3k / 38 / 652.5 |
+| int4 | PE 32×64, 512×2048, **225 MHz** | 921.6 | 854.1 (8192³, 92.7 %) | 117.5k / 39 / 414.5 |
 | int8 | PE 32×32, 512×1024, **225 MHz** | 460.8 | **426.6** (8192³, 92.6 %) | 131.3k / 40 / 414.5 |
 | int16 | PE 32×16, 512×1024, 200 MHz | 204.8 | 190.9 (8192³, 93.2 %) | 85.7k / 552 / 414.5 |
 | int32 | PE 32×8, 1024×512, 200 MHz, `aggressive` | 102.4 | 98.6 (8192³, 96.3 %) | 81.3k / 808 / 654.5 |

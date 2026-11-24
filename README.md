@@ -16,7 +16,7 @@ Best kernel throughput, all results verified exactly on the card:
 | float32 | PE 32×8, 225 MHz | 110.9 GFLOP/s | 1320 |
 | int16 | PE 32×16, 200 MHz | 190.9 GOP/s | 552 |
 | int8 | PE 32×32, 225 MHz | 426.6 GOP/s | 40 |
-| int4 | PE 32×64, 200 MHz | 756.7 GOP/s | 39 |
+| int4 | PE 64×64, 180 MHz | 1290.1 GOP/s | 38 |
 
 **float32 exploration:** the best result after each step, against the peak of that configuration.
 

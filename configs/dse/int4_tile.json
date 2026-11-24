@@ -1,0 +1,25 @@
+{
+  "campaign": "int4_tile",
+  "comment": "docs/notes2: every build loses a roughly fixed 40-80 accelerator cycles per k step and memory tile (int4 PE 64x64 512x4096: 73 of 512 -> 87.5 %; PE 32x64 512x2048: 41 of 512 -> 92.7 %; float PE 32x8 went from 93.2 to 96.3 % when its tile doubled). Doubling the work per k step (tile_n/PN * tile_m/PM = 1024) should recover about half of that. Tiles 1024x4096 (PE 64x64) and 1024x2048 (PE 32x64): tile_m/PM = PN, powers of two, twice the per-PE C buffer. Same clocks and presets as the best builds of int4_pe64 and int4_clock. DDR read taps tuned under load.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@format": [
+      {"kernel.data_type": "int", "kernel.data_bits": 4}
+    ],
+    "@point": [
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 64, "kernel.memory_tile_size_n": 1024,
+       "kernel.memory_tile_size_m": 2048, "clocks.accel_mhz": 225, "vivado.preset": "default"},
+      {"kernel.parallelism_n": 64, "kernel.parallelism_m": 64, "kernel.memory_tile_size_n": 1024,
+       "kernel.memory_tile_size_m": 4096, "clocks.accel_mhz": 180, "vivado.preset": "aggressive"}
+    ]
+  },
+  "runtime_grid": {
+    "triples": [[4096, 4096, 4096], [8192, 8192, 8192]],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": ["hls", "build", "run"],
+  "jobs": {"hls": 1},
+  "ddr_load_tune": true
+}
