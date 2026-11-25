@@ -196,3 +196,6 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   (76 %). Worst path: a PE's A-buffer register to its shift lanes, 6.97 ns, 95 % routing, one LUT level. The C buffers
   fill the BRAM columns and spread the design over the device; with the SoC clock failing too, a lower accelerator
   clock alone would not close it. With int32 sums, ~1024 MACs is the practical array on this device.
+- **CIFAR-10 with 400 epochs** (seed 0): DenseShift 3-bit 92.05 %, 4-bit 91.64 % (200 epochs: 91.32 / 90.89 mean).
+  Both gain ~0.7 points; 4-bit stays below 3-bit, so slower training of its 8 binary variables per weight is not the
+  whole reason. float32 with 400 epochs running for a fair comparison.
