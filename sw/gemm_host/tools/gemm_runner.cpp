@@ -18,8 +18,9 @@
 // contraction: -std=c++17 and no -march), so even a flipped low mantissa bit counts as a mismatch.
 // Mixed formats (kernels/gemm_mixed, docs/notes3): --b-dtype SPEC --c-dtype SPEC (B int/uint or dshift<n> DenseShift
 // codes, C int16/int32), e.g. --dtype int8 --b-dtype dshift3 --c-dtype int32: C = sum value(a) * value(b) wrapped to C.
-// --a-file / --b-file read the codes (int64, A row-major N x K, B row-major K x M) instead of random ones; --c-out
-// writes C (int64, N x M) of the last repetition. --value-range then applies to A only.
+// --a-file / --b-file read A (row-major N x K) and B (row-major K x M) instead of random data: int64 codes for
+// integer formats and DenseShift B, float32 values for float A and B. --c-out writes C (N x M) of the last
+// repetition: int64 for integer C, float32 for float C. --value-range then applies to A only.
 // Exit status: 0 = all repetitions verified (or --verify off), 1 = mismatch, 2 = usage, 3 = error.
 #include <algorithm>
 #include <array>
@@ -69,7 +70,7 @@ struct Options {
     // otherwise both equal --dtype. --value-range then applies to A only.
     Dtype bdt, cdt;
     bool mixed = false;
-    std::string a_file, b_file, c_out;  // int64 codes: A row-major N x K, B row-major K x M; C written N x M
+    std::string a_file, b_file, c_out;  // A row-major N x K, B row-major K x M, C N x M: int64 codes / float32
     std::string spec() const { return mixed ? mixed_spec(dt, bdt, cdt) : dt.spec(); }
 };
 
@@ -162,10 +163,6 @@ Options parse(int argc, char **argv) {
         if (o.b_identity && o.bdt.is_pow2()) { std::fprintf(stderr, "error: --b-identity: DenseShift has no zero\n"); std::exit(2); }
     } else {
         o.bdt = o.cdt = o.dt;
-    }
-    if ((!o.a_file.empty() || !o.b_file.empty() || !o.c_out.empty()) && o.dt.is_float()) {
-        std::fprintf(stderr, "error: --a-file / --b-file / --c-out: integer formats only\n");
-        std::exit(2);
     }
     if (o.b_identity && o.k != o.m) { std::fprintf(stderr, "error: --b-identity needs K == M\n"); std::exit(2); }
     if (o.a_identity && o.n != o.k) { std::fprintf(stderr, "error: --a-identity needs N == K\n"); std::exit(2); }
@@ -337,18 +334,38 @@ int main(int argc, char **argv) {
         std::vector<float> af, bf, btf, cf;            // float32
         std::vector<int64_t> ai, bti, ci;              // integer / fixed codes
         std::vector<uint8_t> a_dev(round64(bytes_a), 0), b_dev(round64(bytes_b), 0);
+        // --a-file / --b-file: given data instead of random (end-to-end runs, ml/denseshift).
+        auto read_exact = [](const std::string &path, void *p, size_t elem, size_t count, const std::string &what) {
+            FILE *f = std::fopen(path.c_str(), "rb");
+            if (!f) throw std::runtime_error(std::string("cannot open ") + path);
+            const size_t got = std::fread(p, elem, count, f);
+            const bool extra = std::fgetc(f) != EOF;
+            std::fclose(f);
+            if (got != count || extra) throw std::runtime_error(path + ": expected " + std::to_string(count) + " " + what);
+        };
+        auto load = [&](const std::string &path, std::vector<int64_t> &v, const Dtype &d, const char *what) {
+            read_exact(path, v.data(), sizeof(int64_t), v.size(), std::string("int64 codes for ") + what);
+            for (auto &x : v) if (x != d.wrap(uint64_t(x))) throw std::runtime_error(path + ": code out of range for " + d.spec());
+        };
+        auto loadf = [&](const std::string &path, std::vector<float> &v, const char *what) {
+            read_exact(path, v.data(), sizeof(float), v.size(), std::string("float32 values for ") + what);
+        };
         if (dt.is_float()) {
             std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
             std::uniform_int_distribution<int64_t> idist(o.lo, o.hi);
             auto value = [&]() { return o.have_range ? float(idist(rng)) : dist(rng); };
             af.resize(size_t(o.n) * o.k); bf.resize(size_t(o.k) * o.m); btf.resize(size_t(o.m) * o.k);
             for (auto &x : af) x = value();
+            if (!o.a_file.empty()) loadf(o.a_file, af, "A (N x K)");
             std::vector<int64_t> bcodes;  // mixed float x DenseShift: B as codes on the card, values on the host
             if (o.mixed) {
                 bcodes.resize(bf.size());
-                for (size_t q = 0; q < bf.size(); q++) { bcodes[q] = o.bdt.wrap(rng()); bf[q] = float(o.bdt.value(bcodes[q])); }
+                for (auto &x : bcodes) x = o.bdt.wrap(rng());
+                if (!o.b_file.empty()) load(o.b_file, bcodes, o.bdt, "B (K x M)");
+                for (size_t q = 0; q < bf.size(); q++) bf[q] = float(o.bdt.value(bcodes[q]));
             } else {
                 for (auto &x : bf) x = value();
+                if (!o.b_file.empty()) loadf(o.b_file, bf, "B (K x M)");
             }
             if (o.b_identity) for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bf[size_t(r) * o.m + col] = r == col;
             if (o.a_identity) for (uint32_t r = 0; r < o.n; r++) for (uint32_t col = 0; col < o.k; col++) af[size_t(r) * o.k + col] = r == col;
@@ -371,16 +388,6 @@ int main(int argc, char **argv) {
             std::vector<int64_t> bi(size_t(o.k) * o.m);
             for (auto &x : ai) x = code();
             for (auto &x : bi) x = bcode();
-            // --a-file / --b-file: given codes instead of random ones (end-to-end runs, ml/denseshift).
-            auto load = [&](const std::string &path, std::vector<int64_t> &v, const Dtype &d, const char *what) {
-                FILE *f = std::fopen(path.c_str(), "rb");
-                if (!f) throw std::runtime_error(std::string("cannot open ") + path);
-                const size_t got = std::fread(v.data(), sizeof(int64_t), v.size(), f);
-                const bool extra = std::fgetc(f) != EOF;
-                std::fclose(f);
-                if (got != v.size() || extra) throw std::runtime_error(path + ": expected " + std::to_string(v.size()) + " int64 codes for " + what);
-                for (auto &x : v) if (x != d.wrap(uint64_t(x))) throw std::runtime_error(path + ": code out of range for " + d.spec());
-            };
             if (!o.a_file.empty()) load(o.a_file, ai, dt, "A (N x K)");
             if (!o.b_file.empty()) load(o.b_file, bi, o.bdt, "B (K x M)");
             if (o.b_identity) for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bi[size_t(r) * o.m + col] = r == col;
@@ -427,8 +434,10 @@ int main(int argc, char **argv) {
             else gemm::unpack(o.cdt, cbuf.data(), ci.size(), ci.data());
             if (!o.c_out.empty() && !warm) {
                 FILE *f = std::fopen(o.c_out.c_str(), "wb");
-                if (!f || std::fwrite(ci.data(), sizeof(int64_t), ci.size(), f) != ci.size()) throw std::runtime_error("cannot write " + o.c_out);
-                std::fclose(f);
+                const bool okw = f && (dt.is_float() ? std::fwrite(cf.data(), sizeof(float), cf.size(), f) == cf.size()
+                                                     : std::fwrite(ci.data(), sizeof(int64_t), ci.size(), f) == ci.size());
+                if (f) std::fclose(f);
+                if (!okw) throw std::runtime_error("cannot write " + o.c_out);
             }
 
             Verify v;

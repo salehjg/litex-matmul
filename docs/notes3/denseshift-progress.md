@@ -230,3 +230,21 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
     `docs/gemm.md` (best builds, README link).
   - Still open (needs the user's go): full exact screens of the 7 DenseShift builds that met timing, and the PE 40×16
     float build (`build/ds_chain2.sh`; with fewer Vivado threads to lower its memory peak).
+
+### 2026-11-25 (afternoon): float × float baseline
+- **Request:** use float32 × float32 GEMM as the baseline for every DenseShift speedup (so far the DenseShift MAC was
+  compared with int8 × int8 at the same array). Conv2d: DenseShift convolutions exist only in the PyTorch training
+  (ResNet-20, with its float32 baseline for accuracy); no convolution has run on the card yet.
+- The float × float baseline is the best float32 build that fits the device: PE 32×8, tile 1024×512, transposed A
+  (1320 DSP; a float MAC is 3 + 2 DSP48, so PE 32×16 = 2560 would not fit). Two clocks: 200 MHz (`a88777ec`, same
+  clock as every DenseShift build) and 225 MHz `aggressive` (`db5adf1c`, the best float32 result).
+- `gemm_runner`: `--a-file/--b-file/--c-out` now also take float32 files (float A and B; float C), so real float
+  layers run on float32 and float32 × dshift builds. `make test` passes; host tools rebuilt for the 7 builds below.
+- `mlp_mnist.py --act-bits 0`: float activations (input pixel / 255, h = relu(acc·a + b), no quantization). The CPU
+  reference sums in the kernel's order (c = c + a·w, k = 0, 1, …, float32 without FMA), so card sums must be equal.
+  `fpga` now records kernel and end-to-end time per layer (median of `--reps`, default 3) for speedups.
+  - float weights × float activations (`fp32_h1024_af`): **98.60 %**, float pipeline 98.60 % (the float × float
+    network for the baseline run).
+  - 3-bit DenseShift × float activations (`ds3_h1024_af`): **98.40 %**, float pipeline 98.40 %.
+- Next: one card session, build after build (`build/ds_baseline.sh`, results `results/ds_baseline/`): random GEMMs
+  1024³/4096³/8192³ on both float32 builds and the DenseShift builds, and the MNIST layers on each matching build.
