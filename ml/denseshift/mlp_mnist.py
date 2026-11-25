@@ -37,30 +37,32 @@ ROOT = data.ROOT
 
 
 class FakeQuantU8(nn.Module):
-    """uint8 codes of a non-negative activation: clip(round(x / s), 0, 255), s = running max / 255 (EMA); the round
-    passes gradients straight through inside the range. Returns codes (not values): the next layer's GEMM input."""
+    """Unsigned codes of a non-negative activation: clip(round(x / s), 0, qmax), s = running max / qmax (EMA); the round
+    passes gradients straight through inside the range. Returns codes (not values): the next layer's GEMM input.
+    qmax 255 = uint8 codes; 127 = codes that also fit int8 (signed int8 builds)."""
 
-    def __init__(self, momentum=0.99):
+    def __init__(self, qmax=255, momentum=0.99):
         super().__init__()
+        self.qmax = qmax
         self.momentum = momentum
         self.register_buffer("scale", torch.tensor(0.0))
 
     def forward(self, x):
         if self.training:
             with torch.no_grad():
-                m = x.detach().amax() / 255.0
+                m = x.detach().amax() / self.qmax
                 self.scale.copy_(m if self.scale == 0 else self.momentum * self.scale + (1 - self.momentum) * m)
         s = self.scale.clamp_min(1e-8)
-        y = torch.clamp(x / s, 0, 255)
+        y = torch.clamp(x / s, 0, self.qmax)
         return y + (torch.round(y) - y).detach()
 
 
 class MLP(nn.Module):
-    def __init__(self, bits, hidden):
+    def __init__(self, bits, hidden, qmax=255):
         super().__init__()
         lin = (lambda i, o: DenseShiftLinear(i, o, bits=bits)) if bits else (lambda i, o: nn.Linear(i, o, bias=False))
-        self.fc1, self.bn1, self.q1 = lin(784, hidden), nn.BatchNorm1d(hidden), FakeQuantU8()
-        self.fc2, self.bn2, self.q2 = lin(hidden, hidden), nn.BatchNorm1d(hidden), FakeQuantU8()
+        self.fc1, self.bn1, self.q1 = lin(784, hidden), nn.BatchNorm1d(hidden), FakeQuantU8(qmax)
+        self.fc2, self.bn2, self.q2 = lin(hidden, hidden), nn.BatchNorm1d(hidden), FakeQuantU8(qmax)
         self.fc3 = nn.Linear(hidden, 10)
 
     def forward(self, x_codes):
@@ -80,8 +82,8 @@ def fold(lin_bn_q):
     return a.cpu().numpy(), b.cpu().numpy(), float(q.scale)
 
 
-def requant(acc, a, b, s):
-    return np.clip(np.rint((acc.astype(np.float64) * a + b) / s), 0, 255)
+def requant(acc, a, b, s, qmax=255):
+    return np.clip(np.rint((acc.astype(np.float64) * a + b) / s), 0, qmax)
 
 
 def gemm_ref(a_codes, w_values, layer=None):
@@ -96,10 +98,11 @@ def logits(q2, ex):
 def int_pipeline(x_codes, ex, gemm=gemm_ref):
     w1 = decode_codes(torch.from_numpy(ex["w1_codes"]), int(ex["bits"])).numpy()
     w2 = decode_codes(torch.from_numpy(ex["w2_codes"]), int(ex["bits"])).numpy()
-    acc1 = gemm(x_codes, w1, 1)
-    q1 = requant(acc1, ex["a1"], ex["b1"], ex["s1"])
+    qmax = int(ex.get("qmax", 255))
+    acc1 = gemm(x_codes >> int(ex.get("in_shift", 0)), w1, 1)
+    q1 = requant(acc1, ex["a1"], ex["b1"], ex["s1"], qmax)
     acc2 = gemm(q1, w2, 2)
-    q2 = requant(acc2, ex["a2"], ex["b2"], ex["s2"])
+    q2 = requant(acc2, ex["a2"], ex["b2"], ex["s2"], qmax)
     return logits(q2, ex), (acc1, acc2)
 
 
@@ -107,14 +110,17 @@ def int_pipeline(x_codes, ex, gemm=gemm_ref):
 
 def train(args):
     out = os.path.join(ROOT, "build", "ml", "mnist",
-                       args.name or (f"ds{args.bits}" if args.bits else "fp32") + f"_h{args.hidden}")
+                       args.name or (f"ds{args.bits}" if args.bits else "fp32") + f"_h{args.hidden}"
+                       + ("" if args.act_bits == 8 else f"_a{args.act_bits}"))
+    qmax, in_shift = 2 ** args.act_bits - 1, 8 - args.act_bits
     os.makedirs(out, exist_ok=True)
     torch.manual_seed(args.seed)
     dev = torch.device("cuda")
     xtr, ytr, xte, yte = data.mnist()
-    xtr, xte = xtr.flatten(1).float().to(dev), xte.flatten(1).float().to(dev)  # pixel codes 0..255
+    xtr, xte = xtr.flatten(1).to(dev) >> in_shift, xte.flatten(1).to(dev) >> in_shift  # pixel codes 0..qmax
+    xtr, xte = xtr.float(), xte.float()
     ytr, yte = ytr.to(dev), yte.to(dev)
-    model = MLP(args.bits, args.hidden).to(dev)
+    model = MLP(args.bits, args.hidden, qmax).to(dev)
     opt = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     t0 = time.time()
@@ -145,19 +151,19 @@ def train(args):
         return
     a1, b1, s1 = fold((model.fc1, model.bn1, model.q1))
     a2, b2, s2 = fold((model.fc2, model.bn2, model.q2))
-    ex = {"bits": args.bits, "hidden": args.hidden,
+    ex = {"bits": args.bits, "hidden": args.hidden, "qmax": qmax, "in_shift": in_shift,
           "w1_codes": model.fc1.export_codes().numpy(), "w2_codes": model.fc2.export_codes().numpy(),
           "a1": a1, "b1": b1, "s1": s1, "a2": a2, "b2": b2, "s2": s2,
           "fc_w": model.fc3.weight.detach().numpy(), "fc_b": model.fc3.bias.detach().numpy()}
     np.savez(os.path.join(out, "export.npz"), **ex)
-    x_codes = xte.cpu().numpy()
+    x_codes = (data.mnist()[2].flatten(1).numpy().astype(np.int64))  # raw pixels; int_pipeline applies in_shift
     with torch.no_grad():
         torch_acc = (model(xte.cpu()).argmax(1) == yte.cpu()).float().mean().item()
     lg, _ = int_pipeline(x_codes, ex)
     int_acc = float((lg.argmax(1) == yte.cpu().numpy()).mean())
     hist = {n: np.bincount(ex[n].ravel(), minlength=2 ** args.bits).tolist() for n in ("w1_codes", "w2_codes")}
     final = {"bits": args.bits, "hidden": args.hidden, "epochs": args.epochs, "seed": args.seed,
-             "torch_test_acc": torch_acc, "int_pipeline_test_acc": int_acc, "minutes": (time.time() - t0) / 60,
+             "act_bits": args.act_bits, "torch_test_acc": torch_acc, "int_pipeline_test_acc": int_acc, "minutes": (time.time() - t0) / 60,
              "s1": s1, "s2": s2, "code_histogram": hist}
     with open(os.path.join(out, "final.json"), "w") as f:
         json.dump(final, f, indent=1)
@@ -179,8 +185,11 @@ def fpga(args):
         info = json.load(f)
     cfg = BuildCfg.from_dict(info["config"])
     nf = cfg.numeric()
-    if not nf.is_mixed or nf.b.spec != f"dshift{int(ex['bits'])}" or nf.a.spec != "uint8":
-        sys.exit(f"build {cfg.build_id()} is {nf.spec}; this network needs uint8 x dshift{int(ex['bits'])}")
+    qmax = int(ex.get("qmax", 255))
+    a_ok = nf.a.spec == "uint8" or (nf.a.spec == "int8" and qmax <= 127)
+    if not nf.is_mixed or nf.b.spec != f"dshift{int(ex['bits'])}" or not a_ok or nf.c.spec != "int32":
+        sys.exit(f"build {cfg.build_id()} is {nf.spec}; this network needs {'u' if qmax > 127 else '[u]'}int8 x "
+                 f"dshift{int(ex['bits'])} -> int32")
     mn, mk, mm = cfg.size_multiples()
     base = runner_cmd(cfg, args.build, info.get("config_hash"))
     _, _, xte, yte = data.mnist()
@@ -241,6 +250,8 @@ def main():
     t.add_argument("--batch", type=int, default=256)
     t.add_argument("--lr", type=float, default=0.1)
     t.add_argument("--seed", type=int, default=0)
+    t.add_argument("--act-bits", type=int, default=8, choices=(7, 8),
+                   help="activation codes 0..2^bits-1 (7: also runs on signed int8 builds)")
     t.add_argument("--name")
     f = sub.add_parser("fpga")
     f.add_argument("--run", required=True, help="training output dir (export.npz)")

@@ -1,0 +1,25 @@
+{
+  "campaign": "ds_scale",
+  "comment": "docs/notes3 Part C3: larger DenseShift arrays once the multiplier is gone (int8 x dshift3). With int32 sums the C buffers (BRAM) set the limit: PE 48x32 with tile 384x2048 keeps them at depth 512 (72-bit BRAM36), ~14.5 RAMB36 per PE. With int16 sums PE 32x64 (2048 MACs; the multiply MAC would need 2048 DSPs). Clock headroom of the shift MAC: PE 32x32 at 250 MHz.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@point": [
+      {"kernel.parallelism_n": 48, "kernel.parallelism_m": 32, "kernel.memory_tile_size_n": 384, "kernel.memory_tile_size_m": 2048,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 32},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 64, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 2048,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 16},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 32, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 1024,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 32,
+       "clocks.accel_mhz": 250}
+    ]
+  },
+  "runtime_grid": {
+    "triples": [[1024, 1024, 1024], [4096, 4096, 4096], [8192, 8192, 8192]],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": ["sim", "hls", "build", "run"],
+  "jobs": {"hls": 2},
+  "ddr_load_tune": true
+}
