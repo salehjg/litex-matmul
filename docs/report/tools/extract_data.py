@@ -19,6 +19,7 @@ import statistics
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "flow"))
+from gemmflow.config import BuildCfg, ConfigError  # noqa: E402
 from gemmflow.numeric import NumericError, resolve  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -93,10 +94,13 @@ def builds():
         wns = clock_wns(os.path.join(d, "gateware"))
         c = s["config"]
         k = c["kernel"]
-        try:
-            dtype = resolve(k["data_type"], k.get("data_bits"), k.get("frac_bits")).spec
-        except NumericError:
-            dtype = k["data_type"]
+        try:  # the full format: mixed builds (kernels/gemm_mixed) are e.g. int8xdshift3-int32
+            dtype = BuildCfg.from_dict(c).numeric().spec
+        except (ConfigError, NumericError):
+            try:
+                dtype = resolve(k["data_type"], k.get("data_bits"), k.get("frac_bits")).spec
+            except NumericError:
+                dtype = k["data_type"]
         out[s["config_hash"][:8]] = dict(dtype=dtype,
             id=s["config_hash"][:8], build_id=s["build_id"], cfg=c, k=c["kernel"],
             mhz=c["clocks"]["accel_mhz"], preset=c["vivado"]["preset"],
