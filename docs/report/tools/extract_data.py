@@ -454,11 +454,13 @@ def formats(B, runs, runs_any):
           "every mixed-type (DenseShift) Vivado build: timing (ns), resources, best GOP/s; unfinished builds last")
 
 
-# float x float baseline for DenseShift (docs/notes3): campaign results/ds_baseline/, every build run in one session.
-DS_SPEEDUP = [("float32 x float32 (multiply-add)", "a88777ec"), ("float32 x float32 (multiply-add)", "db5adf1c"),
-              ("float32 x dshift3 -> float32", "b5f615c5"), ("uint8 x dshift3 -> int32", "72f311dc"),
-              ("int8 x dshift3 -> int32", "555d202a"), ("int8 x dshift3 -> int16", "863a7f43"),
-              ("int8 x int8 -> int32 (multiply)", "29a9315e")]
+# DenseShift against float x float (docs/notes3): results/ds_baseline/, every build run in one session. The baseline
+# at each size is the fastest float32 x float32 build there (PE 32x8 225 MHz aggressive); each other format is
+# represented by its fastest build (by the 8192^3 median), whatever its array, tile, clock or preset.
+DS_LABELS = {"float32": "float32 x float32 (multiply-add)", "float32xdshift3-float32": "float32 x dshift3 -> float32",
+             "uint8xdshift3-int32": "uint8 x dshift3 -> int32", "int8xdshift3-int32": "int8 x dshift3 -> int32",
+             "int8xdshift3-int16": "int8 x dshift3 -> int16", "int8xint8-int32": "int8 x int8 -> int32 (multiply)"}
+SIZES = (1024, 4096, 8192)
 
 
 def ds_speedup(B, runs):
@@ -469,26 +471,26 @@ def ds_speedup(B, runs):
     def med(h, n):
         g = [r["gflops"] for r in runs_by(rs, h) if r["n"] == n]
         return statistics.median(g) if g else None
-    base = {n: med("a88777ec", n) for n in (1024, 4096, 8192)}
-    base225 = med("db5adf1c", 8192)
+    by_dtype = collections.defaultdict(set)
+    for r in rs:
+        by_dtype[r["dtype"]].add(r["config_hash"][:8])
+    pick = {dt: max(hs, key=lambda h: med(h, 8192) or 0) for dt, hs in by_dtype.items()}
+    base = {n: max(med(h, n) or 0 for h in by_dtype["float32"]) for n in SIZES}
     rows = []
-    for i, (lab, h) in enumerate(DS_SPEEDUP):
-        if h not in B or not runs_by(rs, h):
-            continue
-        b = B[h]
-        g = {n: med(h, n) for n in (1024, 4096, 8192)}
-        k = b["k"]
-        rows.append([i, lab, f"{k['parallelism_n']}x{k['parallelism_m']}", k["parallelism_n"] * k["parallelism_m"],
-                     b["mhz"], b["preset"], b["dsp"], b["lut"] / 1000, b["bram"], b["peak"], g[1024], g[4096], g[8192],
-                     pct(g[8192], b["peak"]) if g[8192] else None,
-                     *(g[n] / base[n] if g[n] and base[n] else None for n in (1024, 4096, 8192)),
-                     g[8192] / base225 if g[8192] and base225 else None,
-                     sum(r["verify_bad"] for r in runs_by(rs, h)), len(runs_by(rs, h))])
+    for i, dt in enumerate(dt for dt in DS_LABELS if dt in pick):
+        h = pick[dt]
+        b, k = B[h], B[h]["k"]
+        g = {n: med(h, n) for n in SIZES}
+        rows.append([i, DS_LABELS[dt], f"{k['parallelism_n']}x{k['parallelism_m']}",
+                     k["parallelism_n"] * k["parallelism_m"], b["mhz"], b["preset"], b["dsp"], b["lut"] / 1000,
+                     b["bram"], b["peak"], g[1024], g[4096], g[8192], pct(g[8192], b["peak"]) if g[8192] else None,
+                     *(g[n] / base[n] if g[n] and base[n] else None for n in SIZES),
+                     sum(r["verify_bad"] for r in runs_by(rs, h)), len(runs_by(rs, h)), b["build_id"]])
     write("ds_speedup.csv", ["i", "format", "pe", "macs", "mhz", "preset", "dsp", "lut_k", "bram", "peak", "g1024",
-                             "g4096", "g8192", "pct8192", "sp1024", "sp4096", "sp8192", "sp8192_vs225", "verify_bad",
-                             "runs"], rows,
-          "DenseShift builds against float32 x float32 (PE 32x8 200 MHz = a88777ec; vs225 = the 225 MHz aggressive "
-          "build): median GOP/s per size (results/ds_baseline); speedup = GOP/s ratio at the same size")
+                             "g4096", "g8192", "pct8192", "sp1024", "sp4096", "sp8192", "verify_bad", "runs",
+                             "build_id"], rows,
+          "fastest build per format against the fastest float32 x float32 build at each size (results/ds_baseline,"
+          " median GOP/s of 2 runs); speedup = GOP/s ratio at the same size")
 
 
 if __name__ == "__main__":

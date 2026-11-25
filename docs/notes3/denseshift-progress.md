@@ -290,3 +290,19 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   campaign table, abstract / introduction / conclusion now state speedups against float32 × float32 (3.8× int8
   activations, 7.6× int16 sums, 1.9× float activations, MNIST 3.4×). 34 pages, 0 warnings. README (baseline row and
   speedup column, MNIST table), `ml/denseshift/README.md`, `docs/gemm.md` updated.
+- **Baseline = the fastest float × float build** (user: compare with the best float32 × float32 kernel, and use the
+  best-performing DenseShift kernel of each format). Across all results the fastest float32 build at every size is
+  PE 32×8, 225 MHz `aggressive` (`db5adf1c`: 107.76 / 110.34 / 110.86 GFLOP/s at 1024³ / 4096³ / 8192³). Each
+  DenseShift format had exactly one build that met timing, so those are its fastest. `extract_data.py` now picks
+  both by measurement (`ds_speedup.csv`), `summarize.py` uses the 225 MHz float run for the MNIST speedups.
+  | Fastest build per format | 8192³ | Speedup 1024³ / 4096³ / 8192³ |
+  |---|---|---|
+  | float32 × float32, PE 32×8, 225 MHz (baseline) | 110.86 | 1 |
+  | float32 × dshift3 → float32, PE 32×16, 200 MHz | 189.10 | 1.67 / 1.70 / **1.71** |
+  | int8 or uint8 × dshift3 → int32, PE 32×32, 200 MHz | 375.45 | 3.15 / 3.35 / **3.39** |
+  | int8 × dshift3 → int16, PE 32×64, 200 MHz | 750.91 | 3.33 / 6.70 / **6.77** |
+  | int8 × int8 → int32 multiply, PE 32×32, 200 MHz | 375.45 | 3.15 / 3.35 / 3.39 |
+  MNIST (kernel / end to end): float × dshift3 1.66× / 1.40×, uint8 × dshift3 3.05× / 2.51× (per layer 2.93× and
+  3.15×). No DenseShift build was tried at 225 MHz (250 MHz failed on the dataflow control): a 225 MHz attempt
+  (e.g. `aggressive`) is the open way to raise these. Report, README, `ml/denseshift/README.md`, `docs/gemm.md`
+  updated to these numbers; the equal-clock (200 MHz) figures stay in the report text and above.

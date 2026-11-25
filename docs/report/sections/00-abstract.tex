@@ -24,10 +24,11 @@ that the upstream kernel assumes but does not check.
 
 A third part implements DenseShift~\cite{denseshift}, a power-of-two weight format without zero: training in PyTorch
 (3-bit weights 0.4 points below float on CIFAR-10 ResNet-20, mean of three seeds) and a copy of the kernel with
-separate activation, weight and sum types in which a multiply becomes a shift. Against float32\,\(\times\)\,float32
-GEMM at the same clock it is 3.8 times faster with int8 activations (\SI{375.5}{GOP/s}, int32 sums, 40 DSPs; an
-int8 multiply MAC needs 1064 for the same speed), 7.6 times with int16 sums (a 2048-MAC array, more MACs than the
-device has DSPs) and 1.9 times with float activations (\SI{189.1}{GOP/s}). An MNIST network's DenseShift layers run on the card 3.4 times faster than the same
+separate activation, weight and sum types in which a multiply becomes a shift. Against the fastest
+float32\,\(\times\)\,float32 GEMM (\gflops{110.9}) its fastest builds are 3.4 times faster with int8 activations
+(\SI{375.5}{GOP/s}, int32 sums, 40 DSPs; an int8 multiply MAC needs 1064 for the same speed), 6.8 times with int16
+sums (a 2048-MAC array, more MACs than the device has DSPs) and 1.7 times with float activations
+(\SI{189.1}{GOP/s}). An MNIST network's DenseShift layers run on the card 3.1 times faster than the same
 network in float32\,\(\times\)\,float32 (98.47 against 98.60\,\% accuracy) and give the same 10.24 million sums per
 layer, and the same predictions, as the CPU.
 \end{abstract}

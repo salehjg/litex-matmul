@@ -69,6 +69,6 @@ best configuration, a 32\x8 PE array with transposed A, 1024\x512 tiles and a 22
 every result verified and traceable to the bitstream and source that produced it. With the element format as one
 more configuration key, the same kernel source computes int8 GEMM at \SI{426.6}{GOP/s} and int4 at
 \textbf{\SI{1370.9}{GOP/s}}, exactly checked on the card. A mixed-type copy of the kernel runs DenseShift networks:
-against float32\,\(\times\)\,float32 at the same clock it is 3.8\x\ faster with int8 activations, 7.6\x\
-with int16 sums and 1.9\x\ with float activations, and an MNIST network's layers run 3.4\x\ faster with
+against the fastest float32\,\(\times\)\,float32 build it is 3.4\x\ faster with int8 activations, 6.8\x\
+with int16 sums and 1.7\x\ with float activations, and an MNIST network's layers run 3.1\x\ faster with
 0.13 points less accuracy.

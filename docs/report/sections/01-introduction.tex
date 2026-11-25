@@ -35,9 +35,9 @@ hash and the git state, so any number in this report can be traced to the exact 
         \SI{1370.9}{GOP/s} for int4; and two silent-error causes found on the way, DDR3 read margin under load and
         unchecked tile rules in the kernel (\cref{sec:formats}).
   \item DenseShift power-of-two weights from training to the card: PyTorch layers, a mixed-type kernel with a shift
-        MAC (3.8\x\ the float32\,\(\times\)\,float32 throughput with int8 activations and 40 DSPs, 1.9\x\ with float
-        activations) and an MNIST network whose layers run on the accelerator 3.4\x\ faster than in float32, with
-        results identical to the CPU (\cref{sec:ds}).
+        MAC (3.4\x\ the fastest float32\,\(\times\)\,float32 throughput with int8 activations and 40 DSPs, 1.7\x\
+        with float activations) and an MNIST network whose layers run on the accelerator 3.1\x\ faster than in
+        float32, with results identical to the CPU (\cref{sec:ds}).
 \end{enumerate}
 
 \paragraph{Results at a glance.} \Cref{tab:headline} lists the configurations that mark the path to the best result.

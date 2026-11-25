@@ -3,7 +3,7 @@
 #   /usr/bin/python3 ml/denseshift/summarize.py [--csv docs/report/data/denseshift_cifar.csv]
 #                                               [--mnist-csv docs/report/data/denseshift_mnist_card.csv]
 # MNIST card runs with timings (mlp_mnist.py fpga since the float x float baseline) also get speedups against the
-# float x float network (fp32_h1024_af) on the float32 PE 32x8 200 MHz build.
+# float x float network (fp32_h1024_af) on the fastest float32 build (PE 32x8, 225 MHz, aggressive).
 # Needs only the standard library (also runs with the .venv Python).
 #
 
@@ -38,12 +38,12 @@ def cifar_rows():
     return rows
 
 
-BASELINE_NET, BASELINE_BUILD = "fp32_h1024_af", "f32_pe32x8_t1024x512_200mhz_tA"
+BASELINE_NET, BASELINE_BUILD = "fp32_h1024_af", "f32_pe32x8_t1024x512_225mhz_tA_aggressive"
 
 
 def mnist_card_rows():
     """One row per card run with timings: kernel and end-to-end ms of the two hidden layers, speedups against the
-    float x float network on the 200 MHz float32 build."""
+    float x float network on the fastest float32 build."""
     rows = []
     for g in sorted(glob.glob(os.path.join(ROOT, "build", "ml", "mnist", "*", "fpga_*.json"))):
         c = json.load(open(g))

@@ -23,20 +23,20 @@ Best kernel throughput, all results verified exactly on the card:
 Trained in PyTorch (`ml/denseshift/`) and run on the card with a kernel that has separate A/B/C types
 (`kernels/gemm_mixed/`):
 
-| Build (200 MHz) | Measured (8192³, exact) | vs float32 × float32 | DSPs | LUTs |
+| Fastest build per format | Measured (8192³, exact) | vs best float32 × float32 | DSPs | LUTs |
 |---|---|---|---|---|
-| **Baseline:** float32 × float32, multiply-add, PE 32×8 | 98.6 GFLOP/s | 1× | 1320 | 154.3k |
-| float32 × 3-bit DenseShift → float32 (exponent add), PE 32×16 | 189.1 GOP/s | **1.92×** | 1063 | 202.5k |
-| int8 × 3-bit DenseShift → int32, shift, PE 32×32 | 375.5 GOP/s | **3.81×** | 40 | 161.6k |
-| int8 × 3-bit DenseShift → int16, shift, PE 32×64 | 750.9 GOP/s | **7.62×** | 40 | 190.3k |
-| int8 × int8 weights → int32, multiply, PE 32×32 | 375.5 GOP/s | 3.81× | 1064 | 167.5k |
+| **Baseline:** float32 × float32, multiply-add, PE 32×8, 225 MHz | 110.9 GFLOP/s | 1× | 1320 | 152.0k |
+| float32 × 3-bit DenseShift → float32 (exponent add), PE 32×16, 200 MHz | 189.1 GOP/s | **1.71×** | 1063 | 202.5k |
+| int8 × 3-bit DenseShift → int32, shift, PE 32×32, 200 MHz | 375.5 GOP/s | **3.39×** | 40 | 161.6k |
+| int8 × 3-bit DenseShift → int16, shift, PE 32×64, 200 MHz | 750.9 GOP/s | **6.77×** | 40 | 190.3k |
+| int8 × int8 weights → int32, multiply, PE 32×32, 200 MHz | 375.5 GOP/s | 3.39× | 1064 | 167.5k |
 
-- The baseline is the largest float32 × float32 array that fits: a float MAC costs ~5 DSPs. All rows were measured in
-  one session on the card. Against the best float32 build (225 MHz, 110.9 GFLOP/s) the speedups are 1.71×, 3.39× and
-  6.77×.
+- Each row is the fastest build of its format (array, tile, clock, preset), all measured in one session on the card.
+  The float baseline is the fastest float32 build at every size. A float MAC costs ~5 DSPs, so PE 32×8 is the largest
+  float array that fits.
 - The speedup comes from the array size the DSPs allow. With float activations the multiply becomes an exponent
   add, so twice the MACs fit. With integer activations the MAC needs no DSP: the same speed as an int8 multiply MAC
-  with 40 instead of 1064 DSPs and fewer LUTs.
+  with 40 instead of 1064 DSPs and fewer LUTs. The DenseShift builds run at 200 MHz (225 MHz not tried yet).
 - CIFAR-10 ResNet-20 (200 epochs, 3 seeds): 3-bit DenseShift 91.3 % against 91.7 % for float32 weights (400 epochs:
   92.05 % against 92.24 %). 4-bit (90.9 %) stays below 3-bit, unlike the paper's ImageNet results
   ([ml/denseshift](ml/denseshift/README.md)).
@@ -44,9 +44,9 @@ Trained in PyTorch (`ml/denseshift/`) and run on the card with a kernel that has
 
   | Activations × weights | Accuracy | Kernel time | Speedup (kernel / end to end) |
   |---|---|---|---|
-  | float32 × float32 (baseline) | 98.60 % | 396.9 ms | 1× / 1× |
-  | float32 × 3-bit DenseShift | 98.40 % | 212.7 ms | 1.87× / 1.52× |
-  | uint8 × 3-bit DenseShift | 98.47 % | 115.7 ms | 3.43× / 2.73× |
+  | float32 × float32 (baseline, fastest float build) | 98.60 % | 353.1 ms | 1× / 1× |
+  | float32 × 3-bit DenseShift | 98.40 % | 212.7 ms | 1.66× / 1.40× |
+  | uint8 × 3-bit DenseShift | 98.47 % | 115.7 ms | 3.05× / 2.51× |
 
   End to end includes the PCIe transfers, which shrink less than the compute (C comes back as 4-byte values).
 - Convolutions: DenseShift conv layers are trained (ResNet-20 above, float32 network as the accuracy baseline) but

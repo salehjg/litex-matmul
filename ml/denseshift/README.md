@@ -32,7 +32,7 @@ on a signed int8 × dshift build. `--act-bits 0` gives float activations (input 
 `--bits 0 --act-bits 0` is the float32 × float32 baseline for a float32 build, and `--bits 3 --act-bits 0` runs on a
 float32 × dshift3 build. Float runs are checked bit for bit against float32 sums in the kernel's k order.
 `fpga --reps N` times each layer N times (median, default 3); `summarize.py` prints the speedups against the
-float × float network on the float32 PE 32×8 200 MHz build.
+float × float network on the fastest float32 build (PE 32×8, 225 MHz, `aggressive`).
 
 ## Results
 
@@ -58,11 +58,11 @@ pipeline equals PyTorch in every case. Float activations: float32 weights 98.60 
 On the card, both hidden layers over all 10 000 test images (0 of 10 240 000 sums differ from the CPU in either
 layer, predictions identical to the CPU; times: both layers, median of 3):
 
-| Activations × weights | Build (200 MHz) | Accuracy | Kernel ms | End to end ms | Speedup kernel / e2e |
+| Activations × weights | Build | Accuracy | Kernel ms | End to end ms | Speedup kernel / e2e |
 |---|---|---|---|---|---|
-| float32 × float32 | f32 PE 32×8 | 98.60 % | 396.9 | 559.2 | 1 / 1 |
-| float32 × dshift3 | f32xds3 PE 32×16 | 98.40 % | 212.7 | 367.7 | 1.87 / 1.52 |
-| uint8 × dshift3 | u8xds3c32 PE 32×32 | 98.47 % | 115.7 | 204.9 | 3.43 / 2.73 |
-| 7-bit × dshift3 | i8xds3c32 PE 32×32 | 98.48 % | 115.7 | 204.9 | 3.43 / 2.73 |
+| float32 × float32 | f32 PE 32×8, 225 MHz (fastest float32) | 98.60 % | 353.1 | 515.1 | 1 / 1 |
+| float32 × dshift3 | f32xds3 PE 32×16, 200 MHz | 98.40 % | 212.7 | 367.7 | 1.66 / 1.40 |
+| uint8 × dshift3 | u8xds3c32 PE 32×32, 200 MHz | 98.47 % | 115.7 | 204.9 | 3.05 / 2.51 |
+| 7-bit × dshift3 | i8xds3c32 PE 32×32, 200 MHz | 98.48 % | 115.7 | 204.9 | 3.05 / 2.51 |
 
 The CIFAR-10 convolutions have run only in PyTorch so far, not on the card.
