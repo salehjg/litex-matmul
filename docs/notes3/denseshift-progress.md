@@ -11,7 +11,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | B2 | Flow: config fields, numeric formats, kernel dir, hashes, names, columns | ✅ |
 | B3 | Host: codec, mixed reference, runner options, unit tests | ✅ |
 | C1 | `ds_hls` HLS probe | ✅ |
-| C2 | `ds_same_array` builds + card runs + exact screens | ⬜ |
+| C2 | `ds_same_array` builds + card runs + exact screens | 🟡 building |
 | C3 | `ds_scale` | ⬜ |
 | C4 | MNIST MLP end to end on the card | 🟡 trained, waiting for a build |
 | C5 | Float activations (stretch) | ⬜ |
@@ -114,3 +114,14 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   331.6k LUT / 173.7k FF; **B `acc + (neg ? −x : x)` (x 12 bits wide) 290.6k / 173.7k**; C `acc + (x ^ neg) + neg`
   (carry-in) 300.9k / 167.6k. B kept (`Mac.h`). Whether Vivado folds C's carry-in into one carry chain (and beats B)
   was not built: open point. All 24 simulation sizes still exact.
+- **C2 started** (`configs/dse/ds_same_array.json`, PE 32×32 t512×1024 200 MHz tA; i8×i8→i32, i8×ds3→i32,
+  u8×ds3→i32). First build **i8×i8→i32: timing met (WNS 0.049), LUT 167.5k, FF 259.4k, BRAM 638.5 tiles, DSP 1064**
+  (kernel: LUT 138.9k, RAMB36 509 + RAMB18 37, DSP 1064; 26 min). Each PE's C buffer (1024 bits × 512) is 14 RAMB36
+  + 1 RAMB18: the `ram_s2p` binding gives the 72-bit packing (true dual port would need ~28.5 per PE, 912 for the
+  array, more than the device has with the rest). HLS had estimated LUT 195.8k for this point.
+- Float activations × DenseShift prepared (paper Sec. 3.1.1): flow format `float32xdshift<n>-float32`, runner check
+  bit for bit against k-order float sums; kernel part (`Mac.h` branch: add e to the exponent field, flip the sign,
+  zero/denormal → signed zero; testbench float path) simulated from a scratch copy of the tree: 2/3/4-bit, C pass /
+  split / gather, whole and partial tiles all exact. It goes into `kernels/gemm_mixed/` after the running builds (a
+  tree change would make them rerun HLS). (First try: every entry wrong because the testbench decoded B only under
+  `MM_MAC_DENSESHIFT`; the MAC itself was right.)
