@@ -187,3 +187,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 - **C3 `ds_scale` HLS:** i8×ds3→i32 PE 48×32 t384×2048: DSP 255, BRAM18 1570, LUT 427.7k, 4.505 ns;
   i8×ds3→i16 PE 32×64 t512×2048: DSP 37, BRAM18 1110, LUT 404.8k, 4.374 ns; i8×ds3→i32 PE 32×32 at 250 MHz:
   DSP 39, BRAM18 1106, LUT 292.8k, 4.374 ns (at a 4 ns target). All under the gate; builds running.
+- **CIFAR-10, all with three seeds** (200 epochs): float32 91.70 % (91.56–91.85); DenseShift 2-bit 91.06 %
+  (90.84–91.43), 3-bit 91.32 % (91.10–91.47), 4-bit 90.89 % (90.63–91.25); 3-bit with Eq. 7 91.22 % (91.11–91.36),
+  3-bit with Kaiming init 90.23 % (89.99–90.50). Eq. 8 vs Eq. 7: +0.1 point, within the seed spread here (paper,
+  ImageNet: +0.3/+0.7). Low-variance vs Kaiming init: +1.1 points, on every seed. 400-epoch 3/4-bit runs going.
