@@ -48,8 +48,9 @@ def main():
               f"{'' if r['exp_share'] is None else ' / '.join(f'{x:.2f}' for x in r['exp_share'])} |")
     for f in sorted(glob.glob(os.path.join(ROOT, "build", "ml", "mnist", "*", "final.json"))):
         r = json.load(open(f))
-        print(f"MNIST {os.path.basename(os.path.dirname(f))}: torch {100 * r['torch_test_acc']:.2f} %, "
-              f"integer pipeline {100 * r['int_pipeline_test_acc']:.2f} %")
+        ip = r.get("int_pipeline_test_acc")
+        print(f"MNIST {os.path.basename(os.path.dirname(f))}: torch {100 * r['torch_test_acc']:.2f} %"
+              + (f", integer pipeline {100 * ip:.2f} %" if ip is not None else ""))
         for g in sorted(glob.glob(os.path.join(os.path.dirname(f), "fpga_*.json"))):
             c = json.load(open(g))
             print(f"  card {c['build_id']}: {100 * c['card_test_acc']:.2f} % (CPU integer {100 * c['cpu_int_test_acc']:.2f} %), "

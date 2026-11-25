@@ -58,8 +58,9 @@ class FakeQuantU8(nn.Module):
 class MLP(nn.Module):
     def __init__(self, bits, hidden):
         super().__init__()
-        self.fc1, self.bn1, self.q1 = DenseShiftLinear(784, hidden, bits=bits), nn.BatchNorm1d(hidden), FakeQuantU8()
-        self.fc2, self.bn2, self.q2 = DenseShiftLinear(hidden, hidden, bits=bits), nn.BatchNorm1d(hidden), FakeQuantU8()
+        lin = (lambda i, o: DenseShiftLinear(i, o, bits=bits)) if bits else (lambda i, o: nn.Linear(i, o, bias=False))
+        self.fc1, self.bn1, self.q1 = lin(784, hidden), nn.BatchNorm1d(hidden), FakeQuantU8()
+        self.fc2, self.bn2, self.q2 = lin(hidden, hidden), nn.BatchNorm1d(hidden), FakeQuantU8()
         self.fc3 = nn.Linear(hidden, 10)
 
     def forward(self, x_codes):
@@ -105,7 +106,8 @@ def int_pipeline(x_codes, ex, gemm=gemm_ref):
 # train ------------------------------------------------------------------------------------------------------------
 
 def train(args):
-    out = os.path.join(ROOT, "build", "ml", "mnist", args.name or f"ds{args.bits}_h{args.hidden}")
+    out = os.path.join(ROOT, "build", "ml", "mnist",
+                       args.name or (f"ds{args.bits}" if args.bits else "fp32") + f"_h{args.hidden}")
     os.makedirs(out, exist_ok=True)
     torch.manual_seed(args.seed)
     dev = torch.device("cuda")
@@ -132,6 +134,15 @@ def train(args):
         print(f"epoch {epoch + 1:3d}  loss {loss.item():.4f}  test {acc:.4f}", flush=True)
 
     model.eval().cpu()
+    if not args.bits:  # float32 baseline: same network and uint8 activations, float weights; no integer export
+        with torch.no_grad():
+            torch_acc = (model(xte.cpu()).argmax(1) == yte.cpu()).float().mean().item()
+        final = {"bits": 0, "hidden": args.hidden, "epochs": args.epochs, "seed": args.seed,
+                 "torch_test_acc": torch_acc, "int_pipeline_test_acc": None, "minutes": (time.time() - t0) / 60}
+        with open(os.path.join(out, "final.json"), "w") as f:
+            json.dump(final, f, indent=1)
+        print(json.dumps(final), flush=True)
+        return
     a1, b1, s1 = fold((model.fc1, model.bn1, model.q1))
     a2, b2, s2 = fold((model.fc2, model.bn2, model.q2))
     ex = {"bits": args.bits, "hidden": args.hidden,

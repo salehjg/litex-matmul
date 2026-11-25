@@ -81,3 +81,18 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   depth ≤ 512). Campaign restarted with the new tree (and with 2 HLS jobs instead of 3: three runs at 3.5 GB each plus
   CIFAR training left 2 GB free). Lesson: `pkill -f <pattern>` in a tool shell also kills that shell when the pattern
   is in its own command line; use `pgrep -f "[g]emm_dse"` or PIDs.
+- **C buffer fix confirmed by HLS:** with `ram_s2p` the PE 32×32 int32-C points need ~1105 BRAM18 (was 2002), under
+  the gate. (`--resume` skips by build id and stage, not by HLS hash: the first point still shows the old tree;
+  rerun without `--resume` at the end.) Editing any file in `kernels/gemm_mixed/` (also ORIGIN.md) changes the HLS hash
+  of every mixed config: doc edits there wait until no campaign runs.
+  | PE 32×32, int8 A, int32 C, HLS | DSP | LUT | FF | BRAM18 | est. ns |
+  |---|---|---|---|---|---|
+  | int8 × int8 (multiply) | 1064 | 195.8k | 189.3k | 1110 | 4.374 |
+  | int8 × dshift2 | 39 | 326.6k | 166.2k | 1104 | 4.374 |
+  | int8 × dshift4 | 39 | 339.8k | 178.8k | 1106 | 4.374 |
+  With a 32-bit sum, HLS puts multiply + add into a DSP48 per MAC (the single-type int8 kernel, whose product was
+  cut to 8 bits, had its multipliers in LUTs). The DenseShift MAC needs no DSP and costs LUTs instead: on this FPGA
+  the trade is DSPs for LUTs, not a smaller design.
+- **MNIST MLP, other widths** (`mlp_mnist.py train --bits 0/2/4`, same network, uint8 activations, 30 epochs):
+  float32 weights 98.65 %, DenseShift 2-bit 98.46 %, 3-bit 98.47 %, 4-bit 98.37 % (integer pipeline = PyTorch for
+  all three).
