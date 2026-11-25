@@ -53,6 +53,30 @@ directory's summary and timing report.
 ]{data/formats_builds_table.csv}
 \end{table}
 
+\begin{table}[ht]
+\centering\scriptsize\setlength{\tabcolsep}{3pt}
+\caption{Every mixed-type build of \file{kernels/gemm\_mixed} (\cref{sec:ds}; \file{data/ds\_builds\_table.csv}),
+  A\,\(\times\)\,B\,\(\to\)\,C. WNS: accel clock and worst over all clocks (ns); GOP/s: best result of the build. The
+  last two stopped before a report was written.}
+\label{tab:ds-builds}
+\pgfplotstabletypeset[
+  every column/.style={string type, column type=r},
+  columns/label/.style={string type, column name={Build (format, \(P_N{\times}P_M\), tile, MHz, options)}, column type=l},
+  columns/met/.style={string type, column name={met}, column type=c},
+  columns/wns_accel/.style={column name={WNS accel}},
+  columns/wns/.style={column name={WNS all}},
+  columns/lut_k/.style={column name={LUT}},
+  columns/bram/.style={column name={BRAM}},
+  columns/dsp/.style={column name={DSP}},
+  columns/build_min/.style={column name={min}},
+  columns/gops/.style={column name={GOP/s}},
+  columns/pct/.style={column name={\% peak}},
+  columns/note/.style={string type, column name={note}, column type=l},
+  every head row/.style={before row=\toprule, after row=\midrule},
+  every last row/.style={after row=\bottomrule},
+]{data/ds_builds_table.csv}
+\end{table}
+
 \section{Reproducing the results}
 \label{app:repro}
 \begin{lstlisting}[language=bash, caption={From a clean checkout (Vivado/Vitis 2026.1, the card in a PCIe slot).}]

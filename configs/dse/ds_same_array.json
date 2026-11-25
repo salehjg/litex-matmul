@@ -1,0 +1,23 @@
+{
+  "campaign": "ds_same_array",
+  "comment": "docs/notes3 Part C2: kernels/gemm_mixed on the card at one array (PE 32x32, tile 512x1024, 200 MHz, transposed A). int8 x int8 -> int32 (multiply) against int8 x dshift3 -> int32 (DenseShift, no multiplier) and uint8 x dshift3 -> int32 (the MNIST MLP's layers: uint8 activation codes). Same throughput by construction; the question is LUT/FF/BRAM/DSP, timing and exactness on the card. DDR read taps tuned under load.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "kernel.parallelism_n": [32], "kernel.parallelism_m": [32],
+    "kernel.memory_tile_size_n": [512], "kernel.memory_tile_size_m": [1024],
+    "@format": [
+      {"kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "int", "kernel.b_bits": 8, "kernel.accum_bits": 32},
+      {"kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 32},
+      {"kernel.data_type": "uint", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 32}
+    ]
+  },
+  "runtime_grid": {
+    "triples": [[1024, 1024, 1024], [4096, 4096, 4096], [8192, 8192, 8192]],
+    "repetitions": 2,
+    "warmup": 0,
+    "verify": "sampled"
+  },
+  "stages": ["hls", "build", "run"],
+  "jobs": {"hls": 2},
+  "ddr_load_tune": true
+}

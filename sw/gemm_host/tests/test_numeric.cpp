@@ -74,7 +74,68 @@ static void test_pack() {
     CHECK(buf[0] == 0xF1 && buf[1] == 0x87);       // element 0 in the low nibble (DataPack bit order)
 }
 
+static int64_t dot_mixed(const char *a, const char *b, const char *c, std::vector<int64_t> av, std::vector<int64_t> bv) {
+    return gemm::ref_entry_mixed(Dtype::parse(a), Dtype::parse(b), Dtype::parse(c), av.data(), bv.data(),
+                                 uint32_t(av.size()));
+}
+
+static void test_dshift() {
+    for (const char *s : {"dshift2", "dshift3", "dshift4"}) CHECK(Dtype::parse(s).spec() == s);
+    for (const char *s : {"dshift1", "dshift5", "udshift3"}) {
+        bool threw = false;
+        try { Dtype::parse(s); } catch (const std::invalid_argument &) { threw = true; }
+        CHECK(threw);
+    }
+    const Dtype d2 = Dtype::parse("dshift2"), d3 = Dtype::parse("dshift3"), d4 = Dtype::parse("dshift4");
+    CHECK(d2.storage() == 2 && d3.storage() == 4 && d4.storage() == 4);
+    CHECK(d2.elems_per_word() == 256 && d3.elems_per_word() == 128);
+    CHECK(d3.min_code() == 0 && d3.max_code() == 7 && d3.wrap(0xF) == 7);
+    // {+-1, +-2} and {+-1, +-2, +-4, +-8}; no zero.
+    CHECK(d2.value(0) == 1 && d2.value(1) == 2 && d2.value(2) == -1 && d2.value(3) == -2);
+    CHECK(d3.value(3) == 8 && d3.value(4) == -1 && d3.value(7) == -8);
+    CHECK(d4.value(7) == 128 && d4.value(15) == -128 && d4.pow2_code(true, 5) == 13);
+    // 3*4 + (-2)*(-2) = 16;  int16 C wraps: 127*128*3 = 48768 -> 48768 - 65536 = -16768.
+    CHECK(dot_mixed("int8", "dshift3", "int32", {3, -2}, {d3.pow2_code(false, 2), d3.pow2_code(true, 1)}) == 16);
+    CHECK(dot_mixed("int8", "dshift4", "int16", {127, 127, 127}, {7, 7, 7}) == -16768);
+    CHECK(dot_mixed("uint8", "dshift2", "int32", {255}, {3}) == -510);
+    CHECK(dot_mixed("int8", "int8", "int32", {-128, 127}, {-128, 127}) == 16384 + 16129);  // no wrap at 8 bits
+    // 3-bit codes in 4-bit lanes: pack / unpack round trip, the high lane bit stays 0.
+    std::vector<int64_t> v(999), back(999);
+    std::mt19937_64 rng(3);
+    for (auto &x : v) x = d3.wrap(rng());
+    std::vector<uint8_t> buf(d3.bytes(v.size()));
+    gemm::pack(d3, v.data(), v.size(), buf.data());
+    gemm::unpack(d3, buf.data(), v.size(), back.data());
+    CHECK(v == back);
+    bool high_clear = true;
+    for (uint8_t byte : buf) high_clear = high_clear && !(byte & 0x88);
+    CHECK(high_clear);
+}
+
 #ifdef HAVE_AP_TYPES
+// The DenseShift MAC as kernels/gemm_mixed/include/Mac.h computes it, against ref_entry_mixed.
+template <typename A, int N, typename C>
+static void cross_ds(const char *a_spec, const char *b_spec, const char *c_spec) {
+    const Dtype da = Dtype::parse(a_spec), db = Dtype::parse(b_spec);
+    std::mt19937_64 rng(13);
+    for (int t = 0; t < 2000; t++) {
+        std::vector<int64_t> a(64), b(64);
+        C acc = 0;
+        for (int x = 0; x < 64; x++) {
+            a[x] = da.wrap(rng()); b[x] = db.wrap(rng());
+            A ta = 0;
+            ta.range() = a[x];
+            const ap_uint<N> code = b[x];
+            const ap_uint<N - 1> e = code(N - 2, 0);
+            const ap_int<A::width + (1 << (N - 1))> shifted = ap_int<A::width + (1 << (N - 1))>(ta) << e;
+            acc = code[N - 1] ? C(acc - shifted) : C(acc + shifted);
+        }
+        if (acc.to_int64() != dot_mixed(a_spec, b_spec, c_spec, a, b)) {
+            std::printf("FAIL cross_ds %s x %s -> %s case %d\n", a_spec, b_spec, c_spec, t); failures++; return;
+        }
+    }
+}
+
 template <typename T>
 static void cross_int(const char *spec) {
     const Dtype d = Dtype::parse(spec);
@@ -99,7 +160,12 @@ int main() {
     test_specs();
     test_wrap_and_dot();
     test_pack();
+    test_dshift();
 #ifdef HAVE_AP_TYPES
+    cross_ds<ap_int<8>, 3, ap_int<32>>("int8", "dshift3", "int32");
+    cross_ds<ap_int<8>, 4, ap_int<16>>("int8", "dshift4", "int16");
+    cross_ds<ap_uint<8>, 2, ap_int<32>>("uint8", "dshift2", "int32");
+    cross_ds<ap_int<4>, 3, ap_int<16>>("int4", "dshift3", "int16");
     cross_int<ap_int<2>>("int2");
     cross_int<ap_uint<4>>("uint4");
     cross_int<ap_int<8>>("int8");

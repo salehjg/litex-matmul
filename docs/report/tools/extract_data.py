@@ -19,6 +19,7 @@ import statistics
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "flow"))
+from gemmflow.config import BuildCfg, ConfigError  # noqa: E402
 from gemmflow.numeric import NumericError, resolve  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -93,11 +94,16 @@ def builds():
         wns = clock_wns(os.path.join(d, "gateware"))
         c = s["config"]
         k = c["kernel"]
-        try:
-            dtype = resolve(k["data_type"], k.get("data_bits"), k.get("frac_bits")).spec
-        except NumericError:
-            dtype = k["data_type"]
-        out[s["config_hash"][:8]] = dict(dtype=dtype,
+        mixed = False
+        try:  # the full format: mixed builds (kernels/gemm_mixed) are e.g. int8xdshift3-int32
+            bc = BuildCfg.from_dict(c)
+            dtype, mixed = bc.numeric().spec, bc.is_mixed()
+        except (ConfigError, NumericError):
+            try:
+                dtype = resolve(k["data_type"], k.get("data_bits"), k.get("frac_bits")).spec
+            except NumericError:
+                dtype = k["data_type"]
+        out[s["config_hash"][:8]] = dict(dtype=dtype, mixed=mixed,
             id=s["config_hash"][:8], build_id=s["build_id"], cfg=c, k=c["kernel"],
             mhz=c["clocks"]["accel_mhz"], preset=c["vivado"]["preset"],
             map="".join(c["memory_map"][m][-1] for m in "abc"),
@@ -368,6 +374,7 @@ def main():
           "memory waits in % of kernel cycles (r_wait: kernel ready, no data) and avg read latency (cycles)")
 
     formats(B, runs, all_runs(("ok", "verify_failed")))
+    ds_speedup(B, runs)
 
 
 # Integer and fixed-point formats (docs/notes2) ---------------------------------------------------------------------
@@ -375,7 +382,13 @@ def main():
 # Builds of the formats section that need a word in the appendix table.
 FORMAT_NOTES = {"c0ddddde": "DDR read errors (0 after tuning)", "032f4a87": "DDR read errors (0 after tuning)",
                 "a0f95453": "tile rule 1: wrong C then hang", "f3c7b241": "PCIe 250 MHz path",
-                "e61e6845": "default preset"}
+                "e61e6845": "default preset",
+                # DenseShift (docs/notes3)
+                "8a1d78a1": "PCIe 250 MHz path", "59e14e0c": "congestion (BRAM 868.5 of 955)",
+                "612e98d2": "dataflow control"}
+# DenseShift builds that stopped before a summary was written (build dir prefix -> note).
+DS_UNFINISHED = {"f32xds3c32_pe48x16_t384x1024_200mhz_tA-736d2251": "too many LUTs (303.1k of 298.6k)",
+                 "f32xds3c32_pe40x16_t320x1024_200mhz_tA-36011712": "Vivado stopped (host memory)"}
 
 
 def formats(B, runs, runs_any):
@@ -410,17 +423,74 @@ def formats(B, runs, runs_any):
     # Every non-float build, formatted for the appendix table.
     def fm(v, nd):
         return "--" if v is None else f"{v:.{nd}f}"
-    rows = []
-    for h, b in sorted(((h, b) for h, b in B.items() if b["dtype"] != "float32"),
-                       key=lambda kv: (kv[1]["dtype"].lstrip("u"), kv[1]["k"]["parallelism_n"] * kv[1]["k"]["parallelism_m"],
-                                       kv[1]["mhz"], kv[1]["preset"], kv[1]["build_id"])):
-        g = max((r["gflops"] for r in runs_by(runs_any, h)), default=None)
-        rows.append([f"{b['dtype']} {label(b)}", "yes" if b["met"] else "no", fm(b["wns_accel"], 3), fm(b["wns"], 3),
-                     fm(b["lut"] and b["lut"] / 1000, 1), fm(b["bram"], 1), fm(b["dsp"], 0), fm(b["build_min"], 0),
-                     fm(g, 1), fm(pct(g, b["peak"]) if g else None, 1), FORMAT_NOTES.get(h, "")])
-    write("formats_builds_table.csv", ["label", "met", "wns_accel", "wns", "lut_k", "bram", "dsp", "build_min", "gops",
-                                       "pct", "note"], rows,
+    def table_rows(sel):
+        rows = []
+        for h, b in sorted(((h, b) for h, b in B.items() if sel(b)),
+                           key=lambda kv: (kv[1]["dtype"].lstrip("u"),
+                                           kv[1]["k"]["parallelism_n"] * kv[1]["k"]["parallelism_m"],
+                                           kv[1]["mhz"], kv[1]["preset"], kv[1]["build_id"])):
+            g = max((r["gflops"] for r in runs_by(runs_any, h)), default=None)
+            rows.append([f"{b['dtype']} {label(b)}", "yes" if b["met"] else "no", fm(b["wns_accel"], 3),
+                         fm(b["wns"], 3), fm(b["lut"] and b["lut"] / 1000, 1), fm(b["bram"], 1), fm(b["dsp"], 0),
+                         fm(b["build_min"], 0), fm(g, 1), fm(pct(g, b["peak"]) if g else None, 1),
+                         FORMAT_NOTES.get(h, "")])
+        return rows
+    header = ["label", "met", "wns_accel", "wns", "lut_k", "bram", "dsp", "build_min", "gops", "pct", "note"]
+    write("formats_builds_table.csv", header, table_rows(lambda b: b["dtype"] != "float32" and not b["mixed"]),
           "every integer/fixed-point Vivado build: timing (ns), resources, best GOP/s (rows with DDR read errors included)")
+
+    # Mixed-type builds (kernels/gemm_mixed, DenseShift), plus the ones that stopped before their summary.
+    rows = table_rows(lambda b: b["mixed"])
+    for d, note in DS_UNFINISHED.items():
+        try:
+            c = json.load(open(os.path.join(SOC, d, "config.json")))
+        except OSError:
+            continue
+        bc = BuildCfg.from_dict(c)
+        b = dict(k=c["kernel"], mhz=c["clocks"]["accel_mhz"], preset=c["vivado"]["preset"],
+                 map="".join(c["memory_map"][m][-1] for m in "abc"))
+        rows.append([f"{bc.numeric().spec} {label(b)}", "--"] + ["--"] * 8 + [note])
+    write("ds_builds_table.csv", header, rows,
+          "every mixed-type (DenseShift) Vivado build: timing (ns), resources, best GOP/s; unfinished builds last")
+
+
+# DenseShift against float x float (docs/notes3): results/ds_baseline/, every build run in one session. The baseline
+# at each size is the fastest float32 x float32 build there (PE 32x8 225 MHz aggressive); each other format is
+# represented by its fastest build (by the 8192^3 median), whatever its array, tile, clock or preset.
+DS_LABELS = {"float32": "float32 x float32 (multiply-add)", "float32xdshift3-float32": "float32 x dshift3 -> float32",
+             "uint8xdshift3-int32": "uint8 x dshift3 -> int32", "int8xdshift3-int32": "int8 x dshift3 -> int32",
+             "int8xdshift3-int16": "int8 x dshift3 -> int16", "int8xint8-int32": "int8 x int8 -> int32 (multiply)"}
+SIZES = (1024, 4096, 8192)
+
+
+def ds_speedup(B, runs):
+    rs = [r for r in runs if r["_campaign"] == "ds_baseline"]
+    if not rs:
+        return
+
+    def med(h, n):
+        g = [r["gflops"] for r in runs_by(rs, h) if r["n"] == n]
+        return statistics.median(g) if g else None
+    by_dtype = collections.defaultdict(set)
+    for r in rs:
+        by_dtype[r["dtype"]].add(r["config_hash"][:8])
+    pick = {dt: max(hs, key=lambda h: med(h, 8192) or 0) for dt, hs in by_dtype.items()}
+    base = {n: max(med(h, n) or 0 for h in by_dtype["float32"]) for n in SIZES}
+    rows = []
+    for i, dt in enumerate(dt for dt in DS_LABELS if dt in pick):
+        h = pick[dt]
+        b, k = B[h], B[h]["k"]
+        g = {n: med(h, n) for n in SIZES}
+        rows.append([i, DS_LABELS[dt], f"{k['parallelism_n']}x{k['parallelism_m']}",
+                     k["parallelism_n"] * k["parallelism_m"], b["mhz"], b["preset"], b["dsp"], b["lut"] / 1000,
+                     b["bram"], b["peak"], g[1024], g[4096], g[8192], pct(g[8192], b["peak"]) if g[8192] else None,
+                     *(g[n] / base[n] if g[n] and base[n] else None for n in SIZES),
+                     sum(r["verify_bad"] for r in runs_by(rs, h)), len(runs_by(rs, h)), b["build_id"]])
+    write("ds_speedup.csv", ["i", "format", "pe", "macs", "mhz", "preset", "dsp", "lut_k", "bram", "peak", "g1024",
+                             "g4096", "g8192", "pct8192", "sp1024", "sp4096", "sp8192", "verify_bad", "runs",
+                             "build_id"], rows,
+          "fastest build per format against the fastest float32 x float32 build at each size (results/ds_baseline,"
+          " median GOP/s of 2 runs); speedup = GOP/s ratio at the same size")
 
 
 if __name__ == "__main__":

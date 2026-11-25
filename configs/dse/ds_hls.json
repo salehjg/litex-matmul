@@ -1,0 +1,29 @@
+{
+  "campaign": "ds_hls",
+  "comment": "docs/notes3 Part C1: kernels/gemm_mixed in HLS. DenseShift MAC (C += +-(A << e)) vs multiply (int8 x int8) at PE 32x32 with int8 activations and int32 sums; 2/3/4-bit codes; int16 sums; unsigned activations (after ReLU); PE 32x16 and 32x64. Questions: LUT/FF/DSP per MAC of shift vs multiply, the BRAM cost of int32/int16 C buffers, HLS clock estimates. sim = the gemm_mixed testbench (exact).",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@point": [
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 32, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 1024,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 32},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 32, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 1024,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "int", "kernel.b_bits": 8, "kernel.accum_bits": 32},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 32, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 1024,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 2, "kernel.accum_bits": 32},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 32, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 1024,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 4, "kernel.accum_bits": 32},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 32, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 1024,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 16},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 32, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 1024,
+       "kernel.data_type": "uint", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 32},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 16, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 1024,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 32},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 64, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 2048,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 16},
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 64, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 2048,
+       "kernel.data_type": "int", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 32}
+    ]
+  },
+  "stages": ["sim", "hls"],
+  "jobs": {"hls": 2}
+}

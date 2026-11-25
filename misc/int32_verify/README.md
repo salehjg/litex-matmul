@@ -1,5 +1,8 @@
 # int32_verify — wrong results under load: DDR3 read-capture margin (root cause found 2026-11-24 08:10)
 
+Summary of the problem, the workaround and the fix options: [docs/problems/ddr-read-bit-flips.md](../../docs/problems/ddr-read-bit-flips.md).
+This file is the investigation log.
+
 **Root cause:** single-bit read errors on a few DDR3 data lines when the FPGA core is busy, not a kernel problem.
 - CH0 byte lane 0, DQ4–6 (mostly DQ5). CH1 lanes 0/1/3, DQ5–7.
 - Almost always on the odd beats of the burst.

@@ -1,0 +1,219 @@
+/// @author    Johannes de Fine Licht (definelicht@inf.ethz.ch)
+/// @copyright This software is copyrighted under the BSD 3-Clause License. 
+
+#pragma once
+
+#include <type_traits>
+#include "Config.h"
+#include "hlslib/xilinx/DataPack.h"
+#include "hlslib/xilinx/Resource.h"
+#include "hlslib/xilinx/Stream.h"
+
+#ifdef HLSLIB_SYNTHESIS
+// litex-matmul: Vitis HLS 2026.1 cannot disaggregate arrays of hlslib::Stream objects (HLS 214-177 "unresolved Phi
+// node" on aSplit/aPipes/bPipes), so synthesis uses the native hls::stream (hls::stream<T, N> derives from
+// hls::stream<T>, so Stream<T>& parameters still bind). Simulation keeps hlslib's threaded stream.
+template <typename T, size_t depth = 0>
+using Stream = hls::stream<T, int(depth)>;
+#else
+using hlslib::Stream;
+#endif
+
+constexpr int kSeed = 5; // For initializing matrices for testing
+constexpr unsigned kPipeDepth = kPipeDepthCfg;  // litex-matmul: from the config (upstream: 4)
+
+// litex-matmul (kernels/gemm_mixed): A packs hold DataA_t, B packs DataB_t, C packs DataC_t (Config.h). B and C
+// have separate memory widths (kMemoryWidthM, kMemoryWidthC).
+
+// Memory bus in K-dimension (A, not transposed)
+constexpr int kMemoryWidthK = kMemoryWidthBytesK / sizeof(DataA_t);
+static_assert(kMemoryWidthBytesK % sizeof(DataA_t) == 0,
+              "Memory width in K not divisable by size of data type.");
+using MemoryPackK_t = hlslib::DataPack<DataA_t, kMemoryWidthK>;
+
+// Memory bus in M-dimension (B)
+constexpr int kMemoryWidthM = kMemoryWidthBytesM / sizeof(DataB_t);
+static_assert(kMemoryWidthBytesM % sizeof(DataB_t) == 0,
+              "Memory width in M not divisable by size of data type.");
+using MemoryPackM_t = hlslib::DataPack<DataB_t, kMemoryWidthM>;
+
+// Memory bus of C (M-dimension)
+constexpr int kMemoryWidthC = kMemoryWidthBytesC / sizeof(DataC_t);
+static_assert(kMemoryWidthBytesC % sizeof(DataC_t) == 0,
+              "Memory width of C not divisable by size of data type.");
+using MemoryPackC_t = hlslib::DataPack<DataC_t, kMemoryWidthC>;
+
+// Internal compute buses
+using ComputePackN_t = hlslib::DataPack<DataA_t, kComputeTileSizeN>;
+using ComputePackM_t = hlslib::DataPack<DataB_t, kComputeTileSizeM>;
+using ComputePackC_t = hlslib::DataPack<DataC_t, kComputeTileSizeM>;
+using OutputPack_t = ComputePackC_t;
+
+// C memory words per compute pack (> 1 when PM lanes of DataC_t are wider than a memory word) and compute packs per
+// memory word (> 1 when narrower). One of them is 1.
+constexpr int kCWordsPerPack =
+    (kComputeTileSizeM > kMemoryWidthC) ? kComputeTileSizeM / kMemoryWidthC : 1;
+constexpr int kCPacksPerWord =
+    (kMemoryWidthC > kComputeTileSizeM) ? kMemoryWidthC / kComputeTileSizeM : 1;
+static_assert(kCWordsPerPack * kMemoryWidthC == kComputeTileSizeM * kCPacksPerWord,
+              "parallelism_m and the C memory width must divide one another.");
+
+#ifndef MM_TRANSPOSED_A
+
+// On-chip transpose of A
+constexpr int kTransposeWidth = kTransposeWidthBytes / sizeof(DataA_t);
+static_assert(kTransposeWidthBytes % sizeof(DataA_t) == 0,
+              "Transpose width must be divisable by data size.");
+static_assert(kTransposeWidthBytes % kMemoryWidthBytesK == 0,
+              "Transpose width must be divisable by memory port width.");
+
+using MemoryPackA_t = MemoryPackK_t;
+constexpr decltype(kMemoryWidthK) kMemoryWidthA = kMemoryWidthK;
+
+#else // MM_TRANSPOSED_A
+
+// Memory bus in N-dimension (for transposed A)
+constexpr int kMemoryWidthN = kMemoryWidthBytesN / sizeof(DataA_t);
+static_assert(kMemoryWidthBytesN % sizeof(DataA_t) == 0,
+              "Memory width in N not divisable by size of data type.");
+using MemoryPackN_t = hlslib::DataPack<DataA_t, kMemoryWidthN>;
+using MemoryPackA_t = MemoryPackN_t;
+constexpr decltype(kMemoryWidthN) kMemoryWidthA = kMemoryWidthN;
+
+constexpr unsigned long kOuterTileSizeNMemory = kOuterTileSizeN / kMemoryWidthN;
+static_assert(
+    kOuterTileSizeN % kMemoryWidthN == 0,
+    "Outer memory tile size in N must be divisable by memory port width.");
+
+inline unsigned SizeNMemory(unsigned n) {
+  #pragma HLS INLINE
+  return n / kMemoryWidthN;
+}
+
+#endif // MM_TRANSPOSED_A
+
+constexpr unsigned long kOuterTileSizeMMemory = kOuterTileSizeM / kMemoryWidthM;
+constexpr unsigned long kOuterTileSizeCMemory = kOuterTileSizeM / kMemoryWidthC;
+static_assert(kOuterTileSizeM % kMemoryWidthC == 0,
+              "Outer memory tile size in M must be divisable by the C memory width.");
+
+// litex-matmul: stream depths from the config, 0 = upstream default.
+constexpr unsigned long kASplitDepth =
+    (kASplitDepthCfg > 0) ? kASplitDepthCfg : 2 * kOuterTileSizeN;
+constexpr unsigned long kBMemoryDepth =
+    (kBMemoryDepthCfg > 0) ? kBMemoryDepthCfg : 2 * kOuterTileSizeMMemory;
+constexpr unsigned long kCMemoryDepth =
+    (kCMemoryDepthCfg > 0) ? kCMemoryDepthCfg : 2 * kOuterTileSizeCMemory;
+
+// litex-matmul: HLS pragmas built from macros (two-level stringify so the macros expand first).
+#define MM_STR(x) #x
+#define MM_XSTR(x) MM_STR(x)
+#define MM_PRAGMA(x) _Pragma(MM_XSTR(x))
+static_assert(
+    kOuterTileSizeM % kMemoryWidthM == 0,
+    "Outer memory tile size in M must be divisable by memory port width.");
+
+constexpr unsigned long kInnerTilesN = kOuterTileSizeN / kInnerTileSizeN;
+static_assert(kOuterTileSizeN % kInnerTileSizeN == 0,
+              "Outer tile size must be divisable by the inner tile size.");
+
+constexpr unsigned long kInnerTilesM = kOuterTileSizeM / kComputeTileSizeM;
+static_assert(kOuterTileSizeM % kComputeTileSizeM == 0,
+              "Outer tile size must be divisable by compute tile size in M.");
+
+constexpr unsigned long kComputeTilesN = kInnerTileSizeN / kComputeTileSizeN;
+static_assert(kInnerTileSizeN % kComputeTileSizeN == 0,
+              "Inner tile size must be divisable by compute tile size.");
+
+#ifndef MM_DYNAMIC_SIZES
+
+static_assert(kSizeK % kMemoryWidthK == 0,
+              "K must be divisable by memory width.");
+
+#ifndef MM_TRANSPOSED_A
+
+static_assert(kSizeK % kTransposeWidth == 0,
+              "K must be divisable by the transpose width.");
+
+#endif
+
+#endif
+
+inline unsigned SizeKMemory(unsigned k) {
+  #pragma HLS INLINE
+  return k / kMemoryWidthK;
+}
+
+inline unsigned SizeMMemory(unsigned m) {
+  #pragma HLS INLINE
+  return m / kMemoryWidthM;
+}
+
+inline unsigned SizeCMemory(unsigned m) {
+  #pragma HLS INLINE
+  return m / kMemoryWidthC;
+}
+
+inline unsigned OuterTilesN(unsigned n) {
+  #pragma HLS INLINE
+  return (n + kOuterTileSizeN - 1) / kOuterTileSizeN;
+}
+
+inline unsigned OuterTilesM(unsigned m) {
+  #pragma HLS INLINE
+  return (m + kOuterTileSizeM - 1) / kOuterTileSizeM;
+}
+
+inline unsigned long TotalReadsFromA(const unsigned size_n,
+                                     const unsigned size_k,
+                                     const unsigned size_m) {
+  #pragma HLS INLINE
+  return static_cast<unsigned long>(OuterTilesN(size_n)) * OuterTilesM(size_m) *
+         kOuterTileSizeN * size_k;
+}
+
+inline unsigned long TotalReadsFromB(const unsigned size_n,
+                                     const unsigned size_k,
+                                     const unsigned size_m) {
+  #pragma HLS INLINE
+  return static_cast<unsigned long>(OuterTilesN(size_n)) * OuterTilesM(size_m) *
+         kOuterTileSizeM * size_k;
+}
+
+template <typename T,
+          class = typename std::enable_if<std::is_integral<T>::value, T>::type>
+constexpr T PowerOfTwo(T number, unsigned char power) {
+  return (number > 0) ? PowerOfTwo(number >> 1, power + 1) : (1 << (power - 1));
+}
+
+#ifdef MM_ADD_RESOURCE
+#define MM_ADD_RESOURCE_PRAGMA(var)                                 \
+  HLSLIB_RESOURCE_PRAGMA(var, MM_ADD_RESOURCE)
+#else
+#define MM_ADD_RESOURCE_PRAGMA(var)
+#endif
+
+#ifdef MM_MULT_RESOURCE
+#define MM_MULT_RESOURCE_PRAGMA(var)                                 \
+  HLSLIB_RESOURCE_PRAGMA(var, MM_MULT_RESOURCE)
+#else
+#define MM_MULT_RESOURCE_PRAGMA(var)
+#endif
+
+extern "C" {
+
+#ifdef MM_TRANSPOSED_A
+void MatrixMultiplicationKernel(MemoryPackN_t const a[],
+                                MemoryPackM_t const b[], MemoryPackC_t c[]
+#else
+void MatrixMultiplicationKernel(MemoryPackK_t const a[],
+                                MemoryPackM_t const b[], MemoryPackC_t c[]
+#endif
+#ifdef MM_DYNAMIC_SIZES
+                                ,
+                                const unsigned size_n, const unsigned size_k,
+                                const unsigned size_m
+#endif
+);
+
+}

@@ -1,0 +1,306 @@
+\section{DenseShift: power-of-two weights}
+\label{sec:ds}
+
+The integer formats of \cref{sec:formats} kept one type for A, B, C and the sum, so they measure hardware cost but are
+not what a quantised network computes. This section implements DenseShift~\cite{denseshift}, a low-bit
+power-of-two weight format, end to end: training in PyTorch, a kernel with separate operand types and a shift
+instead of a multiplier, builds on the card, and a small network whose layers run on the accelerator and give the
+same predictions as the CPU. The work was developed on the git branch \code{denseshift} (merged into \code{main}); the dated record is in
+\file{docs/notes3/}.
+
+\subsection{The method}
+\label{sec:ds:method}
+An \(n\)-bit DenseShift weight is \(w = s\cdot 2^{p}\) with a sign \(s = \pm 1\) and an exponent
+\(p \in \{0,\dots,2^{n-1}-1\}\). Unlike earlier shift networks it has no zero, so all \(2^n\) codes carry a value:
+2 bits give \(\{\pm1,\pm2\}\), 3 bits \(\{\pm1,\pm2,\pm4,\pm8\}\). The paper's three claims for hardware and training:
+\begin{itemize}
+  \item \textbf{No multiplier, no zero test.} With integer activations a MAC is \(c \mathrel{+}= \pm(x \ll p)\); without
+        a zero weight the branch that shift networks need for \(w = 0\) disappears (Fig.~3 of the paper).
+  \item \textbf{Float activations.} \(x\cdot(\pm 2^p)\) for a float \(x\) is an integer addition of \(p\) to the exponent
+        field plus a sign flip (Eq.~2 of the paper), so even float networks need no multiplier.
+  \item \textbf{Training.} The sign-scale decomposition writes \(w = (2H(w_s) - 1)\,2^{S_T}\) with
+        \(S_0 = 0,\ S_t = H(w_t)(S_{t-1}+1)\), \(t = 1\dots T\), \(T = 2^{n-1}-1\) and the Heaviside step \(H\); each
+        weight is trained through \(T+1\) float parameters with a straight-through estimator~\cite{s3shift}. The
+        gradient to \(w_s\) is rescaled by \(\sqrt{S_T+1}\) instead of \(2^{S_T}\) (Eq.~8), and all parameters start
+        from \(\mathcal N(0, 10^{-6})\) (``low-variance'' init).
+\end{itemize}
+The paper leaves some details to its released code, which was read for them: the forward value is \(s\,2^{S}\) and the
+backward goes through \(s\sqrt{S+1}\); \(H(0) = 0\), \(\mathrm{sign}(0) = +1\); the first convolution and the final
+fully connected layer stay float; there is no learned weight scale (BatchNorm after every convolution absorbs it).
+
+\subsection{Training in PyTorch}
+\label{sec:ds:train}
+PyTorch comes from the system Python (torch 2.15 with CUDA on an RTX 5060 Ti); the flow's virtual environment is left
+as it is, and the two exchange files. \file{ml/denseshift/denseshift.py} implements DenseShift linear and
+convolution layers for any \(n \ge 2\). A self-test checks that only \(\pm2^p\) values occur, that every code is
+reached, that the exported hardware codes decode to the trained weights, and that the 3-bit layer equals a
+transcription of the official layer in values \emph{and} gradients. ResNet-20 on CIFAR-10 is a small-scale check of
+the accuracy claim (the paper reports ImageNet), trained as in the official code: SGD 0.1, momentum 0.9, weight decay
+\(10^{-4}\), cosine schedule, 200 epochs, three seeds per configuration; float32, 3-bit and 4-bit were also trained
+for 400 epochs (\cref{tab:ds-cifar}; per-run data in \file{data/denseshift\_cifar.csv}).
+
+\begin{table}[ht]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{ResNet-20 on CIFAR-10, test accuracy at the end of training: mean (min--max) of seeds 0--2 at 200 epochs,
+  seed 0 at 400 epochs; first convolution and FC layer float. Weight shares: seed 0, 200 epochs. Exported codes
+  decoded into ordinary weights give the same accuracy in every run. Paper, ImageNet ResNet-18: float 69.6, 2-bit
+  68.90, 3-bit 70.62, 4-bit 70.94\,\%.}
+\label{tab:ds-cifar}
+\begin{tabular}{@{}lrrrl@{}}
+\toprule
+& \multicolumn{2}{c}{200 epochs, 3 seeds} & 400 epochs & \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-4}
+Weights & Accuracy, \% & vs.\ float & Accuracy, \% & Share of weights at \(|w| = 1, 2, 4, \dots\) \\
+\midrule
+float32 & 91.70 (91.56--91.85) & & 92.24 & \\
+DenseShift 2-bit & 91.06 (90.84--91.43) & \(-0.64\) & & 0.49 / 0.51 \\
+DenseShift 3-bit & 91.32 (91.10--91.47) & \(-0.38\) & 92.05 (\(-0.19\)) & 0.52 / 0.14 / 0.12 / 0.21 \\
+DenseShift 4-bit & 90.89 (90.63--91.25) & \(-0.81\) & 91.64 (\(-0.60\)) & 0.33 / 0.12 / 0.11 / 0.10 / 0.10 / 0.09 / 0.07 / 0.07 \\
+\midrule
+3-bit, Eq.~7 gradient & 91.22 (91.11--91.36) & \(-0.48\) & & 0.76 / 0.18 / 0.03 / 0.03 \\
+3-bit, Kaiming init & 90.23 (89.99--90.50) & \(-1.47\) & & 0.45 / 0.20 / 0.15 / 0.20 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+3-bit DenseShift is 0.4 points below float on average and 0.2 points at 400 epochs. The seed spread is up to
+0.6 points, so a single seed would not have settled any of the smaller differences: with seed 0 alone, 2-bit and
+4-bit looked equal. Unlike the paper's ImageNet results, 4-bit stays below 3-bit, and twice the epochs do not close
+the gap (both gain about 0.7 points), so slower training of its eight binary variables per weight is not the whole
+reason. Without the rescaled gradient (Eq.~7) most exponents stay at zero (76\,\% of the weights at \(\pm1\)), as the
+paper predicts, but the accuracy drops by only 0.1 point, within the seed spread (paper: 0.3--0.7). The low-variance
+initialisation is worth 1.1 points, on every seed, even when training from scratch. A second network, a multi-layer perceptron on
+MNIST with two DenseShift hidden layers (\(784 \to 1024 \to 1024 \to 10\)), BatchNorm and unsigned 8-bit activations
+learned with quantisation-aware training, reaches 98.65\,\% with float weights and 98.46/98.47/98.37\,\% with
+2/3/4-bit DenseShift weights. It is the network that runs on the card (\cref{sec:ds:e2e}).
+
+\subsection{A kernel with separate A, B and C types}
+\label{sec:ds:kernel}
+DenseShift needs what the single-type kernel cannot do: activations, weight codes and sums of different widths, and a
+shift in place of the multiplier. Because the HLS hash covers the whole kernel tree, the change went into a copy,
+\file{kernels/gemm\_mixed/}, so that every earlier build keeps its id; the flow picks the tree from the
+configuration (\code{kernel.b\_type}, \code{b\_bits}, \code{accum\_bits}, hashed only when set).
+\begin{itemize}
+  \item \code{DataA\_t}, \code{DataB\_t}, \code{DataC\_t} as \code{ap\_[u]int} types (A also \code{float}); B and C
+        get their own memory widths. 3-bit codes are stored in 4-bit lanes (128 per 512-bit word).
+  \item The MAC is a function chosen in \file{Config.h}: multiply (\(c + a\cdot b\) in exact widths) or DenseShift,
+        \(c + (s\,?\,-(a\ll e) : (a \ll e))\). Negating the narrow shifted term before one C-wide adder is 12\,\%
+        smaller (HLS estimate) than an adder, a subtractor and a multiplexer.
+  \item With 32-bit sums a PE's row of C (\(P_M\) lanes) is wider than a memory word, so the C path either splits a
+        row over several words, passes it through or gathers several rows, all in one pipelined loop.
+  \item A testbench draws codes over their full range and compares with an exact reference; 16 cases (every MAC,
+        signed and unsigned activations, 16- and 32-bit sums with wrap-around, all three C conversions, whole and
+        partial tiles, float activations) pass at two sizes each. The host runner gained \code{--b-dtype},
+        \code{--c-dtype} and file input/output of codes, with a model checked against \code{ap\_int} arithmetic.
+\end{itemize}
+
+\paragraph{C buffers in BRAM.} The first HLS run of int8\,\(\times\)\,3-bit\,\(\to\)\,int32 at PE 32\(\times\)32
+estimated 2002 BRAM18, more than the device has. Each PE's C buffer is 1024 bits wide and 512 deep. The utilisation of
+an earlier int8 build showed why it is expensive: HLS's default two-port RAM becomes true-dual-port blocks with 36-bit
+ports, which leave half of every BRAM36 empty at depth 512. The buffer needs only one write and one read port; bound as
+a simple dual-port RAM (\code{BIND\_STORAGE ram\_s2p}) it uses 72-bit blocks, and the built design has 14 RAMB36 +
+1 RAMB18 per PE instead of about 29. Even so, with 32-bit sums the C buffers are what limits the array size.
+
+\subsection{Shift against multiply on the card}
+\label{sec:ds:card}
+\Cref{tab:ds-same} compares the two MACs at one array with the same activation and sum widths. Both run at the same
+speed, as they must (same array, same schedule), and both are exact on the card.
+
+\begin{table}[ht]
+\centering\small
+\caption{int8 activations and int32 sums, PE 32\(\times\)32, tile 512\(\times\)1024, transposed A, 200\,MHz, both
+  meeting timing. HLS: estimates; Vivado: whole design after implementation; GOP/s at \(8192^3\), checked exactly
+  (4098 sampled entries per run).}
+\label{tab:ds-same}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{HLS} & \multicolumn{4}{c}{Vivado} & \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-7}
+B (weights), MAC & DSP & LUT & DSP & LUT & FF & BRAM & GOP/s \\
+\midrule
+int8, multiply & 1064 & 195.8k & 1064 & 167.5k & 259.4k & 638.5 & 375.45 \\
+DenseShift 3-bit, shift & 39 & 290.6k & 40 & 161.6k & 240.2k & 636.5 & 375.45 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+With a 32-bit sum HLS maps each 8-bit multiply and its add into one DSP48E1 (the single-type int8 kernel, whose
+product was cut to 8 bits, had its multipliers in LUTs). The shift MAC removes all 1024 of them. HLS estimated that it
+would cost 95k more LUTs instead; Vivado's implementation uses 5.9k \emph{fewer} LUTs and 19k fewer flip-flops (per
+PE: 3433 against 4026 LUTs). On this FPGA DenseShift therefore frees the DSPs at no cost in logic. The array cannot
+simply grow into them, because the 32-bit C buffers already use most of the BRAM (\cref{sec:ds:kernel}).
+
+\paragraph{Verification.} Every card run in this section compared 4098 entries per result (the sampled check: random
+entries plus corners) exactly with the host reference, after the DDR read taps were tuned under load (4088 bad words
+before, 0 after, in the first DenseShift bring-up). The MNIST runs (\cref{sec:ds:e2e}) compared every one of the
+\(2\times10.24\) million sums. The full screens that the other formats received (\(2\times2048^3\), every entry) were
+queued for the seven DenseShift builds that met timing but did not run: the job was stopped, together with the float
+PE 40\(\times\)16 build before it, when the host ran low on memory.
+
+\subsection{End to end: an MNIST network on the card}
+\label{sec:ds:e2e}
+\file{ml/denseshift/mlp\_mnist.py} exports the MLP as an integer pipeline: activation codes \(\times\) DenseShift codes
+give exact int32 sums; BatchNorm and the activation scale fold into a per-channel \(a, b\), and the next layer's codes
+are \(\mathrm{clip}(\mathrm{rint}((c\,a + b)/s), 0, q_{\max})\). Evaluated on the CPU this pipeline has the same test
+accuracy as the PyTorch model. On the card, both hidden layers run as GEMMs over all 10\,000 test images, once with
+uint8 activation codes on a uint8\,\(\times\)\,3-bit build (same array; its default-preset build missed timing by
+6\,ps on the PCIe user clock, the \code{explore} preset closed it) and once with codes 0..127 on the signed int8 build
+of \cref{tab:ds-same}:
+\begin{itemize}
+  \item layer 1, \(10048\times832\times1024\) (padded): 52.6\,ms, 325.6\,GOP/s; layer 2,
+        \(10048\times1024\times1024\): 63.2\,ms, 333.7\,GOP/s;
+  \item in both variants 0 of 10\,240\,000 sums differ from the CPU in either layer; the test accuracy computed from
+        the card's sums is 98.47\,\% (uint8) and 98.48\,\% (0..127), equal to PyTorch, and every prediction equals
+        the CPU pipeline's.
+\end{itemize}
+
+\subsection{Float activations without a multiplier}
+\label{sec:ds:float}
+The paper's second deployment mode keeps the activations in float. Multiplying a float by \(\pm2^p\) adds \(p\) to its
+8-bit exponent field and flips its sign bit; a zero or denormal input gives a signed zero. In the kernel this replaces
+the float multiply (three DSP48E1 in the float32 builds) by a small integer adder, so a MAC is one float add, about two
+DSPs. The result is exactly \(a\cdot w\) for every normal input that does not overflow (\(|a| < 2^{120}\) for 4-bit
+codes), so the card's sums are checked bit for bit against float sums in the kernel's \(k\) order.
+
+\begin{itemize}
+  \item PE 32\(\times\)16, tile 512\(\times\)512, 200\,MHz: timing met, 202.5k LUT, 1063 DSP, 427.5 BRAM tiles;
+        179.4, 187.6 and \textbf{189.1\,GOP/s} at \(1024^3\), \(4096^3\) and \(8192^3\) (92.3\,\% of 204.8),
+        all exact. The fastest float32\,\(\times\)\,float32 build (PE 32\(\times\)8, 225\,MHz, 1320 DSP) reaches
+        110.9\,GFLOP/s: DenseShift weights give 1.71\(\times\) the throughput with fewer DSPs
+        (\cref{sec:ds:speedup}).
+  \item PE 48\(\times\)16 (768 MACs, 1793 DSP) synthesised but needed 303\,086 LUTs of 298\,600: with the
+        multiplier gone, the float adders' LUTs set the limit.
+  \item PE 40\(\times\)16 (640 MACs, tile 320\(\times\)1024; HLS estimate 1505 DSP, 407k LUT) was in Vivado
+        implementation when the job was stopped for lack of host memory; it has not been built.
+\end{itemize}
+
+\subsection{Larger arrays}
+\label{sec:ds:scale}
+Without multipliers, the C buffers and the routing set the size. Three builds tested the limits (int8 activations,
+3-bit weights, 200\,MHz unless stated):
+\begin{itemize}
+  \item \textbf{PE 32\(\times\)64 with int16 sums} (2048 MACs; the multiply MAC would need 2048 DSPs, more than the
+        device's 1920): timing met, 190.3k LUT, 638 BRAM tiles, 40 DSP; \textbf{750.9\,GOP/s} at \(8192^3\)
+        (91.7\,\%), exact. Sums wrap at 16 bits, so this suits layers whose sums fit, or a host that splits \(K\).
+  \item \textbf{PE 48\(\times\)32 with int32 sums} (tile 384\(\times\)2048): 91\,\% of the BRAM tiles and
+        76\,\% of the LUTs; the spread-out placement failed timing by 2.5\,ns (a PE's A register to its shift lanes,
+        95\,\% routing), and the SoC and PCIe clocks failed too.
+  \item \textbf{PE 32\(\times\)32 at 250\,MHz}: failed by 0.93\,ns in the HLS dataflow control
+        (\code{ap\_sync}/\code{ap\_ready} fan-out), the limit already met by the large int4 arrays
+        (\cref{sec:formats:wide}), not in the MAC.
+\end{itemize}
+With int32 sums, PE 32\(\times\)32 at 200\,MHz is therefore the practical DenseShift array on this device; its
+value is the freed DSPs and smaller logic rather than a larger array. Narrower C buffers than the C bus (for example
+24-bit sums) would be the next step for larger int32-class arrays.
+
+\subsection{Speedup against float32 \texorpdfstring{\(\times\)}{x} float32}
+\label{sec:ds:speedup}
+The reference for every DenseShift result is the fastest float32\,\(\times\)\,float32 GEMM on the unchanged kernel:
+PE 32\(\times\)8, tile 1024\(\times\)512, transposed A, 225\,MHz with the \code{aggressive} preset
+(\gflops{110.9}, the best float32 result of \cref{sec:eval}, and the fastest float32 build at every size). A float
+MAC costs about five DSP48E1 (three for the multiply, two for the add), so twice the array would need about 2600 of
+the 1920 DSPs. Each DenseShift format is represented by its fastest build, whatever its array, tile, clock or preset;
+each had exactly one build that met timing (\cref{tab:ds-builds}). All builds of \cref{tab:ds-speedup} ran in one
+session (\file{results/ds\_baseline/}, run only, the same bring-up with DDR taps tuned under load for each),
+\(1024^3\) to \(8192^3\), every run checked exactly.
+
+\begin{table}[ht]
+\centering\small\setlength{\tabcolsep}{4pt}
+\caption{Fastest build of each format against the fastest float32\,\(\times\)\,float32 build, random GEMMs on the
+  card (\file{data/ds\_speedup.csv}). Speedup = throughput ratio at the same size, median of two runs. The uint8
+  build uses the \code{explore} preset, the int8 builds the default one.}
+\label{tab:ds-speedup}
+\begin{tabular}{@{}llrrrrrr@{}}
+\toprule
+& & & & & \multicolumn{3}{c}{Speedup} \\
+\cmidrule(lr){6-8}
+A \(\times\) B \(\to\) C & Array, clock & MACs & DSP & GOP/s \(8192^3\) & \(1024^3\) & \(4096^3\) & \(8192^3\) \\
+\midrule
+float32 \(\times\) float32 & PE 32\(\times\)8, 225\,MHz, aggr. & 256 & 1320 & 110.86 & 1 & 1 & 1 \\
+\midrule
+float32 \(\times\) 3-bit \(\to\) float32 & PE 32\(\times\)16, 200\,MHz & 512 & 1063 & 189.10 & 1.67 & 1.70 & \textbf{1.71} \\
+int8, uint8 \(\times\) 3-bit \(\to\) int32 & PE 32\(\times\)32, 200\,MHz & 1024 & 40 & 375.45 & 3.15 & 3.35 & \textbf{3.39} \\
+int8 \(\times\) 3-bit \(\to\) int16 & PE 32\(\times\)64, 200\,MHz & 2048 & 40 & 750.91 & 3.33 & 6.70 & \textbf{6.77} \\
+\midrule
+int8 \(\times\) int8 \(\to\) int32 (multiply) & PE 32\(\times\)32, 200\,MHz & 1024 & 1064 & 375.45 & 3.15 & 3.35 & 3.39 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The speedup is the array size the DSP budget allows: with float activations the exponent add frees the multiplier's
+three DSPs, so twice the MACs fit (1063 DSPs for 512 MACs); with integer activations no DSP is left in the MAC and
+the array grows until the C buffers (int32 sums) or the LUTs set the limit. The DenseShift builds run at 200\,MHz
+(250\,MHz failed, 225\,MHz was not tried), so part of the larger array is spent against the float kernel's higher
+clock; at an equal 200\,MHz the float kernel reaches \gflops{98.6} and the speedups are 1.92, 3.81 and
+7.62\(\times\). The per-cycle efficiency is about the same everywhere (92--96\,\% of peak at \(8192^3\)). At
+\(1024^3\) the PE 32\(\times\)64 build fills only half of its 2048-wide tile, hence 3.33\(\times\). The
+int8\,\(\times\)\,int8 row shows that an integer multiply MAC at the same array is as fast; DenseShift's gain over it
+is the 1024 DSPs it does not use (\cref{tab:ds-same}).
+
+\paragraph{The MNIST network.} The same MLP was also trained with float activations (input pixel/255,
+\(h = \max(0, c\,a + b)\), no quantisation): with float weights it is the float32\,\(\times\)\,float32 baseline
+(98.60\,\%), run on the fastest float32 build; with 3-bit DenseShift weights it runs on the float32\,\(\times\)\,3-bit
+build (98.40\,\%). The runner reads and writes float32 files for this. \Cref{tab:ds-mnist} times both hidden layers
+over the 10\,000 test images; in every run all \(2\times10.24\) million sums equal the CPU's, the float ones bit for
+bit against float32 sums in the kernel's \(k\) order.
+
+\begin{table}[ht]
+\centering\small\setlength{\tabcolsep}{4pt}
+\caption{MNIST MLP hidden layers on the card (\file{data/denseshift\_mnist\_card.csv}), median of three runs.
+  Kernel: both layers; end to end: A and B to the card, kernel, C back. Speedup against float32\,\(\times\)\,float32
+  on the fastest float32 build.}
+\label{tab:ds-mnist}
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+Activations \(\times\) weights & Build & Accuracy & Kernel ms & End to end ms & \multicolumn{2}{c}{Speedup} \\
+\cmidrule(lr){6-7}
+& & & & & kernel & e2e \\
+\midrule
+float32 \(\times\) float32 & PE 32\(\times\)8, 225\,MHz & 98.60\,\% & 353.1 & 515.1 & 1 & 1 \\
+float32 \(\times\) 3-bit & PE 32\(\times\)16, 200\,MHz & 98.40\,\% & 212.7 & 367.7 & \textbf{1.66} & 1.40 \\
+uint8 \(\times\) 3-bit & PE 32\(\times\)32, 200\,MHz & 98.47\,\% & 115.7 & 204.9 & \textbf{3.05} & 2.51 \\
+0..127 \(\times\) 3-bit & PE 32\(\times\)32 (int8), 200\,MHz & 98.48\,\% & 115.7 & 204.9 & 3.05 & 2.51 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Per layer, uint8\,\(\times\)\,3-bit is 2.93\(\times\) (layer 1) and 3.15\(\times\) (layer 2) faster in the kernel.
+Layer 2 (\(K = M = 1024\)) matches the \(1024^3\) GEMM; layer 1 also pads \(K\) from 784 to 832 for the integer
+build's 64-element words. End to end the gain is smaller because the transfers shrink less than the compute: C comes
+back as four-byte values in every format (\(2\times41\)\,MB), and only A and B get smaller (one byte per uint8 code,
+half a byte per 3-bit code, against four).
+
+\paragraph{Convolutions.} The DenseShift convolutions of \cref{sec:ds:train} have their float32 baseline in
+accuracy (\cref{tab:ds-cifar}), but no convolution has run on the card in either format. As GEMMs (im2col on the
+host) ResNet-20's layers have only 16--64 output channels, the GEMM's \(M\), while this kernel's tile is at least
+\(P_N P_M \ge 256\) wide (\cref{sec:formats:tiles}), so they would use a few per cent of either array; wider layers
+or a kernel with a narrower tile would be needed for a meaningful speedup.
+
+\subsection{Campaigns}
+\label{sec:ds:campaigns}
+\Cref{tab:ds-campaigns} lists the DenseShift campaigns of 25 November 2026; every build with its timing and resources
+is in \cref{tab:ds-builds} (appendix). The 21 CIFAR-10 trainings (8--39 minutes each, 5.3 GPU hours in all) ran
+alongside them.
+
+\begin{table}[ht]
+\centering\small
+\caption{DenseShift campaigns, 25 November 2026 (\file{data/campaigns.csv}; \code{ds\_baseline}: a
+  \code{gemm\_run.py} session, \file{results/ds\_baseline/}). Builds: completed Vivado runs (PE
+  48\(\times\)16 in \code{ds\_float} stopped at the LUT check before placement); runs: card result rows.}
+\label{tab:ds-campaigns}
+\begin{tabular}{@{}lllrrrl@{}}
+\toprule
+Campaign & Time & Stages & Points & Builds & Runs & Question \\
+\midrule
+\code{ds\_hls} & 02:02--02:30 & sim, hls & 9 & -- & -- & which mixed formats fit, at what cost? \\
+\code{ds\_same\_array} & 02:38--04:02 & all & 3 & 3 & 12 & shift against multiply at one array \\
+\code{ds\_float} & 04:04--04:59 & all & 2 & 1 & 6 & float activations \\
+\code{ds\_u8} & 04:59--05:31 & all & 1 & 1 & 6 & uint8 activations (\code{explore} rebuild) \\
+\code{ds\_scale} & 05:31--07:53 & all & 3 & 3 & 6 & larger arrays, 250\,MHz \\
+\code{ds\_float2} & from 07:53 & all & 1 & 0 & 0 & float PE 40\(\times\)16 (stopped) \\
+\code{ds\_baseline} & 10:32--10:42 & run & 7 & -- & 42 & against float32\,\(\times\)\,float32 (\cref{sec:ds:speedup}) \\
+\midrule
+\multicolumn{3}{@{}l}{total} & 26 & 8 & 72 & \\
+\bottomrule
+\end{tabular}
+\end{table}

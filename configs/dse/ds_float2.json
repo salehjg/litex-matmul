@@ -1,0 +1,15 @@
+{
+  "campaign": "ds_float2",
+  "comment": "docs/notes3 Part C5: float32 activations x DenseShift 3-bit, PE 40x16 (640 MACs). PE 48x16 needed 303 086 LUTs of 298 600 (ds_float); 40 PEs with tile 320x1024 (tile_n/PN 8, tile_m/PM 64 >= PN, C buffer depth 512).",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@point": [
+      {"kernel.data_type": "float", "kernel.b_type": "pow2", "kernel.b_bits": 3,
+       "kernel.parallelism_n": 40, "kernel.parallelism_m": 16, "kernel.memory_tile_size_n": 320, "kernel.memory_tile_size_m": 1024}
+    ]
+  },
+  "runtime_grid": {"triples": [[1024, 1024, 1024], [4096, 4096, 4096], [8192, 8192, 8192]], "repetitions": 2, "warmup": 0, "verify": "sampled"},
+  "stages": ["hls", "build", "run"],
+  "jobs": {"hls": 1},
+  "ddr_load_tune": true
+}

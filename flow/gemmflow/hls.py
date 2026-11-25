@@ -10,7 +10,7 @@ import os
 import time
 import xml.etree.ElementTree as ET
 
-from .config import ROOT, KERNEL_DIR, DEVICE
+from .config import ROOT, DEVICE
 from .tools import VitisHls
 
 HLSLIB_INCLUDE = os.path.join(ROOT, "submodules", "gemm_hls", "hlslib", "include")
@@ -54,7 +54,9 @@ class HlsRun:
         k = self.cfg.kernel
         flags = ["-O3", "-DMM_SYNTHESIS", "-DHLSLIB_SYNTHESIS", "-DMM_DYNAMIC_SIZES",
                  "-DHLSLIB_STREAM_TIMEOUT=16", "-DHLSLIB_LEGACY_SDX=0",
-                 f"-I{self.dir}", f"-I{os.path.join(KERNEL_DIR, 'include')}", f"-I{HLSLIB_INCLUDE}"]
+                 f"-I{self.dir}", f"-I{os.path.join(self.cfg.kernel_dir(), 'include')}", f"-I{HLSLIB_INCLUDE}"]
+        if self.cfg.is_mixed():
+            flags.append("-DAP_INT_MAX_W=4096")  # kernels/gemm_mixed: wide C packs
         if k.transposed_a:
             flags.append("-DMM_TRANSPOSED_A")
         if k.data_type == "half":
@@ -72,7 +74,7 @@ class HlsRun:
         with open(os.path.join(self.dir, "Config.h"), "w") as f:
             f.write(self.cfg.render_config_h())
         period = 1000.0 / self.cfg.clocks.accel_mhz
-        sources = [os.path.join(KERNEL_DIR, "src", s) for s in ("Top.cpp", "Memory.cpp", "Compute.cpp")]
+        sources = [os.path.join(self.cfg.kernel_dir(), "src", s) for s in ("Top.cpp", "Memory.cpp", "Compute.cpp")]
         params = {
             "project":           self.project,
             "top":               TOP,
@@ -82,7 +84,7 @@ class HlsRun:
             "cflags":            "{" + self.cflags() + "}",
             "op_bindings":       _tcl_list(f"{op} {impl}" for op, impl in self.op_bindings()),
             "sources":           _tcl_list(sources),
-            "testbench":         "{" + os.path.join(KERNEL_DIR, "tb", "test_gemm.cpp") + "}",
+            "testbench":         "{" + os.path.join(self.cfg.kernel_dir(), "tb", "test_gemm.cpp") + "}",
             "run_csim":          int(self.cfg.hls.run_csim),
             "csim_argv":         "{256 256 256}",
             "export_flow":       self.cfg.hls.export_flow,

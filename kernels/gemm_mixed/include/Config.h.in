@@ -1,0 +1,72 @@
+/// @author    Johannes de Fine Licht (definelicht@inf.ethz.ch)
+/// @copyright This software is copyrighted under the BSD 3-Clause License.
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <ap_int.h>
+#include "hlslib/xilinx/Operators.h"
+
+// int32 C packs with parallelism_m = 64 are 2048 bits wide: the flow compiles with -DAP_INT_MAX_W=4096.
+#if AP_INT_MAX_W < 4096
+#error "kernels/gemm_mixed needs -DAP_INT_MAX_W=4096 (wide C packs)"
+#endif
+
+using uint8_t = unsigned char;
+
+// litex-matmul (kernels/gemm_mixed): separate element types for A (activations), B (weights) and C (the sum, also
+// the accumulator), filled in by flow/gemmflow (docs/notes3/denseshift-plan.md). Widths are in container units
+// (bytes / sizeof(type)) per memory word, as upstream counts them: packed 2/4-bit types get a logical width.
+using DataA_t = ${MM_DATA_TYPE_A};
+using DataB_t = ${MM_DATA_TYPE_B};
+using DataC_t = ${MM_DATA_TYPE_C};
+constexpr int kBitsA = ${MM_BITS_A};
+constexpr int kBitsB = ${MM_BITS_B};
+constexpr int kBitsC = ${MM_BITS_C};
+constexpr int kMemoryWidthBytesN = ${MM_MEMORY_BUS_WIDTH_N};  // A (transposed)
+constexpr int kMemoryWidthBytesK = ${MM_MEMORY_BUS_WIDTH_K};  // A (not transposed)
+constexpr int kMemoryWidthBytesM = ${MM_MEMORY_BUS_WIDTH_M};  // B
+constexpr int kMemoryWidthBytesC = ${MM_MEMORY_BUS_WIDTH_C};  // C
+#ifndef MM_DYNAMIC_SIZES
+constexpr unsigned long kSizeN = ${MM_SIZE_N};
+constexpr unsigned long kSizeK = ${MM_SIZE_K};
+constexpr unsigned long kSizeM = ${MM_SIZE_M};
+#endif
+constexpr unsigned long kOuterTileSizeN = ${MM_MEMORY_TILE_SIZE_N};
+constexpr unsigned long kOuterTileSizeM = ${MM_MEMORY_TILE_SIZE_M};
+constexpr unsigned long kInnerTileSizeN = ${MM_PARALLELISM_N};
+constexpr int kComputeTileSizeM = ${MM_PARALLELISM_M};
+// constexpr int kComputeTileSizeN = ${MM_GRANULARITY_N}; // NYI
+constexpr int kComputeTileSizeN = 1;
+constexpr int kTransposeWidthBytes = ${MM_TRANSPOSE_WIDTH};
+constexpr float kFrequency = ${MM_CLOCK_INTERNAL};
+constexpr auto kGoldenDir = "${MM_GOLDEN_DIR}";
+
+// The multiply-accumulate (include/Mac.h): MULTIPLY (C += A * B) or DENSESHIFT (C += +-(A << e), B = sign/exponent
+// code of kShiftBits bits).
+#define MM_MAC_${MM_MAC}
+constexpr int kShiftBits = ${MM_SHIFT_BITS};
+
+#if ${MM_MEMORY_BUS_WIDTH_M} != ${MM_KERNEL_WIDTH_M}
+  #define MM_CONVERT_B
+#endif
+
+// When A is not transposed, the data width must be converted if a PE buffers
+// more than one row of A (currently unsupported). When A is transposed, the
+// data width must be converted if the memory bus is wider than the number of
+// rows buffered per PE.
+#if (defined(MM_TRANSPOSED_A) && \
+     (${MM_DATA_WIDTH_A} != ${MM_MEMORY_BUS_WIDTH_N}))
+#define MM_CONVERT_A
+#endif
+
+// litex-matmul: knobs from the JSON build config (flow/gemmflow/config.py). Stream depths: 0 = upstream default.
+constexpr unsigned kPipeDepthCfg = ${MM_PIPE_DEPTH};
+constexpr unsigned long kASplitDepthCfg = ${MM_A_SPLIT_DEPTH};
+constexpr unsigned long kBMemoryDepthCfg = ${MM_B_MEMORY_DEPTH};
+constexpr unsigned long kCMemoryDepthCfg = ${MM_C_MEMORY_DEPTH};
+// m_axi interface parameters (used in HLS pragmas, hence macros).
+#define MM_AXI_MAX_BURST ${MM_AXI_MAX_BURST}
+#define MM_AXI_OUTSTANDING ${MM_AXI_OUTSTANDING}
+#define MM_AXI_LATENCY ${MM_AXI_LATENCY}
