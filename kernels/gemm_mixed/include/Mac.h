@@ -5,8 +5,11 @@
 //   MM_MAC_DENSESHIFT  C += (-1)^s * (A << e)          B = DenseShift code of kShiftBits bits (Li et al., ICCV 2023):
 //                                                      s = bit kShiftBits-1, e = bits [kShiftBits-2:0]; no zero
 //                                                      weight, so no zero test (paper Fig. 3b). Sum wraps at kBitsC.
+//   MM_MAC_DENSESHIFT_FLOAT  C += (-1)^s * 2^e * A   A, C float: add e to A's exponent field and flip its sign bit
+//                                                      (paper Sec. 3.1.1, Eq. 2), then a float add; no multiplier.
 //
-// A and B are ap_int/ap_uint types; the arithmetic is done in exact widths so that HLS sees the real operand sizes.
+// A and B are ap_int/ap_uint types (A and C float for MM_MAC_DENSESHIFT_FLOAT); integer arithmetic is done in exact
+// widths so that HLS sees the real operand sizes.
 #pragma once
 
 #include "Config.h"
@@ -37,6 +40,25 @@ inline DataC_t Mac(const DataC_t acc, const DataA_t a, const DataB_t b) {
   return DataC_t(acc + term);
 }
 
+#elif defined(MM_MAC_DENSESHIFT_FLOAT)
+
+static_assert(kShiftBits >= 2 && kShiftBits <= kBitsB, "DenseShift code must fit the B lane");
+
+// x * (-1)^s * 2^e by integer operations on the float's bits. Zero and denormal x give a signed zero (denormals are
+// flushed). No overflow check: the exponent field plus e (<= 7 for 4-bit codes) only overflows for |x| >= 2^120.
+inline DataC_t Mac(const DataC_t acc, const DataA_t a, const DataB_t b) {
+  #pragma HLS INLINE
+  const ap_uint<kShiftBits - 1> e = b(kShiftBits - 2, 0);
+  const bool negative = b[kShiftBits - 1];
+  union { float f; uint32_t u; } in, out;
+  in.f = a;
+  const uint32_t exponent = (in.u >> 23) & 0xFFu;
+  uint32_t u = in.u ^ (uint32_t(negative) << 31);
+  u = (exponent == 0) ? (u & 0x80000000u) : (u + (uint32_t(e) << 23));
+  out.u = u;
+  return acc + out.f;
+}
+
 #else
-#error "Config.h must define MM_MAC_MULTIPLY or MM_MAC_DENSESHIFT"
+#error "Config.h must define MM_MAC_MULTIPLY, MM_MAC_DENSESHIFT or MM_MAC_DENSESHIFT_FLOAT"
 #endif

@@ -17,7 +17,8 @@ shows every change since.
 - `include/Mac.h` (new): `Mac(acc, a, b)`. Multiply: `acc + a * b` in exact widths. DenseShift:
   `acc + (s ? -(a << e) : (a << e))` with `s = b[n-1]`, `e = b[n-2:0]`, no zero test (paper Fig. 3b): the narrow
   term is negated, then one C-width adder (12 % fewer LUTs by the HLS estimate than an adder, a subtractor and a
-  mux). Sums wrap at the C width.
+  mux). Sums wrap at the C width. Float activations (`MM_MAC_DENSESHIFT_FLOAT`, A and C float): e is added to A's
+  exponent field and its sign bit flipped (paper Sec. 3.1.1), then a float add; zero/denormal A gives a signed zero.
 - `include/MatrixMultiplication.h`: A packs of `DataA_t`, B packs of `DataB_t`, new `MemoryPackC_t`,
   `ComputePackC_t` (`OutputPack_t`), `kMemoryWidthC`, `kOuterTileSizeCMemory`, `SizeCMemory()`,
   `kCWordsPerPack` / `kCPacksPerWord`; the kernel's C port is `MemoryPackC_t`.
@@ -31,4 +32,4 @@ shows every change since.
 - `include/Utility.h`: removed (only the old testbench used it).
 - `tb/test_gemm.cpp`: new testbench: random codes over the whole range of A and B (all DenseShift codes), int64
   reference wrapped once to the C width, exact compare. `misc/gemm_mixed_sim/sim.py` runs it for every MAC, format
-  and C conversion case.
+  and C conversion case. Float activations: A uniform in (−1, 1) with some zeros, reference = float sums in k order.

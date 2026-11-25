@@ -11,9 +11,9 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | B2 | Flow: config fields, numeric formats, kernel dir, hashes, names, columns | ✅ |
 | B3 | Host: codec, mixed reference, runner options, unit tests | ✅ |
 | C1 | `ds_hls` HLS probe | ✅ |
-| C2 | `ds_same_array` builds + card runs + exact screens | 🟡 building |
+| C2 | `ds_same_array` builds + card runs + exact screens | ✅ (u8 build: PCIe path −6 ps, rebuild queued) |
 | C3 | `ds_scale` | ⬜ |
-| C4 | MNIST MLP end to end on the card | 🟡 trained, waiting for a build |
+| C4 | MNIST MLP end to end on the card | ✅ (7-bit activations on the int8 build) |
 | C5 | Float activations (stretch) | ⬜ |
 | D | README / report | ⬜ |
 
@@ -147,3 +147,17 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   PE at PM 32) limit the array for both MACs (~PE 56×32 fits the BRAM; the multiply MAC also fits the DSPs there),
   so DenseShift's gain on this FPGA is freed DSPs and fewer LUT/FF, not a larger int32 array. With int16 sums the
   multiply MAC is DSP-bound (≤ ~1880 MACs) while DenseShift PE 32×64 (2048 MACs) fits BRAM: the C3 candidate.
+- **C2 on the card** (`results/ds_same_array/`, DDR taps tuned under load: 4088 bad words before, 0 after):
+  | Build (PE 32×32 t512×1024 200 MHz) | 1024³ | 4096³ | 8192³ | verify |
+  |---|---|---|---|---|
+  | int8 × int8 → int32 (1064 DSP) | 339.35 | 369.80 | **375.45 GOP/s** (91.7 %) | exact (sampled) |
+  | int8 × dshift3 → int32 (40 DSP) | 339.33 | 369.80 | **375.45 GOP/s** (91.7 %) | exact (sampled) |
+  Same cycles, as expected for the same array and schedule (the int8 kernels/gemm PE 32×32 build: 379.4).
+  `u8xds3c32` missed timing by 6 ps, on the PCIe 250 MHz user clock (`clkout2`), not on the accelerator clock
+  (0.000): the known flaky path. Rebuild with the `explore` preset queued.
+- **C4 done: MNIST MLP on the card.** To run before the uint8 rebuild, `mlp_mnist.py --act-bits 7` trains the same
+  network with activation codes 0..127 (inputs: pixel >> 1), which fit the signed int8 build: PyTorch 98.48 %,
+  integer pipeline 98.48 %. `mlp_mnist.py fpga` on `i8xds3c32_pe32x32` (no new bring-up, board lock held):
+  layer 1 10048×832×1024 in 52.59 ms (325.6 GOP/s), layer 2 10048×1024×1024 in 63.15 ms (333.7 GOP/s),
+  **0 of 10 240 000 sums differ from the CPU in each layer; test accuracy on the card 98.48 %, predictions identical
+  to the CPU integer pipeline.** (Result: `build/ml/mnist/ds3_h1024_a7/fpga_<build>.json`.)
