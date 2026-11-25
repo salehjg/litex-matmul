@@ -1,0 +1,136 @@
+\section{DenseShift: power-of-two weights}
+\label{sec:ds}
+
+The integer formats of \cref{sec:formats} kept one type for A, B, C and the sum, so they measure hardware cost but are
+not what a quantised network computes. This section implements DenseShift~\cite{denseshift}, a low-bit
+power-of-two weight format, end to end: training in PyTorch, a kernel with separate operand types and a shift
+instead of a multiplier, builds on the card, and a small network whose layers run on the accelerator and give the
+same predictions as the CPU. The work is on the git branch \code{denseshift}; the dated record is in
+\file{docs/notes3/}.
+
+\subsection{The method}
+\label{sec:ds:method}
+An \(n\)-bit DenseShift weight is \(w = s\cdot 2^{p}\) with a sign \(s = \pm 1\) and an exponent
+\(p \in \{0,\dots,2^{n-1}-1\}\). Unlike earlier shift networks it has no zero, so all \(2^n\) codes carry a value:
+2 bits give \(\{\pm1,\pm2\}\), 3 bits \(\{\pm1,\pm2,\pm4,\pm8\}\). The paper's three claims for hardware and training:
+\begin{itemize}
+  \item \textbf{No multiplier, no zero test.} With integer activations a MAC is \(c \mathrel{+}= \pm(x \ll p)\); without
+        a zero weight the branch that shift networks need for \(w = 0\) disappears (Fig.~3 of the paper).
+  \item \textbf{Float activations.} \(x\cdot(\pm 2^p)\) for a float \(x\) is an integer addition of \(p\) to the exponent
+        field plus a sign flip (Eq.~2 of the paper), so even float networks need no multiplier.
+  \item \textbf{Training.} The sign-scale decomposition writes \(w = (2H(w_s) - 1)\,2^{S_T}\) with
+        \(S_0 = 0,\ S_t = H(w_t)(S_{t-1}+1)\), \(t = 1\dots T\), \(T = 2^{n-1}-1\) and the Heaviside step \(H\); each
+        weight is trained through \(T+1\) float parameters with a straight-through estimator~\cite{s3shift}. The
+        gradient to \(w_s\) is rescaled by \(\sqrt{S_T+1}\) instead of \(2^{S_T}\) (Eq.~8), and all parameters start
+        from \(\mathcal N(0, 10^{-6})\) (``low-variance'' init).
+\end{itemize}
+The paper leaves some details to its released code, which was read for them: the forward value is \(s\,2^{S}\) and the
+backward goes through \(s\sqrt{S+1}\); \(H(0) = 0\), \(\mathrm{sign}(0) = +1\); the first convolution and the final
+fully connected layer stay float; there is no learned weight scale (BatchNorm after every convolution absorbs it).
+
+\subsection{Training in PyTorch}
+\label{sec:ds:train}
+PyTorch comes from the system Python (torch 2.15 with CUDA on an RTX 5060 Ti); the flow's virtual environment is left
+as it is, and the two exchange files. \file{ml/denseshift/denseshift.py} implements DenseShift linear and
+convolution layers for any \(n \ge 2\). A self-test checks that only \(\pm2^p\) values occur, that every code is
+reached, that the exported hardware codes decode to the trained weights, and that the 3-bit layer equals a
+transcription of the official layer in values \emph{and} gradients. ResNet-20 on CIFAR-10 is a small-scale check of
+the accuracy claim (the paper reports ImageNet), trained as in the official code: SGD 0.1, momentum 0.9, weight decay
+\(10^{-4}\), cosine schedule, 200 epochs (\cref{tab:ds-cifar}).
+
+\begin{table}[ht]
+\centering\small
+\caption{ResNet-20 on CIFAR-10, test accuracy after 200 epochs (seed 0; first convolution and FC layer float).
+  Exported codes decoded into ordinary weights give the same accuracy in every run. Paper, ImageNet ResNet-18: float
+  69.6, 2-bit 68.90, 3-bit 70.62, 4-bit 70.94\,\%.}
+\label{tab:ds-cifar}
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+Weights & Accuracy & vs.\ float & Share of weights at \(|w| = 1, 2, 4, \dots\) \\
+\midrule
+float32 & 91.68\,\% & & \\
+DenseShift 2-bit & 90.84\,\% & \(-0.84\) & 0.49 / 0.51 \\
+DenseShift 3-bit & 91.40\,\% & \(-0.28\) & 0.52 / 0.14 / 0.12 / 0.21 \\
+DenseShift 4-bit & 90.80\,\% & \(-0.88\) & 0.33 / 0.12 / 0.11 / 0.10 / 0.10 / 0.09 / 0.07 / 0.07 \\
+\midrule
+3-bit, Eq.~7 gradient & 91.36\,\% & \(-0.32\) & 0.76 / 0.18 / 0.03 / 0.03 \\
+3-bit, Kaiming init & 90.50\,\% & \(-1.18\) & 0.45 / 0.20 / 0.15 / 0.20 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+3-bit DenseShift comes within 0.3 points of float. Without the rescaled gradient most exponents stay at zero (76\,\% of
+the weights at \(\pm1\)), as the paper predicts, although the accuracy is the same here; the low-variance
+initialisation is worth 0.9 points even when training from scratch. A second network, a multi-layer perceptron on
+MNIST with two DenseShift hidden layers (\(784 \to 1024 \to 1024 \to 10\)), BatchNorm and unsigned 8-bit activations
+learned with quantisation-aware training, reaches 98.65\,\% with float weights and 98.46/98.47/98.37\,\% with
+2/3/4-bit DenseShift weights. It is the network that runs on the card (\cref{sec:ds:e2e}).
+
+\subsection{A kernel with separate A, B and C types}
+\label{sec:ds:kernel}
+DenseShift needs what the single-type kernel cannot do: activations, weight codes and sums of different widths, and a
+shift in place of the multiplier. Because the HLS hash covers the whole kernel tree, the change went into a copy,
+\file{kernels/gemm\_mixed/}, so that every earlier build keeps its id; the flow picks the tree from the
+configuration (\code{kernel.b\_type}, \code{b\_bits}, \code{accum\_bits}, hashed only when set).
+\begin{itemize}
+  \item \code{DataA\_t}, \code{DataB\_t}, \code{DataC\_t} as \code{ap\_[u]int} types (A also \code{float}); B and C
+        get their own memory widths. 3-bit codes are stored in 4-bit lanes (128 per 512-bit word).
+  \item The MAC is a function chosen in \file{Config.h}: multiply (\(c + a\cdot b\) in exact widths) or DenseShift,
+        \(c + (s\,?\,-(a\ll e) : (a \ll e))\). Negating the narrow shifted term before one C-wide adder is 12\,\%
+        smaller (HLS estimate) than an adder, a subtractor and a multiplexer.
+  \item With 32-bit sums a PE's row of C (\(P_M\) lanes) is wider than a memory word, so the C path either splits a
+        row over several words, passes it through or gathers several rows, all in one pipelined loop.
+  \item A testbench draws codes over their full range and compares with an exact reference; 16 cases (every MAC,
+        signed and unsigned activations, 16- and 32-bit sums with wrap-around, all three C conversions, whole and
+        partial tiles, float activations) pass at two sizes each. The host runner gained \code{--b-dtype},
+        \code{--c-dtype} and file input/output of codes, with a model checked against \code{ap\_int} arithmetic.
+\end{itemize}
+
+\paragraph{C buffers in BRAM.} The first HLS run of int8\,\(\times\)\,3-bit\,\(\to\)\,int32 at PE 32\(\times\)32
+estimated 2002 BRAM18, more than the device has. Each PE's C buffer is 1024 bits wide and 512 deep. The utilisation of
+an earlier int8 build showed why it is expensive: HLS's default two-port RAM becomes true-dual-port blocks with 36-bit
+ports, which leave half of every BRAM36 empty at depth 512. The buffer needs only one write and one read port; bound as
+a simple dual-port RAM (\code{BIND\_STORAGE ram\_s2p}) it uses 72-bit blocks, and the built design has 14 RAMB36 +
+1 RAMB18 per PE instead of about 29. Even so, with 32-bit sums the C buffers are what limits the array size.
+
+\subsection{Shift against multiply on the card}
+\label{sec:ds:card}
+\Cref{tab:ds-same} compares the two MACs at one array with the same activation and sum widths. Both run at the same
+speed, as they must (same array, same schedule), and both are exact on the card.
+
+\begin{table}[ht]
+\centering\small
+\caption{int8 activations and int32 sums, PE 32\(\times\)32, tile 512\(\times\)1024, transposed A, 200\,MHz, both
+  meeting timing. HLS: estimates; Vivado: whole design after implementation; GOP/s at \(8192^3\), verified exactly.}
+\label{tab:ds-same}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{HLS} & \multicolumn{4}{c}{Vivado} & \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-7}
+B (weights), MAC & DSP & LUT & DSP & LUT & FF & BRAM & GOP/s \\
+\midrule
+int8, multiply & 1064 & 195.8k & 1064 & 167.5k & 259.4k & 638.5 & 375.45 \\
+DenseShift 3-bit, shift & 39 & 290.6k & 40 & 161.6k & 240.2k & 636.5 & 375.45 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+With a 32-bit sum HLS maps each 8-bit multiply and its add into one DSP48E1 (the single-type int8 kernel, whose
+product was cut to 8 bits, had its multipliers in LUTs). The shift MAC removes all 1024 of them. HLS estimated that it
+would cost 95k more LUTs instead; Vivado's implementation uses 5.9k \emph{fewer} LUTs and 19k fewer flip-flops (per
+PE: 3433 against 4026 LUTs). On this FPGA DenseShift therefore frees the DSPs at no cost in logic. The array cannot
+simply grow into them, because the 32-bit C buffers already use most of the BRAM (\cref{sec:ds:kernel}).
+
+\subsection{End to end: an MNIST network on the card}
+\label{sec:ds:e2e}
+\file{ml/denseshift/mlp\_mnist.py} exports the MLP as an integer pipeline: activation codes \(\times\) DenseShift codes
+give exact int32 sums; BatchNorm and the activation scale fold into a per-channel \(a, b\), and the next layer's codes
+are \(\mathrm{clip}(\mathrm{rint}((c\,a + b)/s), 0, q_{\max})\). Evaluated on the CPU this pipeline has the same test
+accuracy as the PyTorch model. On the card, both hidden layers run as GEMMs over all 10\,000 test images (the variant
+with activation codes 0..127, which fits the signed int8 build of \cref{tab:ds-same}):
+\begin{itemize}
+  \item layer 1, \(10048\times832\times1024\) (padded): 52.6\,ms, 325.6\,GOP/s; layer 2,
+        \(10048\times1024\times1024\): 63.2\,ms, 333.7\,GOP/s;
+  \item 0 of 10\,240\,000 sums differ from the CPU in either layer; the test accuracy computed from the card's sums is
+        98.48\,\%, and every prediction equals the CPU pipeline's.
+\end{itemize}
