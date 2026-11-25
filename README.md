@@ -23,12 +23,17 @@ Best kernel throughput, all results verified exactly on the card:
 Trained in PyTorch (`ml/denseshift/`) and run on the card with a kernel that has separate A/B/C types
 (`kernels/gemm_mixed/`):
 
-| PE 32×32, 200 MHz, int8 activations, int32 sums | Measured (8192³, exact) | DSPs | LUTs |
+| Build (200 MHz) | Measured (8192³, exact) | DSPs | LUTs |
 |---|---|---|---|
-| int8 weights, multiply | 375.5 GOP/s | 1064 | 167.5k |
-| 3-bit DenseShift weights, shift | 375.5 GOP/s | 40 | 161.6k |
+| int8 × int8 weights → int32, multiply, PE 32×32 | 375.5 GOP/s | 1064 | 167.5k |
+| int8 × 3-bit DenseShift → int32, shift, PE 32×32 | 375.5 GOP/s | 40 | 161.6k |
+| int8 × 3-bit DenseShift → int16, shift, PE 32×64 | 750.9 GOP/s | 40 | 190.3k |
+| float32 × 3-bit DenseShift → float32 (exponent add), PE 32×16 | 189.1 GOP/s | 1063 | 202.5k |
 
-- CIFAR-10 ResNet-20: 3-bit DenseShift 91.4 % against 91.7 % for float32 weights.
+- Same speed as the multiply MAC with 40 instead of 1064 DSPs and fewer LUTs; float activations give 1.7× the float32
+  result (110.9 GFLOP/s), because a DenseShift product is an exponent add.
+- CIFAR-10 ResNet-20 (200 epochs, 3 seeds): 3-bit DenseShift 91.3 % against 91.7 % for float32 weights (400 epochs:
+  92.05 % against 92.24 %).
 - An MNIST MLP with two 3-bit DenseShift hidden layers runs on the card: all 2 × 10.24 M sums equal the CPU's, and the
   test accuracy is 98.48 %, the same as in PyTorch.
 
