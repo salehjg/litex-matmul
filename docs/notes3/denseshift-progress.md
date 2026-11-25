@@ -273,10 +273,11 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   | float32 × dshift3 (`ds3_h1024_af`) | f32xds3 PE 32×16 | 98.40 % | 93.1 + 119.5 = 212.7 | 367.7 | **1.87 / 1.52** |
   | uint8 × dshift3 (`ds3_h1024`) | u8xds3c32 PE 32×32 | 98.47 % | 52.6 + 63.2 = 115.7 | 204.9 | **3.43 / 2.73** |
   | 7-bit × dshift3 (`ds3_h1024_a7`) | i8xds3c32 PE 32×32 | 98.48 % | 115.7 | 204.9 | 3.43 / 2.73 |
-  Float sums equal the CPU's kernel-order float32 sums bit for bit (2 × 10.24 M per run), integer sums exactly. The
-  kernel speedup on these shapes (K = 784/832, M = 1024, N = 10 000/10 048) is a little below the square-GEMM one
-  (3.43 vs 3.81): the integer build pads K to 832 and works a 1024-wide tile against M = 1024 per pass. End to end
-  is lower again because the transfers shrink less: C goes back as 4-byte values in every format (2 × 41 MB), and
+  Float sums equal the CPU's kernel-order float32 sums bit for bit (2 × 10.24 M per run), integer sums exactly. Per
+  layer, uint8 × dshift3 is 3.29× (layer 1) and 3.55× (layer 2) faster in the kernel: layer 2 (K = M = 1024) matches
+  the 1024³ GEMM (3.54×), where the fixed cost per tile and k step weighs more on the larger array than at 8192³
+  (3.81×); layer 1 also pads K from 784 to 832 for the integer build's 64-element words (−6 %). End to end is lower
+  again because the transfers shrink less: C goes back as 4-byte values in every format (2 × 41 MB), and
   float A is 4 bytes per element against 1 for uint8 codes. `summarize.py` prints the table
   (`--mnist-csv docs/report/data/denseshift_mnist_card.csv`).
 - **Conv2d:** DenseShift convolutions are trained (ResNet-20, all 3×3 and 1×1 convolutions except the first) with
