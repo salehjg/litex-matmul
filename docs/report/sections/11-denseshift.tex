@@ -134,3 +134,20 @@ with activation codes 0..127, which fits the signed int8 build of \cref{tab:ds-s
   \item 0 of 10\,240\,000 sums differ from the CPU in either layer; the test accuracy computed from the card's sums is
         98.48\,\%, and every prediction equals the CPU pipeline's.
 \end{itemize}
+
+\subsection{Float activations without a multiplier}
+\label{sec:ds:float}
+The paper's second deployment mode keeps the activations in float. Multiplying a float by \(\pm2^p\) adds \(p\) to its
+8-bit exponent field and flips its sign bit; a zero or denormal input gives a signed zero. In the kernel this replaces
+the float multiply (three DSP48E1 in the float32 builds) by a small integer adder, so a MAC is one float add, about two
+DSPs. The result is exactly \(a\cdot w\) for every normal input that does not overflow (\(|a| < 2^{120}\) for 4-bit
+codes), so the card's sums are checked bit for bit against float sums in the kernel's \(k\) order.
+
+\begin{itemize}
+  \item PE 32\(\times\)16, tile 512\(\times\)512, 200\,MHz: timing met, 202.5k LUT, 1063 DSP, 427.5 BRAM tiles;
+        179.4, 187.6 and \textbf{189.1\,GOP/s} at \(1024^3\), \(4096^3\) and \(8192^3\) (92.3\,\% of 204.8),
+        all exact. The best float32 build (multiply-add, PE 32\(\times\)8, 225\,MHz, 1320 DSP) reached
+        110.9\,GFLOP/s: DenseShift weights give 1.7\(\times\) the throughput with fewer DSPs.
+  \item PE 48\(\times\)16 (768 MACs, 1793 DSP) synthesised but needed 303\,086 LUTs of 298\,600: with the
+        multiplier gone, the float adders' LUTs set the limit.
+\end{itemize}
