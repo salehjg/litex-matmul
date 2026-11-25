@@ -306,3 +306,8 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   3.15×). No DenseShift build was tried at 225 MHz (250 MHz failed on the dataflow control): a 225 MHz attempt
   (e.g. `aggressive`) is the open way to raise these. Report, README, `ml/denseshift/README.md`, `docs/gemm.md`
   updated to these numbers; the equal-clock (200 MHz) figures stay in the report text and above.
+- **`docs/problems/ddr-read-bit-flips.md`** (new): the DDR3 read bit-flip problem in one place (symptoms, how it was
+  found, root cause, the load-tuning workaround, results incl. this branch's sessions, fix options, file map); linked
+  from README, `docs/gemm.md` and `misc/int32_verify/README.md`. Note: each tuned bring-up's own check is a full
+  exact check of 1024³ (every entry, full-range data) before and after tuning, so every DenseShift build that ran
+  had one with 0 wrong entries after tuning (`float32 × dshift3` PE 32×16: 50 223 wrong before tuning).

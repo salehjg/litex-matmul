@@ -77,7 +77,8 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
 - **Verification is exact:** integer and fixed-point formats always. float32 bit for bit against a reference that
   accumulates in the kernel's order (`--float-exact`, default in `gemm_dse.py` and `gemm_run.py`; rows carry
   `verify_exact`).
-- **DDR read margin under load** ([misc/int32_verify](../misc/int32_verify/README.md)): with the GEMM array busy, the
+- **DDR read margin under load** ([problems/ddr-read-bit-flips.md](problems/ddr-read-bit-flips.md),
+  [misc/int32_verify](../misc/int32_verify/README.md)): with the GEMM array busy, the
   idle-calibrated read taps of some byte lanes sit at the edge of their window. Single DQ bits then flip on odd beats
   (CH0 DQ5 on this card), which gives wrong C entries in some builds although the kernel is right.
   - `gemm_run.py --ddr-load-tune`, or `"ddr_load_tune": true` in a campaign, re-tunes the taps under load after

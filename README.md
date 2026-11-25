@@ -96,6 +96,6 @@ sudo scripts/setup_permissions.sh                   # once: password-less card a
 | float32 GEMM: plan and progress log | [plan](docs/notes1/gemm-hls-plan.md) · [progress](docs/notes1/gemm-hls-progress.md) |
 | Integer and fixed-point formats: plan and progress log | [plan](docs/notes2/int-dtype-plan.md) · [progress](docs/notes2/int-dtype-progress.md) |
 | DenseShift (power-of-two weights): plan and progress log, PyTorch code, mixed-type kernel | [plan](docs/notes3/denseshift-plan.md) · [progress](docs/notes3/denseshift-progress.md) · [ml/denseshift](ml/denseshift/) · [kernels/gemm_mixed/ORIGIN.md](kernels/gemm_mixed/ORIGIN.md) |
-| DDR read margin under load (wrong results, root cause, fix) | [misc/int32_verify](misc/int32_verify/README.md) |
+| DDR3 read bit flips under load (wrong results, root cause, workaround, fix options) | [docs/problems/ddr-read-bit-flips.md](docs/problems/ddr-read-bit-flips.md) · [misc/int32_verify](misc/int32_verify/README.md) |
 | Changes to the upstream HLS kernel | [kernels/gemm/ORIGIN.md](kernels/gemm/ORIGIN.md) |
 | Regenerating the README images | `docs/report/tools/export_figures.sh` |
