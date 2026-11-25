@@ -18,6 +18,20 @@ Best kernel throughput, all results verified exactly on the card:
 | int8 | PE 32×32, 225 MHz | 426.6 GOP/s | 40 |
 | int4 | PE 64×64, 180 MHz | 1370.9 GOP/s | 38 |
 
+**DenseShift** ([Li et al., ICCV 2023](https://arxiv.org/abs/2208.09708), branch `denseshift`,
+[notes](docs/notes3/denseshift-progress.md)): power-of-two weights ±2^e without zero, so a MAC is a shift and an add.
+Trained in PyTorch (`ml/denseshift/`) and run on the card with a kernel that has separate A/B/C types
+(`kernels/gemm_mixed/`):
+
+| PE 32×32, 200 MHz, int8 activations, int32 sums | Measured (8192³, exact) | DSPs | LUTs |
+|---|---|---|---|
+| int8 weights, multiply | 375.5 GOP/s | 1064 | 167.5k |
+| 3-bit DenseShift weights, shift | 375.5 GOP/s | 40 | 161.6k |
+
+- CIFAR-10 ResNet-20: 3-bit DenseShift 91.4 % against 91.7 % for float32 weights.
+- An MNIST MLP with two 3-bit DenseShift hidden layers runs on the card: all 2 × 10.24 M sums equal the CPU's, and the
+  test accuracy is 98.48 %, the same as in PyTorch.
+
 **float32 exploration:** the best result after each step, against the peak of that configuration.
 
 ![Best GFLOP/s after each exploration step](docs/images/progress.png)
@@ -57,6 +71,7 @@ sudo scripts/setup_permissions.sh                   # once: password-less card a
 | Full report (architecture, flow, every measurement): `docs/report/build.sh` → `report.pdf` | [docs/report/](docs/report/) |
 | float32 GEMM: plan and progress log | [plan](docs/notes1/gemm-hls-plan.md) · [progress](docs/notes1/gemm-hls-progress.md) |
 | Integer and fixed-point formats: plan and progress log | [plan](docs/notes2/int-dtype-plan.md) · [progress](docs/notes2/int-dtype-progress.md) |
+| DenseShift (power-of-two weights): plan and progress log, PyTorch code, mixed-type kernel | [plan](docs/notes3/denseshift-plan.md) · [progress](docs/notes3/denseshift-progress.md) · [ml/denseshift](ml/denseshift/) · [kernels/gemm_mixed/ORIGIN.md](kernels/gemm_mixed/ORIGIN.md) |
 | DDR read margin under load (wrong results, root cause, fix) | [misc/int32_verify](misc/int32_verify/README.md) |
 | Changes to the upstream HLS kernel | [kernels/gemm/ORIGIN.md](kernels/gemm/ORIGIN.md) |
 | Regenerating the README images | `docs/report/tools/export_figures.sh` |
