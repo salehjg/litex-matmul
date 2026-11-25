@@ -14,7 +14,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | C2 | `ds_same_array` builds + card runs + exact screens | ✅ (u8 build: PCIe path −6 ps, rebuild queued) |
 | C3 | `ds_scale` | ⬜ |
 | C4 | MNIST MLP end to end on the card | ✅ (7-bit activations on the int8 build) |
-| C5 | Float activations (stretch) | ⬜ |
+| C5 | Float activations (stretch) | 🟡 building |
 | D | README / report | ⬜ |
 
 ## Log
@@ -161,3 +161,13 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   layer 1 10048×832×1024 in 52.59 ms (325.6 GOP/s), layer 2 10048×1024×1024 in 63.15 ms (333.7 GOP/s),
   **0 of 10 240 000 sums differ from the CPU in each layer; test accuracy on the card 98.48 %, predictions identical
   to the CPU integer pipeline.** (Result: `build/ml/mnist/ds3_h1024_a7/fpga_<build>.json`.)
+- **Float activations in the kernel** (`e63e263`): `Mac.h` `MM_MAC_DENSESHIFT_FLOAT` and the testbench float path
+  copied in after `ds_same_array`; all 32 simulation sizes exact (16 cases). The three earlier mixed builds were made
+  from the previous tree, so their HLS stamps now look stale (rerun cards with `gemm_run.py`, not the DSE build stage).
+- **C5 `ds_float`** (chain `build/ds_chain.sh`: ds_float → ds_u8 + MNIST uint8 → ds_scale). HLS: PE 32×16 DSP 1064,
+  LUT 326.7k, BRAM18 688, 4.209 ns; PE 48×16 DSP 1793, LUT 485.3k, BRAM18 896, 4.374 ns. **Build PE 32×16
+  t512×512: timing met (WNS 0.025), LUT 202.5k, FF 319.0k, BRAM 427.5, DSP 1063** (32 min): twice the MACs of the best
+  float32 array (PE 32×8: 1320 DSP, 154.3k LUT) with fewer DSPs. PE 48×16 placed (the LUTs fit despite the HLS
+  estimate).
+- **CIFAR-10 seeds** (in progress): seed 1 gives float32 91.85, 2-bit 91.43 (seed 0: 90.84), 3-bit 91.47: the seed
+  spread is up to 0.6 points, so single-seed differences below that mean little.
