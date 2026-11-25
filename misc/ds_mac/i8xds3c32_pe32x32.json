@@ -1,0 +1,61 @@
+{
+  "name": "i8xds3c32_pe32x32_t512x1024_200mhz_tA",
+  "kernel": {
+    "data_type": "int",
+    "parallelism_n": 32,
+    "parallelism_m": 32,
+    "memory_tile_size_n": 512,
+    "memory_tile_size_m": 1024,
+    "bus_width_bytes": {
+      "n": 64,
+      "k": 64,
+      "m": 64
+    },
+    "transpose_width_bytes": 64,
+    "transposed_a": true,
+    "fifo_depths": {
+      "pipe": 4,
+      "a_split": null,
+      "b_memory": null,
+      "c_memory": null
+    },
+    "add_resource": null,
+    "mult_resource": null,
+    "m_axi": {
+      "max_burst_len": 64,
+      "num_outstanding": 16,
+      "latency": 64
+    },
+    "data_bits": 8,
+    "b_type": "pow2",
+    "b_bits": 3,
+    "accum_bits": 32
+  },
+  "memory_map": {
+    "a": "ch0",
+    "b": "ch1",
+    "c": "ch1"
+  },
+  "clocks": {
+    "accel_mhz": 200,
+    "hls_uncertainty_pct": 27
+  },
+  "hls": {
+    "run_csim": false,
+    "export_flow": "none"
+  },
+  "vivado": {
+    "preset": "default",
+    "max_threads": "auto",
+    "synth_directive": null,
+    "opt_directive": null,
+    "place_directive": null,
+    "post_place_phys_opt": null,
+    "route_directive": null,
+    "post_route_phys_opt": null,
+    "floorplan": null
+  },
+  "soc": {
+    "sys_clk_mhz": 125
+  }
+}

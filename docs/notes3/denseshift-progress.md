@@ -10,7 +10,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | B1 | `kernels/gemm_mixed/` (A/B/C types, shift MAC) + g++ simulation | ✅ |
 | B2 | Flow: config fields, numeric formats, kernel dir, hashes, names, columns | ✅ |
 | B3 | Host: codec, mixed reference, runner options, unit tests | ✅ |
-| C1 | `ds_hls` HLS probe | 🟡 running |
+| C1 | `ds_hls` HLS probe | ✅ |
 | C2 | `ds_same_array` builds + card runs + exact screens | ⬜ |
 | C3 | `ds_scale` | ⬜ |
 | C4 | MNIST MLP end to end on the card | 🟡 trained, waiting for a build |
@@ -96,3 +96,21 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 - **MNIST MLP, other widths** (`mlp_mnist.py train --bits 0/2/4`, same network, uint8 activations, 30 epochs):
   float32 weights 98.65 %, DenseShift 2-bit 98.46 %, 3-bit 98.47 %, 4-bit 98.37 % (integer pipeline = PyTorch for
   all three).
+- **C1 done** (`results/ds_hls/`; HLS estimates, 200 MHz target, all ports 512 bits):
+  | Point | DSP | LUT | FF | BRAM18 | est. ns |
+  |---|---|---|---|---|---|
+  | i8×i8→i32 PE 32×32 (multiply) | 1064 | 195.8k | 189.3k | 1110 | 4.374 |
+  | i8×ds2→i32 PE 32×32 | 39 | 326.6k | 166.2k | 1104 | 4.374 |
+  | i8×ds3→i32 PE 32×32 (MAC A, ram_s2p) | 39 | 331.6k | 173.7k | 1106 | 4.374 |
+  | i8×ds4→i32 PE 32×32 | 39 | 339.8k | 178.8k | 1106 | 4.374 |
+  | u8×ds3→i32 PE 32×32 | 39 | 331.6k | 173.7k | 1106 | 4.374 |
+  | i8×ds3→i16 PE 32×32 | 39 | 245.2k | 123.5k | 658 | 4.209 |
+  | i8×ds3→i32 PE 32×16 | 39 | 203.7k | 114.1k | 1104 | 4.374 |
+  | i8×ds3→i16 PE 32×64 (t512×2048) | 37 | 421.1k | 195.8k | 1110 | 4.374 |
+  | i8×ds3→i32 PE 32×64 (t512×2048) | 37 | 585.0k | 295.2k | **2006** (over the gate) | 4.505 |
+  PE 32×16 at t512×1024 needs as much BRAM as PE 32×32: half the width, twice the depth (1024 > 512: no 72-bit
+  packing). PE 32×64 with int32 sums does not fit (BRAM, and LUTs very likely); with int16 sums it fits the BRAM.
+- **DenseShift MAC form** (`misc/ds_mac/`, int8 × dshift3 → int32, PE 32×32, HLS): A `neg ? acc − x : acc + x`
+  331.6k LUT / 173.7k FF; **B `acc + (neg ? −x : x)` (x 12 bits wide) 290.6k / 173.7k**; C `acc + (x ^ neg) + neg`
+  (carry-in) 300.9k / 167.6k. B kept (`Mac.h`). Whether Vivado folds C's carry-in into one carry chain (and beats B)
+  was not built: open point. All 24 simulation sizes still exact.

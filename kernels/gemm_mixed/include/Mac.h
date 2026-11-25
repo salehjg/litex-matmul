@@ -31,7 +31,10 @@ inline DataC_t Mac(const DataC_t acc, const DataA_t a, const DataB_t b) {
   const ap_uint<kShiftBits - 1> e = b(kShiftBits - 2, 0);
   const bool negative = b[kShiftBits - 1];
   const Shifted_t shifted = Shifted_t(a) << e;
-  return negative ? DataC_t(acc - shifted) : DataC_t(acc + shifted);
+  // Negate the narrow term, then one C-width adder. HLS estimates for int8 x dshift3 -> int32 at PE 32x32
+  // (misc/ds_mac): acc - x / acc + x with a mux 331.6k LUT; this form 290.6k; acc + (x ^ s) + s (carry-in) 300.9k.
+  const Shifted_t term = negative ? Shifted_t(-shifted) : shifted;
+  return DataC_t(acc + term);
 }
 
 #else

@@ -15,11 +15,15 @@ shows every change since.
   with `kShiftBits`. Includes `ap_int.h` and requires `-DAP_INT_MAX_W=4096` (an int32 C pack with PM 64 is 2048
   bits). The upstream `OperatorMap`/`OperatorReduce` and the resource pragmas are gone.
 - `include/Mac.h` (new): `Mac(acc, a, b)`. Multiply: `acc + a * b` in exact widths. DenseShift:
-  `acc +/- (a << e)` with `s = b[n-1]`, `e = b[n-2:0]`, no zero test (paper Fig. 3b). Sums wrap at the C width.
+  `acc + (s ? -(a << e) : (a << e))` with `s = b[n-1]`, `e = b[n-2:0]`, no zero test (paper Fig. 3b): the narrow
+  term is negated, then one C-width adder (12 % fewer LUTs by the HLS estimate than an adder, a subtractor and a
+  mux). Sums wrap at the C width.
 - `include/MatrixMultiplication.h`: A packs of `DataA_t`, B packs of `DataB_t`, new `MemoryPackC_t`,
   `ComputePackC_t` (`OutputPack_t`), `kMemoryWidthC`, `kOuterTileSizeCMemory`, `SizeCMemory()`,
   `kCWordsPerPack` / `kCPacksPerWord`; the kernel's C port is `MemoryPackC_t`.
-- `src/Compute.cpp`: the C buffer, C pipes and stores are `ComputePackC_t`; the MAC is `Mac()`.
+- `src/Compute.cpp`: the C buffer, C pipes and stores are `ComputePackC_t`; the MAC is `Mac()`. The C buffer is
+  bound as `ram_s2p` (one write, one read port), so Vivado can use 72-bit BRAM36 at depth ≤ 512; the default `ram_2p`
+  became true-dual-port blocks with 36-bit ports in kernels/gemm (half of each BRAM36 unused).
 - `src/Memory.cpp`, `include/Memory.h`: A paths use `DataA_t`. `ConvertWidthC` handles three cases in one loop with
   `II = kCPacksPerWord`: gather several compute packs into one C word (as before), pass one through, or split one
   compute pack over `kCWordsPerPack` C words (int32 C with PM > 16). `WriteC` and `IndexC` count C words.
