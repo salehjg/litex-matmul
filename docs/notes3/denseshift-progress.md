@@ -14,7 +14,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | C2 | `ds_same_array` builds + card runs + exact screens | ✅ (screens queued) |
 | C3 | `ds_scale` | ✅ |
 | C4 | MNIST MLP end to end on the card | ✅ (uint8 and 7-bit activation variants) |
-| C5 | Float activations (stretch) | 🟡 building |
+| C5 | Float activations (stretch) | ✅ PE 32×16 (PE 40×16 build stopped by the memory guard) |
 | D | README / report | ⬜ |
 
 ## Log
@@ -209,3 +209,9 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 - **C3 done.** PE 32×64 int8×ds3→int16 on the card: 1024³ 358.93 (M = 1024 fills half of the 2048-wide tile),
   4096³ 739.64, **8192³ 750.91 GOP/s (91.7 % of 819.2), exact** (sums wrap at 16 bits and are checked so). 40 DSPs.
   With int32 sums the largest array that closes stays PE 32×32 (PE 48×32: congestion; 250 MHz: dataflow control).
+- **Chain 2 stopped by Claude Code's memory guard** (~08:20, system critically low on memory while the session was
+  idle). It was in the Vivado run of `f32xds3c32_pe40x16_t320x1024` (HLS: DSP 1505, LUT 407.2k, BRAM18 776; the largest
+  float build so far, no other job running). No process left; the build has no bitstream. Not run: that build's card
+  runs and the full exact screens (2 × 2048³, every entry) of the 7 DenseShift builds that met timing. Not restarted
+  (standing rule: memory-reaped tasks are restarted only when the user asks). To redo: `build/ds_chain2.sh` minus its
+  wait line, or the screens alone (no Vivado run apart from JTAG programming).
