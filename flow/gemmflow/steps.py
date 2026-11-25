@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 
-from .config import KERNEL_DIR, ROOT, tree_hash
+from .config import ROOT, tree_hash
 from .hls import HLSLIB_INCLUDE, HlsRun
 from .manifest import manifest
 from .reports import VivadoReport
@@ -178,6 +178,8 @@ class SimStep(Step):
 
     def supported(self):
         nf = self.cfg.numeric()
+        if nf.is_mixed:
+            return True, ""  # kernels/gemm_mixed has its own testbench (any A/B/C, exact)
         if nf.needs_ap_header or nf.family == "half":
             return False, f"{nf.spec}: the testbench supports float32 and native integers only"
         return True, ""
@@ -214,14 +216,16 @@ class SimStep(Step):
         settings = read_config_sh().get("VIVADO_SETTINGS", "")
         vitis_inc = os.path.join(os.path.dirname(os.path.dirname(settings)), "Vitis", "include")
         flags = ["-std=c++17", "-O2", "-DMM_DYNAMIC_SIZES", "-DHLSLIB_STREAM_TIMEOUT=16", "-DHLSLIB_LEGACY_SDX=0",
-                 f"-I{self.dir}", f"-I{os.path.join(KERNEL_DIR, 'include')}", f"-I{HLSLIB_INCLUDE}",
+                 f"-I{self.dir}", f"-I{os.path.join(self.cfg.kernel_dir(), 'include')}", f"-I{HLSLIB_INCLUDE}",
                  "-isystem", vitis_inc, "-pthread", "-w"]
+        if self.cfg.is_mixed():
+            flags.append("-DAP_INT_MAX_W=4096")  # kernels/gemm_mixed: wide C packs
         if self.cfg.kernel.transposed_a:
             flags.append("-DMM_TRANSPOSED_A")
         if self.cfg.kernel.data_type == "half":
             flags.append("-DMM_HALF_PRECISION")
-        srcs = [os.path.join(KERNEL_DIR, "tb", "test_gemm.cpp")] + \
-               [os.path.join(KERNEL_DIR, "src", s) for s in ("Top.cpp", "Memory.cpp", "Compute.cpp")]
+        srcs = [os.path.join(self.cfg.kernel_dir(), "tb", "test_gemm.cpp")] + \
+               [os.path.join(self.cfg.kernel_dir(), "src", s) for s in ("Top.cpp", "Memory.cpp", "Compute.cpp")]
         exe, log = os.path.join(self.dir, "test_gemm"), os.path.join(self.dir, "sim.log")
         with open(log, "w") as f:
             for args in (["g++", *flags, "-o", exe, *srcs], [exe, *map(str, self.size())]):

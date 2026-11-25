@@ -10,22 +10,22 @@
 
 // Read wide bursts from memory, then distribute it into separate column
 // buffers, which will be read out in column-major order and sent to the kernel
-void ReadA(MemoryPackK_t const a[], Stream<Data_t> aSplit[kTransposeWidth],
+void ReadA(MemoryPackK_t const a[], Stream<DataA_t> aSplit[kTransposeWidth],
            unsigned n, unsigned k, unsigned m);
 
 // We pop from the column buffers in column-major order, funneling the
 // transposed data to the kernel
 #ifdef MM_CONVERT_A
 
-void TransposeA(Stream<Data_t> aSplit[kTransposeWidth],
-                Stream<Data_t> &toKernel, unsigned n, unsigned k, unsigned m);
+void TransposeA(Stream<DataA_t> aSplit[kTransposeWidth],
+                Stream<DataA_t> &toKernel, unsigned n, unsigned k, unsigned m);
 
-void ConvertWidthA(Stream<Data_t> &narrow, Stream<ComputePackN_t> &wide,
+void ConvertWidthA(Stream<DataA_t> &narrow, Stream<ComputePackN_t> &wide,
                    unsigned, unsigned k, unsigned m);
 
 #else
 
-void TransposeA(Stream<Data_t> aSplit[kTransposeWidth],
+void TransposeA(Stream<DataA_t> aSplit[kTransposeWidth],
                 Stream<ComputePackN_t> &toKernel, unsigned n, unsigned k,
                 unsigned m);
 #endif
@@ -61,8 +61,8 @@ void FeedB(Stream<ComputePackM_t> &fromMemory, Stream<ComputePackM_t> &toKernel,
 
 #endif
 
-void ConvertWidthC(Stream<OutputPack_t> &narrow, Stream<MemoryPackM_t> &wide,
+void ConvertWidthC(Stream<OutputPack_t> &narrow, Stream<MemoryPackC_t> &wide,
                    unsigned n, unsigned k, unsigned m);
 
-void WriteC(Stream<MemoryPackM_t> &pipe, MemoryPackM_t memory[], unsigned n,
+void WriteC(Stream<MemoryPackC_t> &pipe, MemoryPackC_t memory[], unsigned n,
             unsigned k, unsigned m);

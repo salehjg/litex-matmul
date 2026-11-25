@@ -5,10 +5,10 @@
 
 #ifdef MM_TRANSPOSED_A
 void MatrixMultiplicationKernel(MemoryPackN_t const a[],
-                                MemoryPackM_t const b[], MemoryPackM_t c[]
+                                MemoryPackM_t const b[], MemoryPackC_t c[]
 #else
 void MatrixMultiplicationKernel(MemoryPackK_t const a[],
-                                MemoryPackM_t const b[], MemoryPackM_t c[]
+                                MemoryPackM_t const b[], MemoryPackC_t c[]
 #endif
 #ifdef MM_DYNAMIC_SIZES
                                 ,
@@ -39,9 +39,9 @@ void MatrixMultiplicationKernel(MemoryPackK_t const a[],
 
   // Memory accesses and pipes for A 
 #ifndef MM_TRANSPOSED_A
-  Stream<Data_t, kASplitDepth> aSplit[kTransposeWidth];
+  Stream<DataA_t, kASplitDepth> aSplit[kTransposeWidth];
   #pragma HLS STREAM variable=aSplit depth=kASplitDepth
-  Stream<Data_t> aConvert("aConvert");
+  Stream<DataA_t> aConvert("aConvert");
 #else
   Stream<MemoryPackN_t, 2 * kOuterTileSizeNMemory> aMemory("aMemory");
 #endif
@@ -52,7 +52,7 @@ void MatrixMultiplicationKernel(MemoryPackK_t const a[],
   Stream<ComputePackM_t, kPipeDepth> bPipes[kComputeTilesN + 1];
 
   // Pipes for C
-  Stream<ComputePackM_t> cPipes[kComputeTilesN + 1];
+  Stream<ComputePackC_t> cPipes[kComputeTilesN + 1];
 
 #ifndef HLSLIB_SYNTHESIS
   // Name the arrays of channels for debugging purposes
@@ -116,7 +116,7 @@ void MatrixMultiplicationKernel(MemoryPackK_t const a[],
                              pe, size_n, size_k, size_m);
   }
 
-  Stream<MemoryPackM_t, kCMemoryDepth> cMemory("cMemory");
+  Stream<MemoryPackC_t, kCMemoryDepth> cMemory("cMemory");
   HLSLIB_DATAFLOW_FUNCTION(ConvertWidthC, cPipes[0], cMemory, size_n, size_k,
                            size_m);
   HLSLIB_DATAFLOW_FUNCTION(WriteC, cMemory, c, size_n, size_k, size_m);

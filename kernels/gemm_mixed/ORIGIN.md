@@ -1,39 +1,30 @@
-# kernels/gemm: origin and changes
+# kernels/gemm_mixed: origin and changes
 
-Adapted from [spcl/gemm_hls](https://github.com/spcl/gemm_hls) (Johannes de Fine Licht, ETH Zurich, BSD-3-Clause,
-see `LICENSE.md`). The upstream repository is kept unmodified in `submodules/gemm_hls` as a reference.
+A copy of [`kernels/gemm`](../gemm/ORIGIN.md) (itself adapted from spcl/gemm_hls, BSD-3-Clause, see `LICENSE.md`)
+with separate element types for A, B and C and a choice of MAC, for DenseShift (docs/notes3/denseshift-plan.md).
+`kernels/gemm` is left as it is, so every earlier build id and HLS hash stays valid; the flow picks this tree for
+configs with `kernel.b_type` / `b_bits` or an `accum_bits` wider than the element (`BuildCfg.kernel_dir()`).
 
-| Item | Upstream |
-|---|---|
-| gemm_hls | `7c790eb660aca2754ea8026fb2e911c47565ef8c` (2022-03-15) |
-| hlslib (used through `submodules/gemm_hls/hlslib/include`) | `a67e02f263d666e1c7ba649c6755025b5fdd38bf` (2022-01-21) |
+The first commit of this directory (`b377caa`) is a verbatim copy of `kernels/gemm`; `git log -p kernels/gemm_mixed`
+shows every change since.
 
-## File map
+## Changes against kernels/gemm
 
-| Here | Upstream |
-|---|---|
-| `src/Top.cpp`, `src/Memory.cpp`, `src/Compute.cpp` | `kernel/` |
-| `include/MatrixMultiplication.h`, `Memory.h`, `Compute.h`, `Utility.h` | `include/` |
-| `include/Config.h.in` | `include/Config.h.in` (filled by CMake upstream, by `flow/gemmflow` here) |
-| `tb/test_gemm.cpp` | `test/TestSimulation.cpp` |
-
-## Changes
-
-The first commit of this directory is a verbatim copy. Every later change is listed here (newest first) and is a
-separate commit, so `git log -p kernels/gemm` shows the full diff against upstream.
-
-- `src/Memory.cpp` `ConvertWidthC`: the packs of one memory word are read in one unrolled iteration (constant
-  indices, `PIPELINE II = packs per word`) instead of a II=1 loop with a dynamic 512-bit index and a conditional
-  write (Vitis HLS 2026.1 estimated 10.6 ns for that path at a 5 ns target).
-- Streams for Vitis HLS 2026.1: in synthesis (`HLSLIB_SYNTHESIS`) `Stream` is an alias of `hls::stream<T, depth>`
-  (`include/MatrixMultiplication.h`), because 2026.1 fails on arrays of `hlslib::Stream` objects (HLS 214-177,
-  unresolved Phi node on aSplit/aPipes/bPipes). Simulation still uses `hlslib::Stream`. Call sites use `write()` /
-  `read()` (both types have them) instead of hlslib's `Push()` / `Pop()`; `src/Memory.cpp` no longer has its own
-  `using hlslib::Stream`.
-- Interface and knobs (plan §4.1): `src/Top.cpp` uses `ap_ctrl_hs`, `m_axi offset=direct` for A/B/C (burst length,
-  outstanding requests and latency from the config through `MM_PRAGMA`) and `ap_none` sizes, no AXI-Lite. Stream
-  depths `kPipeDepth`, `aSplit`, `bMemory`, `cMemory` come from the config (`include/Config.h.in`: `kPipeDepthCfg`,
-  `k*DepthCfg`, 0 = upstream default; `include/MatrixMultiplication.h`: `kASplitDepth`, `kBMemoryDepth`,
-  `kCMemoryDepth`, `MM_PRAGMA`).
-- `include/Utility.h`: no `hlslib/xilinx/OpenCL.h` (needs `CL/cl2.hpp`; there is no OpenCL host here); `Pack()` uses
-  `std::vector` with the default allocator instead of hlslib's 4 KB `AlignedAllocator`.
+- `include/Config.h.in`: `DataA_t`, `DataB_t`, `DataC_t` (always `ap_int`/`ap_uint`), their bit widths, one memory
+  width per operand (`kMemoryWidthBytesN/K` for A, `M` for B, `C` for C), `MM_MAC_MULTIPLY` or `MM_MAC_DENSESHIFT`
+  with `kShiftBits`. Includes `ap_int.h` and requires `-DAP_INT_MAX_W=4096` (an int32 C pack with PM 64 is 2048
+  bits). The upstream `OperatorMap`/`OperatorReduce` and the resource pragmas are gone.
+- `include/Mac.h` (new): `Mac(acc, a, b)`. Multiply: `acc + a * b` in exact widths. DenseShift:
+  `acc +/- (a << e)` with `s = b[n-1]`, `e = b[n-2:0]`, no zero test (paper Fig. 3b). Sums wrap at the C width.
+- `include/MatrixMultiplication.h`: A packs of `DataA_t`, B packs of `DataB_t`, new `MemoryPackC_t`,
+  `ComputePackC_t` (`OutputPack_t`), `kMemoryWidthC`, `kOuterTileSizeCMemory`, `SizeCMemory()`,
+  `kCWordsPerPack` / `kCPacksPerWord`; the kernel's C port is `MemoryPackC_t`.
+- `src/Compute.cpp`: the C buffer, C pipes and stores are `ComputePackC_t`; the MAC is `Mac()`.
+- `src/Memory.cpp`, `include/Memory.h`: A paths use `DataA_t`. `ConvertWidthC` handles three cases in one loop with
+  `II = kCPacksPerWord`: gather several compute packs into one C word (as before), pass one through, or split one
+  compute pack over `kCWordsPerPack` C words (int32 C with PM > 16). `WriteC` and `IndexC` count C words.
+- `src/Top.cpp`: stream and port types as above.
+- `include/Utility.h`: removed (only the old testbench used it).
+- `tb/test_gemm.cpp`: new testbench: random codes over the whole range of A and B (all DenseShift codes), int64
+  reference wrapped once to the C width, exact compare. `misc/gemm_mixed_sim/sim.py` runs it for every MAC, format
+  and C conversion case.

@@ -6,14 +6,15 @@
 #include "hlslib/xilinx/Utility.h"
 #include "MatrixMultiplication.h"
 #include "Memory.h"
+#include "Mac.h"
 #include <cassert>
 
 void ProcessingElement(Stream<ComputePackN_t> &aIn,
                        Stream<ComputePackN_t> &aOut,
                        Stream<ComputePackM_t> &bIn,
                        Stream<ComputePackM_t> &bOut,
-                       Stream<ComputePackM_t> &cOut,
-                       Stream<ComputePackM_t> &cIn, const unsigned locationN,
+                       Stream<ComputePackC_t> &cOut,
+                       Stream<ComputePackC_t> &cIn, const unsigned locationN,
                        const unsigned size_n, const unsigned size_k,
                        const unsigned size_m) {
   // A is double-buffered, such that new values can be read while the 
@@ -23,7 +24,7 @@ void ProcessingElement(Stream<ComputePackN_t> &aIn,
   ComputePackN_t aBuffer[2 * kInnerTilesN];
 
   // This is where we spend all our T^2 fast memory
-  ComputePackM_t cBuffer[kInnerTilesN * kInnerTilesM][kComputeTileSizeN];
+  ComputePackC_t cBuffer[kInnerTilesN * kInnerTilesM][kComputeTileSizeN];
   #pragma HLS ARRAY_PARTITION variable=cBuffer complete dim=2
 
   // Populate the buffer for the first outer product 
@@ -112,10 +113,10 @@ OuterTile_N:
               const bool inBoundsN = ((n0 * kInnerTilesN * kComputeTileSizeN +
                                        n1 * kComputeTileSizeN + n2) < size_n);
 
-              ComputePackM_t cStore;
+              ComputePackC_t cStore;
               const auto cPrev = (k > 0)
                                      ? cBuffer[n1 * kInnerTilesM + m1][n2]
-                                     : ComputePackM_t(static_cast<Data_t>(0));
+                                     : ComputePackC_t(static_cast<DataC_t>(0));
 
             Unroll_M:
               for (unsigned m2 = 0; m2 < kComputeTileSizeM; ++m2) {
@@ -126,12 +127,9 @@ OuterTile_N:
 
                 const bool inBounds = inBoundsN && inBoundsM;
 
-                const auto mapped = OperatorMap::Apply(aVal[n2], bVal[m2]);
-                MM_MULT_RESOURCE_PRAGMA(mapped);
+                // litex-matmul (kernels/gemm_mixed): multiply or DenseShift MAC in the C width (include/Mac.h).
                 const auto prev = cPrev[m2];
-
-                const auto reduced = OperatorReduce::Apply(prev, mapped);
-                MM_ADD_RESOURCE_PRAGMA(reduced);
+                const DataC_t reduced = Mac(prev, aVal[n2], bVal[m2]);
                 // If out of bounds, propagate the existing value instead of
                 // storing the newly computed value
                 cStore[m2] = inBounds ? reduced : prev; 

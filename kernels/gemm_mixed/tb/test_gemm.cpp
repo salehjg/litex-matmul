@@ -1,96 +1,105 @@
-/// @author    Johannes de Fine Licht (definelicht@inf.ethz.ch)
-/// @copyright This software is copyrighted under the BSD 3-Clause License.
-
-#include <algorithm>
-#include <cmath>
+// litex-matmul (kernels/gemm_mixed): g++ simulation test of the mixed-type kernel (docs/notes3/denseshift-plan.md).
+//
+//   ./test_gemm N K M [seed]
+//
+// A and B are random codes over their whole range (DenseShift B: all 2^kShiftBits codes). The reference sums
+// value(a) * value(b) in 64-bit arithmetic and wraps once to kBitsC bits, which equals the kernel's per-step wrap
+// (arithmetic mod 2^kBitsC). Exact compare; exit 1 on the first mismatches.
+#include <cstdint>
 #include <iostream>
 #include <random>
-#include <type_traits>
+#include <string>
 #include <vector>
 #include "MatrixMultiplication.h"
-#include "Utility.h"
+
+static int64_t ValueA(const DataA_t &a) { return a.to_int64(); }
+
+static int64_t ValueB(const DataB_t &b) {
+#ifdef MM_MAC_DENSESHIFT
+  const int e = b(kShiftBits - 2, 0).to_int();
+  return b[kShiftBits - 1] ? -(int64_t(1) << e) : (int64_t(1) << e);
+#else
+  return b.to_int64();
+#endif
+}
+
+static int64_t WrapC(uint64_t x) {
+  DataC_t c = DataC_t(int64_t(x));  // keeps the low kBitsC bits, sign-extended for signed C
+  return c.to_int64();
+}
+
+template <int W, typename T>
+std::vector<hlslib::DataPack<T, W>> Pack(const std::vector<T> &v) {
+  std::vector<hlslib::DataPack<T, W>> out(v.size() / W);
+  for (size_t i = 0; i < out.size(); ++i)
+    for (int w = 0; w < W; ++w) out[i][w] = v[i * W + w];
+  return out;
+}
 
 int main(int argc, char **argv) {
-#ifdef MM_DYNAMIC_SIZES
-  if (argc < 4 || argc > 4) {
-    std::cerr << "Usage: ./TestSimulation N K M" << std::endl;
+  if (argc < 4 || argc > 5) {
+    std::cerr << "Usage: ./test_gemm N K M [seed]" << std::endl;
     return 1;
   }
   const unsigned size_n = std::stoul(argv[1]);
   const unsigned size_k = std::stoul(argv[2]);
   const unsigned size_m = std::stoul(argv[3]);
-  if (size_k % kMemoryWidthK != 0) {
-    std::cerr << "K must be divisable by memory width." << std::endl;
-    return 1;
-  }
-#ifndef MM_TRANSPOSED_A
-  if (size_k % kTransposeWidth != 0) {
-    std::cerr << "K must be divisable by the transpose width." << std::endl;
-    return 1;
-  }
-#endif
-  if (size_m % kMemoryWidthM != 0) {
-    std::cerr << "M must be divisable by memory width." << std::endl;
-    return 1;
-  }
+  const unsigned seed = argc > 4 ? std::stoul(argv[4]) : kSeed;
+#ifdef MM_TRANSPOSED_A
+  if (size_n % kMemoryWidthN != 0) { std::cerr << "N must be divisable by the A memory width.\n"; return 1; }
 #else
-  constexpr auto size_n = kSizeN;
-  constexpr auto size_k = kSizeK;
-  constexpr auto size_m = kSizeM;
+  if (size_k % kMemoryWidthK != 0 || size_k % kTransposeWidth != 0) {
+    std::cerr << "K must be divisable by the A memory and transpose widths.\n";
+    return 1;
+  }
+#endif
+  if (size_m % kMemoryWidthM != 0 || size_m % kMemoryWidthC != 0) {
+    std::cerr << "M must be divisable by the B and C memory widths.\n";
+    return 1;
+  }
+
+  std::mt19937_64 rng(seed);
+  std::vector<DataA_t> a(size_n * size_k);  // row-major N x K
+  std::vector<DataB_t> b(size_k * size_m);  // row-major K x M
+  for (auto &x : a) x = DataA_t(int64_t(rng()));  // any bit pattern: the whole code range
+#ifdef MM_MAC_DENSESHIFT
+  for (auto &x : b) x = DataB_t(rng() & ((1u << kShiftBits) - 1));
+#else
+  for (auto &x : b) x = DataB_t(int64_t(rng()));
 #endif
 
-  std::vector<Data_t> a(size_n * size_k);
-  std::vector<Data_t> b(size_k * size_m);
-  std::vector<Data_t> cReference(size_n * size_m, 0);
-
-  std::default_random_engine rng(kSeed);
-  typename std::conditional<std::is_integral<Data_t>::value,
-                            std::uniform_int_distribution<unsigned long>,
-                            std::uniform_real_distribution<double>>::type
-      dist(1, 10);
-
-  std::for_each(a.begin(), a.end(),
-                [&dist, &rng](Data_t &in) { in = Data_t(dist(rng)); });
-  std::for_each(b.begin(), b.end(),
-                [&dist, &rng](Data_t &in) { in = Data_t(dist(rng)); });
-
+#ifdef MM_TRANSPOSED_A
+  std::vector<DataA_t> at(size_k * size_n);  // the kernel reads A^T, row-major K x N
+  for (unsigned i = 0; i < size_n; ++i)
+    for (unsigned k = 0; k < size_k; ++k) at[k * size_n + i] = a[i * size_k + k];
+  const auto aKernel = Pack<kMemoryWidthA>(at);
+#else
   const auto aKernel = Pack<kMemoryWidthA>(a);
+#endif
   const auto bKernel = Pack<kMemoryWidthM>(b);
-  auto cKernel = Pack<kMemoryWidthM>(cReference);
-
-  ReferenceImplementation(a.data(), b.data(), cReference.data(), size_n, size_k,
-                          size_m);
+  std::vector<MemoryPackC_t> cKernel(size_n * size_m / kMemoryWidthC);
 
   std::cout << "Running simulation...\n" << std::flush;
-#ifdef MM_DYNAMIC_SIZES
-  MatrixMultiplicationKernel(aKernel.data(), bKernel.data(), cKernel.data(),
-                             size_n, size_k, size_m);
-#else
-  MatrixMultiplicationKernel(aKernel.data(), bKernel.data(), cKernel.data());
-#endif
+  MatrixMultiplicationKernel(aKernel.data(), bKernel.data(), cKernel.data(), size_n, size_k, size_m);
   std::cout << "Verifying results...\n" << std::flush;
 
-  const auto cTest = Unpack<kMemoryWidthM>(cKernel);
-
+  unsigned bad = 0;
   for (unsigned i = 0; i < size_n; ++i) {
     for (unsigned j = 0; j < size_m; ++j) {
-      const auto testVal = make_signed<Data_t>(cTest[i * size_m + j]);
-      const auto refVal = make_signed<Data_t>(cReference[i * size_m + j]);
-      const Data_t diff = std::abs(testVal - refVal);
-      bool mismatch;
-      if (std::is_floating_point<Data_t>::value) {
-        mismatch = diff / refVal > static_cast<Data_t>(1e-3);
-      } else {
-        mismatch = diff != 0;
-      }
-      if (mismatch) {
-        std::cerr << "Mismatch at (" << i << ", " << j << "): " << testVal
-                  << " vs. " << refVal << "\n";
-        return 1;
-      }
+      uint64_t acc = 0;
+      for (unsigned k = 0; k < size_k; ++k) acc += uint64_t(ValueA(a[i * size_k + k]) * ValueB(b[k * size_m + j]));
+      const int64_t ref = WrapC(acc);
+      const DataC_t got_c = cKernel[(i * size_m + j) / kMemoryWidthC][(i * size_m + j) % kMemoryWidthC];
+      const int64_t got = got_c.to_int64();
+      if (got != ref && bad++ < 10)
+        std::cerr << "Mismatch at (" << i << ", " << j << "): " << got << " vs. " << ref << "\n";
     }
   }
-  std::cout << "Matrix-matrix multiplication successfully verified.\n";
-
+  if (bad) {
+    std::cerr << bad << " of " << size_n * size_m << " entries wrong\n";
+    return 1;
+  }
+  std::cout << "Matrix-matrix multiplication successfully verified (" << size_n << "x" << size_k << "x" << size_m
+            << ", " << kBitsA << "-bit A, " << kBitsB << "-bit B, " << kBitsC << "-bit C).\n";
   return 0;
 }

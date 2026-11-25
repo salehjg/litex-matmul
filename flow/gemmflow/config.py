@@ -13,10 +13,11 @@ import re
 from dataclasses import dataclass, field, fields
 from typing import Optional
 
-from .numeric import NumericError, resolve as resolve_numeric
+from .numeric import NumericError, is_mixed_config, resolve as resolve_numeric, resolve_mixed
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 KERNEL_DIR = os.path.join(ROOT, "kernels", "gemm")
+KERNEL_MIXED_DIR = os.path.join(ROOT, "kernels", "gemm_mixed")  # separate A/B/C types (docs/notes3)
 
 DEVICE = {"part": "xc7k480tiffg1156-2L", "dsp": 1920, "bram36": 955}
 
@@ -37,7 +38,7 @@ class ConfigError(ValueError):
 
 # Fields added after 2026-11-24 are hashed only when they are not None, so the build ids (and HLS hashes) of earlier
 # configs stay the same (flow/tests pins them). Section -> field names.
-LATE_FIELDS = {"kernel": ("data_bits", "frac_bits", "accum_bits")}
+LATE_FIELDS = {"kernel": ("data_bits", "frac_bits", "accum_bits", "b_type", "b_bits")}
 
 
 def _hash_dict(d):
@@ -78,7 +79,9 @@ class KernelCfg:
     data_type:             str = "float"   # float | half | int | uint | fixed | ufixed (flow/gemmflow/numeric.py)
     data_bits:             Optional[int] = None   # None: 32 for float, 16 for half; required otherwise
     frac_bits:             Optional[int] = None   # fixed/ufixed: fractional bits
-    accum_bits:            Optional[int] = None   # reserved: None or == data_bits (wider needs a kernel change)
+    accum_bits:            Optional[int] = None   # C (the sum): None = data_bits; wider -> kernels/gemm_mixed
+    b_type:                Optional[str] = None   # B format when it differs from A: int | uint | pow2 (DenseShift)
+    b_bits:                Optional[int] = None   # B bits (pow2: 2, 3, 4)
     parallelism_n:         int = 8
     parallelism_m:         int = 8
     memory_tile_size_n:    int = 128
@@ -157,22 +160,39 @@ class BuildCfg:
 
     # Derived values -----------------------------------------------------------------------------------------------
 
+    def is_mixed(self):
+        """True when the config needs kernels/gemm_mixed (B format of its own, or a C wider than the element)."""
+        k = self.kernel
+        return is_mixed_config(k.data_type, k.data_bits, k.b_type, k.b_bits, k.accum_bits)
+
+    def kernel_dir(self):
+        return KERNEL_MIXED_DIR if self.is_mixed() else KERNEL_DIR
+
     def numeric(self):
-        """The element format (flow/gemmflow/numeric.py); raises ConfigError if unsupported."""
+        """The element format (flow/gemmflow/numeric.py): a NumericFormat, or a MixedFormat (A, B, C, MAC) for
+        kernels/gemm_mixed. Raises ConfigError if unsupported."""
         k = self.kernel
         try:
+            if self.is_mixed():
+                return resolve_mixed(k.data_type, k.data_bits, k.frac_bits, k.b_type, k.b_bits, k.accum_bits)
             return resolve_numeric(k.data_type, k.data_bits, k.frac_bits, k.accum_bits)
         except NumericError as e:
             raise ConfigError(str(e)) from None
 
+    def operands(self):
+        """(A, B, C) NumericFormats; all the same one for single-type configs."""
+        nf = self.numeric()
+        return (nf.a, nf.b, nf.c) if nf.is_mixed else (nf, nf, nf)
+
     @property
     def elem_bytes(self):
         """sizeof(Data_t): container bytes of one element (several packed elements share one for 2/4-bit types)."""
-        return self.numeric().container_bytes
+        return self.numeric().container_bytes if not self.is_mixed() else self.operands()[0].container_bytes
 
-    def elems(self, nbytes):
-        """Number of elements in nbytes of memory (512-bit words hold 512 / bits elements)."""
-        return nbytes * 8 // self.numeric().bits
+    def elems(self, nbytes, operand="a"):
+        """Number of elements of operand a/b/c in nbytes of memory (512-bit words hold 512 / bits elements)."""
+        f = self.operands()["abc".index(operand)]
+        return nbytes * 8 // f.storage_bits
 
     def resolved_vivado(self):
         """Directives after the preset, explicit fields win. max_threads resolved (Vivado caps it at 8 on Linux)."""
@@ -193,7 +213,8 @@ class BuildCfg:
         if not k.transposed_a:
             mult_k = math.lcm(mult_k, self.elems(k.transpose_width_bytes))
         mult_n = self.elems(k.bus_width_bytes.n) if k.transposed_a else 1
-        return mult_n, mult_k, self.elems(k.bus_width_bytes.m)
+        mult_m = math.lcm(self.elems(k.bus_width_bytes.m, "b"), self.elems(k.bus_width_bytes.m, "c"))
+        return mult_n, mult_k, mult_m
 
     def peak_gops(self):
         """2 operations per multiply-add, P_N x P_M multiply-adds per cycle (GFLOP/s for float types)."""
@@ -210,23 +231,34 @@ class BuildCfg:
         k = self.kernel
         errors, warnings = [], []
         nf = self.numeric()
+        fa, fb, fc = self.operands()
         bw = k.bus_width_bytes
-        for name in ("n", "k", "m"):
+        for name, fmts in (("n", (fa,)), ("k", (fa,)), ("m", (fb, fc))):
             w = getattr(bw, name)
-            if w <= 0 or (w * 8) % nf.bits:
-                errors.append(f"bus_width_bytes.{name}={w} must be a positive multiple of the {nf.bits}-bit element")
+            for f in fmts:
+                if w <= 0 or (w * 8) % f.storage_bits:
+                    errors.append(f"bus_width_bytes.{name}={w} must be a positive multiple of the {f.storage_bits}-bit "
+                                  "element")
         for name in ("parallelism_n", "parallelism_m", "memory_tile_size_n", "memory_tile_size_m"):
             if getattr(k, name) <= 0:
                 errors.append(f"kernel.{name} must be positive")
         if errors:
             raise ConfigError("; ".join(errors))
 
-        width_m, width_n = self.elems(bw.m), self.elems(bw.n)
+        width_m, width_n, width_c = self.elems(bw.m, "b"), self.elems(bw.n), self.elems(bw.m, "c")
         if width_m % k.parallelism_m:
             errors.append(f"elements per M bus word = {width_m} must be a multiple of parallelism_m = {k.parallelism_m}")
         if k.memory_tile_size_m % width_m:
             errors.append(f"memory_tile_size_m = {k.memory_tile_size_m} must be a multiple of the elements per M bus "
                           f"word = {width_m}")
+        if nf.is_mixed:
+            # kernels/gemm_mixed ConvertWidthC splits a compute pack over several C words or gathers several packs.
+            if width_c % k.parallelism_m and k.parallelism_m % width_c:
+                errors.append(f"C elements per bus word = {width_c} and parallelism_m = {k.parallelism_m} must divide "
+                              "one another")
+            if k.memory_tile_size_m % width_c:
+                errors.append(f"memory_tile_size_m = {k.memory_tile_size_m} must be a multiple of the C elements per "
+                              f"bus word = {width_c}")
         if k.memory_tile_size_n % k.parallelism_n:
             errors.append(f"memory_tile_size_n = {k.memory_tile_size_n} must be a multiple of parallelism_n = {k.parallelism_n}")
         if k.memory_tile_size_m % k.parallelism_m:
@@ -253,8 +285,9 @@ class BuildCfg:
             if k.memory_tile_size_n % width_n:
                 errors.append(f"transposed A: memory_tile_size_n must be a multiple of the elements per N bus word = {width_n}")
         else:
-            if (k.transpose_width_bytes * 8) % nf.bits:
-                errors.append(f"transpose_width_bytes = {k.transpose_width_bytes} must hold whole {nf.bits}-bit elements")
+            if (k.transpose_width_bytes * 8) % fa.storage_bits:
+                errors.append(f"transpose_width_bytes = {k.transpose_width_bytes} must hold whole {fa.storage_bits}-bit "
+                              "elements")
             if k.transpose_width_bytes % bw.k:
                 errors.append(f"transpose_width_bytes = {k.transpose_width_bytes} must be a multiple of bus_width_bytes.k = {bw.k}")
             limit = (k.memory_tile_size_n // k.parallelism_n) * (k.memory_tile_size_m // k.parallelism_m)
@@ -264,7 +297,8 @@ class BuildCfg:
         for res_name in ("mult_resource", "add_resource"):
             v = getattr(k, res_name)
             if v is not None and v not in nf.valid_impls():
-                errors.append(f"kernel.{res_name} = {v!r} must be one of {list(nf.valid_impls())} for {nf.spec}")
+                allowed = list(nf.valid_impls()) or ["null (not wired into kernels/gemm_mixed)"]
+                errors.append(f"kernel.{res_name} = {v!r} must be one of {allowed} for {nf.spec}")
         for ch in (self.memory_map.a, self.memory_map.b, self.memory_map.c):
             if ch not in ("ch0", "ch1"):
                 errors.append(f"memory_map entries must be ch0 or ch1, got {ch!r}")
@@ -285,6 +319,8 @@ class BuildCfg:
     def config_h_values(self):
         """Placeholder values for Config.h.in. Widths are in container units (bytes / sizeof(Data_t)), as the kernel
         counts elements: for packed 2/4-bit types the logical bus width is 512 / bits containers per 64-byte word."""
+        if self.is_mixed():
+            return self._config_h_values_mixed()
         k, bw, nf = self.kernel, self.kernel.bus_width_bytes, self.numeric()
         e = nf.container_bytes
         v = {
@@ -315,14 +351,48 @@ class BuildCfg:
         v["MM_DATA_WIDTH"] = e  # sizeof(Data_t); Config.h.in writes it as ${MM_DATA_WIDTH_${MM_DATA_TYPE}}
         return v
 
+    def _config_h_values_mixed(self):
+        """kernels/gemm_mixed/include/Config.h.in: one type, bit width and logical bus width per operand."""
+        k, bw, nf = self.kernel, self.kernel.bus_width_bytes, self.numeric()
+        fa, fb, fc = nf.a, nf.b, nf.c
+        return {
+            "MM_DATA_TYPE_A": fa.ap_type, "MM_DATA_TYPE_B": fb.ap_type, "MM_DATA_TYPE_C": fc.ap_type,
+            "MM_BITS_A": fa.bits, "MM_BITS_B": fb.storage_bits, "MM_BITS_C": fc.bits,
+            "MM_MEMORY_BUS_WIDTH_N": fa.logical_bytes(bw.n),
+            "MM_MEMORY_BUS_WIDTH_K": fa.logical_bytes(bw.k),
+            "MM_MEMORY_BUS_WIDTH_M": fb.logical_bytes(bw.m),
+            "MM_MEMORY_BUS_WIDTH_C": fc.logical_bytes(bw.m),
+            "MM_SIZE_N": 0, "MM_SIZE_K": 0, "MM_SIZE_M": 0,
+            "MM_MEMORY_TILE_SIZE_N": k.memory_tile_size_n,
+            "MM_MEMORY_TILE_SIZE_M": k.memory_tile_size_m,
+            "MM_PARALLELISM_N":      k.parallelism_n,
+            "MM_PARALLELISM_M":      k.parallelism_m,
+            "MM_GRANULARITY_N":      1,
+            "MM_TRANSPOSE_WIDTH":    fa.logical_bytes(k.transpose_width_bytes),
+            "MM_CLOCK_INTERNAL":     self.clocks.accel_mhz,
+            "MM_GOLDEN_DIR":         "",
+            "MM_MAC":                nf.mac.upper(),
+            "MM_SHIFT_BITS":         fb.bits if nf.mac == "denseshift" else 0,
+            "MM_KERNEL_WIDTH_M":     k.parallelism_m * fb.container_bytes,
+            "MM_DATA_WIDTH_A":       fa.container_bytes,
+            "MM_PIPE_DEPTH":         k.fifo_depths.pipe,
+            "MM_A_SPLIT_DEPTH":      k.fifo_depths.a_split or 0,
+            "MM_B_MEMORY_DEPTH":     k.fifo_depths.b_memory or 0,
+            "MM_C_MEMORY_DEPTH":     k.fifo_depths.c_memory or 0,
+            "MM_AXI_MAX_BURST":      k.m_axi.max_burst_len,
+            "MM_AXI_OUTSTANDING":    k.m_axi.num_outstanding,
+            "MM_AXI_LATENCY":        k.m_axi.latency,
+        }
+
     def render_config_h(self, template_path=None):
         """Fill ${NAME} placeholders (nested ones like ${MM_DATA_WIDTH_${MM_DATA_TYPE}} from the inside out)."""
-        template_path = template_path or os.path.join(KERNEL_DIR, "include", "Config.h.in")
+        template_path = template_path or os.path.join(self.kernel_dir(), "include", "Config.h.in")
         with open(template_path) as f:
             text = f.read()
         values = {k: str(v) for k, v in self.config_h_values().items()}
         # The nested width lookup is resolved here: type names such as ap_fixed<16, 8> are not placeholder names.
-        text = text.replace("${MM_DATA_WIDTH_${MM_DATA_TYPE}}", values.pop("MM_DATA_WIDTH"))
+        if "MM_DATA_WIDTH" in values:
+            text = text.replace("${MM_DATA_WIDTH_${MM_DATA_TYPE}}", values.pop("MM_DATA_WIDTH"))
         pattern = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
         for _ in range(4):
             text, n = pattern.subn(lambda m: values[m.group(1)] if m.group(1) in values else m.group(0), text)
@@ -348,7 +418,7 @@ class BuildCfg:
         """What the HLS IP depends on: kernel, clocks, hls sections and the kernel source tree."""
         d = _hash_dict({"kernel": dataclasses.asdict(self.kernel), "clocks": dataclasses.asdict(self.clocks),
                         "hls": dataclasses.asdict(self.hls)})
-        d["sources"] = tree_hash(KERNEL_DIR)
+        d["sources"] = tree_hash(self.kernel_dir())
         return _sha(json.dumps(d, sort_keys=True))
 
     def build_id(self):

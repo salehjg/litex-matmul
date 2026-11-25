@@ -47,16 +47,15 @@ unsigned IndexC(const unsigned n0, const unsigned n1, const unsigned m0,
                 const unsigned m1m, const unsigned size_n,
                 const unsigned size_k, const unsigned size_m) {
   #pragma HLS INLINE
-  const auto index = (n0 * kOuterTileSizeN + n1) * SizeMMemory(size_m) +
-                     (m0 * kOuterTileSizeMMemory + m1m);
-  // assert(index < size_n * SizeMMemory(size_m));
+  const auto index = (n0 * kOuterTileSizeN + n1) * SizeCMemory(size_m) +
+                     (m0 * kOuterTileSizeCMemory + m1m);
   return index;
 }
 
 #ifndef MM_TRANSPOSED_A
 
 void _ReadAInner(MemoryPackK_t const a[],
-                 Stream<Data_t> aSplit[kTransposeWidth], const unsigned n0,
+                 Stream<DataA_t> aSplit[kTransposeWidth], const unsigned n0,
                  const unsigned n1, const unsigned n2, const unsigned k0,
                  const unsigned k1, const unsigned size_n,
                  const unsigned size_k, const unsigned size_m) {
@@ -71,7 +70,7 @@ ReadA_Unroll:
 
 template <unsigned innerReads>
 void _ReadAInnerLoop(MemoryPackK_t const a[],
-                     Stream<Data_t> aSplit[kTransposeWidth], unsigned n0,
+                     Stream<DataA_t> aSplit[kTransposeWidth], unsigned n0,
                      unsigned n1, unsigned k0, const unsigned size_n,
                      const unsigned size_k, const unsigned size_m) {
   #pragma HLS INLINE
@@ -90,7 +89,7 @@ ReadA_N2:
 // otherwise doesn't pipeline the loops (because the inner trip count is 1).
 template <>
 void _ReadAInnerLoop<1>(MemoryPackK_t const a[],
-                        Stream<Data_t> aSplit[kTransposeWidth],
+                        Stream<DataA_t> aSplit[kTransposeWidth],
                         const unsigned n0, const unsigned n1, const unsigned k0,
                         const unsigned size_n, const unsigned size_k,
                         const unsigned size_m) {
@@ -103,7 +102,7 @@ ReadA_N2:
   }
 }
 
-void ReadA(MemoryPackK_t const a[], Stream<Data_t> aSplit[kTransposeWidth],
+void ReadA(MemoryPackK_t const a[], Stream<DataA_t> aSplit[kTransposeWidth],
            const unsigned size_n, const unsigned size_k,
            const unsigned size_m) {
   assert((static_cast<unsigned long>(OuterTilesN(size_n)) *
@@ -128,7 +127,7 @@ ReadA_N0:
 }
 
 template <unsigned inner_tiles>
-void _TransposeAInner(Stream<Data_t> aSplit[kTransposeWidth],
+void _TransposeAInner(Stream<DataA_t> aSplit[kTransposeWidth],
                       Stream<ComputePackN_t> &toKernel, const unsigned k) {
   #pragma HLS INLINE
   for (unsigned n1 = 0; n1 < kOuterTileSizeN / kComputeTileSizeN; ++n1) {
@@ -147,7 +146,7 @@ void _TransposeAInner(Stream<Data_t> aSplit[kTransposeWidth],
 }
 
 template <>
-void _TransposeAInner<1>(Stream<Data_t> aSplit[kTransposeWidth],
+void _TransposeAInner<1>(Stream<DataA_t> aSplit[kTransposeWidth],
                          Stream<ComputePackN_t> &toKernel, const unsigned k) {
   #pragma HLS INLINE
   for (unsigned n1 = 0; n1 < kOuterTileSizeN; ++n1) {
@@ -161,7 +160,7 @@ void _TransposeAInner<1>(Stream<Data_t> aSplit[kTransposeWidth],
 
 // We pop from the column buffers in column-major order, funneling the
 // transposed data to the kernel
-void TransposeA(Stream<Data_t> aSplit[kTransposeWidth],
+void TransposeA(Stream<DataA_t> aSplit[kTransposeWidth],
                 Stream<ComputePackN_t> &toKernel, const unsigned size_n,
                 const unsigned size_k, const unsigned size_m) {
   assert((static_cast<unsigned long>(OuterTilesN(size_n)) *
@@ -181,7 +180,7 @@ TransposeA_N0:
 }
 
 #ifdef MM_CONVERT_A
-void ConvertWidthA(Stream<Data_t> &narrow, Stream<ComputePackN_t> &wide,
+void ConvertWidthA(Stream<DataA_t> &narrow, Stream<ComputePackN_t> &wide,
                    const unsigned size_n, const unsigned size_k,
                    const unsigned size_m) {
 ConvertWidthA_Outer:
@@ -320,48 +319,48 @@ ConvertWidthB_Outer:
   }
 }
 
-void ConvertWidthC(Stream<ComputePackM_t> &narrow, Stream<MemoryPackM_t> &wide,
+// litex-matmul (kernels/gemm_mixed): C has its own memory width. Either kCPacksPerWord compute packs are gathered
+// into one memory word (all in one unrolled iteration with constant indices, II = packs per word, as in kernels/gemm),
+// or one compute pack of PM DataC_t lanes is split over kCWordsPerPack memory words (int32 C with PM > 16), or it is
+// passed through (both 1). One memory word per iteration.
+void ConvertWidthC(Stream<ComputePackC_t> &narrow, Stream<MemoryPackC_t> &wide,
                    const unsigned size_n, const unsigned size_k,
                    const unsigned size_m) {
-  assert(kMemoryWidthM % ComputePackM_t::kWidth == 0);
-
-  // assert((((size_n * size_m) / MemoryPackM_t::kWidth) *
-  //         (kMemoryWidthM / ComputePackM_t::kWidth) * ComputePackM_t::kWidth) ==
-  //        size_n * size_m);
-
+  ComputePackC_t computePack;  // split: the pack being written out
 ConvertWidthC_N:
   for (unsigned i = 0; i < OuterTilesN(size_n) * kOuterTileSizeN; ++i) {
   ConvertWidthC_M:
-    for (unsigned j = 0; j < OuterTilesM(size_m) * kOuterTileSizeMMemory; ++j) {
-#ifdef MM_CONVERT_B
-      // litex-matmul: all compute packs of one memory word are read in one (unrolled) iteration with constant
-      // indices, II = number of packs, so one pack per cycle as before. Upstream's II=1 loop indexed the 512-bit
-      // pack dynamically between the stream read and the conditional write: Vitis HLS 2026.1 estimated 10.6 ns for
-      // that at a 5 ns target.
-      #pragma HLS PIPELINE II=kMemoryWidthM / ComputePackM_t::kWidth
+    for (unsigned j = 0; j < OuterTilesM(size_m) * kOuterTileSizeCMemory; ++j) {
+      #pragma HLS PIPELINE II=kCPacksPerWord
       #pragma HLS LOOP_FLATTEN
-      MemoryPackM_t memoryPack;
-    ConvertWidthC_Memory:
-      for (unsigned j = 0; j < kMemoryWidthM / ComputePackM_t::kWidth; ++j) {
-        #pragma HLS UNROLL
-        const auto computePack = narrow.read();
-      ConvertWidthC_Compute:
-        for (unsigned w = 0; w < ComputePackM_t::kWidth; ++w) {
+      MemoryPackC_t memoryPack;
+      if (kCPacksPerWord > 1) {
+      ConvertWidthC_Gather:
+        for (unsigned p = 0; p < kCPacksPerWord; ++p) {
           #pragma HLS UNROLL
-          memoryPack[j * ComputePackM_t::kWidth + w] = computePack[w];
+          const auto pack = narrow.read();
+          for (unsigned w = 0; w < kComputeTileSizeM; ++w) {
+            #pragma HLS UNROLL
+            memoryPack[p * kComputeTileSizeM + w] = pack[w];
+          }
+        }
+      } else {
+        const unsigned part = j % kCWordsPerPack;
+        if (part == 0) {
+          computePack = narrow.read();
+        }
+      ConvertWidthC_Split:
+        for (unsigned w = 0; w < kMemoryWidthC; ++w) {
+          #pragma HLS UNROLL
+          memoryPack[w] = computePack[part * kMemoryWidthC + w];
         }
       }
       wide.write(memoryPack);
-#else
-      #pragma HLS PIPELINE II=1
-      #pragma HLS LOOP_FLATTEN
-      wide.write(narrow.read());
-#endif
     }
   }
 }
 
-void WriteC(Stream<MemoryPackM_t> &pipe, MemoryPackM_t memory[],
+void WriteC(Stream<MemoryPackC_t> &pipe, MemoryPackC_t memory[],
             const unsigned size_n, const unsigned size_k,
             const unsigned size_m) {
   // assert((OuterTilesN(size_n) * OuterTilesM(size_m) * kOuterTileSizeN *
@@ -374,12 +373,12 @@ WriteC_OuterTile_N:
     WriteC_N1:
       for (unsigned n1 = 0; n1 < kOuterTileSizeN; ++n1) {
       WriteC_M1:
-        for (unsigned m1m = 0; m1m < kOuterTileSizeMMemory; ++m1m) {
+        for (unsigned m1m = 0; m1m < kOuterTileSizeCMemory; ++m1m) {
           #pragma HLS PIPELINE II=1
           #pragma HLS LOOP_FLATTEN
           const auto val = pipe.read();
           if ((n0 * kOuterTileSizeN + n1 < size_n) &&
-              (m0 * kOuterTileSizeMMemory + m1m < SizeMMemory(size_m))) {
+              (m0 * kOuterTileSizeCMemory + m1m < SizeCMemory(size_m))) {
             memory[IndexC(n0, n1, m0, m1m, size_n, size_k, size_m)] = val;
           }
         }

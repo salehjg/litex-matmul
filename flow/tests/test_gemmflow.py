@@ -20,7 +20,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "flow"))
 
 from gemmflow.config import BuildCfg, ConfigError          # noqa: E402
-from gemmflow.numeric import NumericError, parse_spec, resolve  # noqa: E402
+from gemmflow.numeric import NumericError, parse_mixed_spec, parse_spec, resolve, resolve_mixed  # noqa: E402
 from gemmflow.results import ResultStore, flatten           # noqa: E402
 from gemmflow.steps import write_build_reports              # noqa: E402
 
@@ -253,6 +253,72 @@ class TestSimStep(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("native integers", why)
         self.assertEqual(SimStep(int_cfg(data_type="int", data_bits=8)).size(), (64, 128, 64))
+
+
+class TestMixed(unittest.TestCase):
+    """kernels/gemm_mixed: separate A/B/C formats, DenseShift B (docs/notes3/denseshift-plan.md)."""
+
+    def ds_cfg(self, **kw):
+        k = dict(data_type="int", data_bits=8, b_type="pow2", b_bits=3, accum_bits=32, parallelism_m=32,
+                 memory_tile_size_n=512, memory_tile_size_m=1024)
+        k.update(kw)
+        return int_cfg(**k)
+
+    def test_formats(self):
+        f = resolve_mixed("int", 8, None, "pow2", 3, 32)
+        self.assertEqual((f.spec, f.short, f.kind, f.mac), ("int8xdshift3-int32", "i8xds3c32", "pow2", "denseshift"))
+        self.assertEqual((f.b.spec, f.b.storage_bits, f.b.elems_per_word, f.b.logical_bytes(64)), ("dshift3", 4, 128, 128))
+        self.assertEqual(resolve_mixed("int", 8, None, "pow2", 2).b.elems_per_word, 256)
+        self.assertEqual(resolve_mixed("int", 8, None, "int", 8, 32).mac, "multiply")
+        self.assertEqual(f.runner_args(), ["--dtype", "int8", "--b-dtype", "dshift3", "--c-dtype", "int32"])
+        self.assertEqual(parse_mixed_spec("int8xdshift3-int32"), f)
+        c = f.columns()
+        self.assertEqual((c["dtype"], c["a_dtype"], c["b_dtype"], c["c_dtype"], c["acc_bits"], c["pow2_exp_bits"],
+                          c["pow2_dense"]), ("int8xdshift3-int32", "int8", "dshift3", "int32", 32, 2, True))
+        for args, msg in ((("fixed", 16, 8, "pow2", 3), r"A must be int or uint"), (("int", 8, None, "pow2", 5), r"b_bits"),
+                          (("int", 8, None, "pow2", 3, 8), r"accum_bits \(C\)"), (("int", 8, None, "half", 16), r"b_type")):
+            with self.subTest(args), self.assertRaisesRegex(NumericError, msg):
+                resolve_mixed(*args)
+
+    def test_config(self):
+        cfg = self.ds_cfg()
+        cfg.validate()
+        self.assertTrue(cfg.is_mixed())
+        self.assertTrue(cfg.kernel_dir().endswith(os.path.join("kernels", "gemm_mixed")))
+        self.assertEqual(cfg.name, "i8xds3c32_pe32x32_t512x1024_200mhz_tA")
+        self.assertEqual(cfg.size_multiples(), (64, 64, 128))
+        h = cfg.render_config_h()
+        for frag in ("using DataA_t = ap_int<8>;", "using DataB_t = ap_uint<4>;", "using DataC_t = ap_int<32>;",
+                     "#define MM_MAC_DENSESHIFT", "kShiftBits = 3;", "kMemoryWidthBytesM = 128;",
+                     "kMemoryWidthBytesC = 64;"):
+            self.assertIn(frag, h)
+        self.assertNotIn("${", h)
+        self.assertNotEqual(cfg.hls_hash(), int_cfg(data_type="int", data_bits=8, parallelism_m=32,
+                                                    memory_tile_size_n=512, memory_tile_size_m=1024).hls_hash())
+        # Single-type configs stay on kernels/gemm, also with accum_bits == data_bits.
+        self.assertFalse(int_cfg(data_type="int", data_bits=8, accum_bits=8).is_mixed())
+        self.assertTrue(int_cfg(data_type="int", data_bits=8, accum_bits=32).is_mixed())
+        with self.assertRaisesRegex(ConfigError, r"b_type 'pow2'"):
+            int_cfg(data_type="pow2", data_bits=3).numeric()
+
+    def test_rules(self):
+        # PM must divide the B elements per word (128 for 4-bit lanes) ...
+        with self.assertRaisesRegex(ConfigError, r"elements per M bus word = 128 must be a multiple of parallelism_m = 48"):
+            self.ds_cfg(parallelism_m=48, memory_tile_size_m=1536).validate()
+        # ... and the tile the C words (int32: 16 per word) and B words.
+        with self.assertRaisesRegex(ConfigError, r"multiple of the elements per M bus word = 128"):
+            self.ds_cfg(parallelism_m=16, memory_tile_size_m=528).validate()
+        with self.assertRaisesRegex(ConfigError, r"not wired into kernels/gemm_mixed"):
+            self.ds_cfg(mult_resource="fabric").validate()
+        self.ds_cfg(parallelism_m=64, memory_tile_size_m=4096, parallelism_n=64, memory_tile_size_n=1024).validate()
+
+    def test_runner_cmd_and_sim(self):
+        from gemmflow.runner import runner_cmd
+        from gemmflow.steps import SimStep
+        cmd = runner_cmd(self.ds_cfg(), "/b")
+        self.assertIn("--b-dtype", cmd)
+        self.assertEqual(cmd[cmd.index("--multiples") + 1], "64,64,128")
+        self.assertTrue(SimStep(self.ds_cfg()).supported()[0])
 
 
 class TestResults(unittest.TestCase):
