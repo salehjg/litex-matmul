@@ -12,7 +12,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | B3 | Host: codec, mixed reference, runner options, unit tests | ✅ |
 | C1 | `ds_hls` HLS probe | ✅ |
 | C2 | `ds_same_array` builds + card runs + exact screens | ✅ (screens queued) |
-| C3 | `ds_scale` | ⬜ |
+| C3 | `ds_scale` | 🟡 building |
 | C4 | MNIST MLP end to end on the card | ✅ (uint8 and 7-bit activation variants) |
 | C5 | Float activations (stretch) | 🟡 building |
 | D | README / report | ⬜ |
@@ -184,3 +184,6 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 - **MNIST with uint8 activations on the card** (`mlp_mnist.py fpga --run build/ml/mnist/ds3_h1024`, chain step right
   after ds_u8): layer 1 52.59 ms (325.6 GOP/s), layer 2 63.15 ms (333.7 GOP/s), **0 of 10 240 000 sums differ in each
   layer, test accuracy 98.47 % = CPU integer pipeline = PyTorch, predictions identical.**
+- **C3 `ds_scale` HLS:** i8×ds3→i32 PE 48×32 t384×2048: DSP 255, BRAM18 1570, LUT 427.7k, 4.505 ns;
+  i8×ds3→i16 PE 32×64 t512×2048: DSP 37, BRAM18 1110, LUT 404.8k, 4.374 ns; i8×ds3→i32 PE 32×32 at 250 MHz:
+  DSP 39, BRAM18 1106, LUT 292.8k, 4.374 ns (at a 4 ns target). All under the gate; builds running.
