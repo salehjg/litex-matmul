@@ -248,3 +248,39 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   - 3-bit DenseShift × float activations (`ds3_h1024_af`): **98.40 %**, float pipeline 98.40 %.
 - Next: one card session, build after build (`build/ds_baseline.sh`, results `results/ds_baseline/`): random GEMMs
   1024³/4096³/8192³ on both float32 builds and the DenseShift builds, and the MNIST layers on each matching build.
+- **Card session done** (`build/ds_baseline.sh`, 10:32–10:42, `results/ds_baseline/`: 42 rows, 0 wrong entries;
+  every build loaded, DDR taps tuned under load, 0 bad words after tuning each time). GOP/s at 8192³ (median of 2)
+  and speedup against float32 × float32 at 200 MHz at the same size (`docs/report/data/ds_speedup.csv`):
+  | Build (all PE arrays transposed A) | MACs | DSP | 8192³ | ×float (1024³ / 4096³ / 8192³) | ×float 225 MHz |
+  |---|---|---|---|---|---|
+  | float32 × float32, PE 32×8, 200 MHz | 256 | 1320 | 98.59 GFLOP/s | 1 | 0.89 |
+  | float32 × float32, PE 32×8, 225 MHz `aggressive` | 256 | 1320 | 110.86 | 1.12 | 1 |
+  | float32 × dshift3 → float32, PE 32×16 | 512 | 1063 | 189.10 | 1.87 / 1.91 / **1.92** | 1.71 |
+  | uint8 × dshift3 → int32, PE 32×32 (`explore`) | 1024 | 40 | 375.45 | 3.54 / 3.77 / **3.81** | 3.39 |
+  | int8 × dshift3 → int32, PE 32×32 | 1024 | 40 | 375.45 | 3.54 / 3.77 / **3.81** | 3.39 |
+  | int8 × dshift3 → int16, PE 32×64 | 2048 | 40 | 750.91 | 3.75 / 7.53 / **7.62** | 6.77 |
+  | int8 × int8 → int32 multiply, PE 32×32 (reference) | 1024 | 1064 | 375.45 | 3.81 | 3.39 |
+  The speedup is the array size: a float32 MAC costs ~5 DSP48 (3 multiply + 2 add), so PE 32×8 is the largest float
+  × float array (PE 32×16 would need ~2600 of 1920 DSPs). DenseShift with float activations replaces the multiply by
+  an exponent add (~2 DSP per MAC: twice the MACs), and with integer activations it needs no DSP at all. At 1024³ the
+  PE 32×64 build fills only half of its 2048-wide tile (M = 1024), hence 3.75×.
+- **MNIST on the card against float × float** (10 000 test images, both hidden layers; kernel = sum of the two
+  layers' kernel times, end to end = A and B to the card + kernel + C back; median of 3; every sum equal to the CPU):
+  | Network (activations × weights) | Build | Accuracy | Kernel ms | End to end ms | Speedup kernel / e2e |
+  |---|---|---|---|---|---|
+  | float32 × float32 (`fp32_h1024_af`) | f32 PE 32×8 200 MHz | 98.60 % | 173.1 + 223.9 = 396.9 | 559.2 | 1 / 1 |
+  | float32 × float32 | f32 PE 32×8 225 MHz | 98.60 % | 154.0 + 199.1 = 353.1 | 515.1 | 1.12 / 1.09 |
+  | float32 × dshift3 (`ds3_h1024_af`) | f32xds3 PE 32×16 | 98.40 % | 93.1 + 119.5 = 212.7 | 367.7 | **1.87 / 1.52** |
+  | uint8 × dshift3 (`ds3_h1024`) | u8xds3c32 PE 32×32 | 98.47 % | 52.6 + 63.2 = 115.7 | 204.9 | **3.43 / 2.73** |
+  | 7-bit × dshift3 (`ds3_h1024_a7`) | i8xds3c32 PE 32×32 | 98.48 % | 115.7 | 204.9 | 3.43 / 2.73 |
+  Float sums equal the CPU's kernel-order float32 sums bit for bit (2 × 10.24 M per run), integer sums exactly. The
+  kernel speedup on these shapes (K = 784/832, M = 1024, N = 10 000/10 048) is a little below the square-GEMM one
+  (3.43 vs 3.81): the integer build pads K to 832 and works a 1024-wide tile against M = 1024 per pass. End to end
+  is lower again because the transfers shrink less: C goes back as 4-byte values in every format (2 × 41 MB), and
+  float A is 4 bytes per element against 1 for uint8 codes. `summarize.py` prints the table
+  (`--mnist-csv docs/report/data/denseshift_mnist_card.csv`).
+- **Conv2d:** DenseShift convolutions are trained (ResNet-20, all 3×3 and 1×1 convolutions except the first) with
+  the float32 network as the accuracy baseline (91.70 % float32 against 91.32 % 3-bit, 3 seeds). No convolution ran
+  on the card, in either format: that needs im2col on the host, and ResNet-20's layers have only 16–64 output
+  channels (GEMM M) against a tile width of ≥ 512 (tile_m ≥ PN·PM by the forwarding rule), so they would use
+  3–12 % of either array. Left for the user to decide (asked).
