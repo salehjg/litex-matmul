@@ -191,3 +191,8 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   (90.84–91.43), 3-bit 91.32 % (91.10–91.47), 4-bit 90.89 % (90.63–91.25); 3-bit with Eq. 7 91.22 % (91.11–91.36),
   3-bit with Kaiming init 90.23 % (89.99–90.50). Eq. 8 vs Eq. 7: +0.1 point, within the seed spread here (paper,
   ImageNet: +0.3/+0.7). Low-variance vs Kaiming init: +1.1 points, on every seed. 400-epoch 3/4-bit runs going.
+- **ds_scale, PE 48×32 int32 sums: timing failed, WNS −2.534 ns** on the accelerator clock, and also −1.267 on the
+  125 MHz SoC clock and −1.868 / −0.007 on PCIe clocks. Utilisation: BRAM 868.5 of 955 tiles (91 %), LUT 227.6k
+  (76 %). Worst path: a PE's A-buffer register to its shift lanes, 6.97 ns, 95 % routing, one LUT level. The C buffers
+  fill the BRAM columns and spread the design over the device; with the SoC clock failing too, a lower accelerator
+  clock alone would not close it. With int32 sums, ~1024 MACs is the practical array on this device.
