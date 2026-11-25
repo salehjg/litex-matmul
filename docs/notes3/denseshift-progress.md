@@ -285,3 +285,8 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   on the card, in either format: that needs im2col on the host, and ResNet-20's layers have only 16–64 output
   channels (GEMM M) against a tile width of ≥ 512 (tile_m ≥ PN·PM by the forwarding rule), so they would use
   3–12 % of either array. Left for the user to decide (asked).
+- **Docs for the float × float baseline:** report subsection "Speedup against float32 × float32"
+  (`sec:ds:speedup`: `tab:ds-speedup` GEMMs, `tab:ds-mnist` MNIST layers, the conv2d state), `ds_baseline` in the
+  campaign table, abstract / introduction / conclusion now state speedups against float32 × float32 (3.8× int8
+  activations, 7.6× int16 sums, 1.9× float activations, MNIST 3.4×). 34 pages, 0 warnings. README (baseline row and
+  speedup column, MNIST table), `ml/denseshift/README.md`, `docs/gemm.md` updated.

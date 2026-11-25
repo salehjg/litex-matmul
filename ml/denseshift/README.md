@@ -28,7 +28,11 @@ it is; the two sides exchange files (`export.npz`, int64 code files, JSON). Data
 ```
 
 `mlp_mnist.py train --act-bits 7` keeps the activation codes in 0..127 (inputs: pixel >> 1), so the network also runs
-on a signed int8 × dshift build.
+on a signed int8 × dshift build. `--act-bits 0` gives float activations (input pixel / 255, no quantisation):
+`--bits 0 --act-bits 0` is the float32 × float32 baseline for a float32 build, and `--bits 3 --act-bits 0` runs on a
+float32 × dshift3 build. Float runs are checked bit for bit against float32 sums in the kernel's k order.
+`fpga --reps N` times each layer N times (median, default 3); `summarize.py` prints the speedups against the
+float × float network on the float32 PE 32×8 200 MHz build.
 
 ## Results
 
@@ -48,7 +52,17 @@ CIFAR-10 ResNet-20, test accuracy at the end of training (200 epochs: mean and r
   leaves 76 % of the weights at ±1.
 - The decoded copies (exported codes as ordinary weights) give exactly the same accuracy in every run.
 
-MNIST MLP: float32 weights 98.65 %, DenseShift 2/3/4-bit 98.46 / 98.47 / 98.37 %; the integer pipeline equals PyTorch
-in every case. On the card (PE 32×32 builds at 200 MHz), both hidden layers over all 10 000 test images: 0 of
-10 240 000 sums differ from the CPU in either layer, test accuracy 98.47 % (uint8 activations) and 98.48 % (7-bit
-activations on the int8 build), predictions identical to the CPU.
+MNIST MLP, uint8 activations: float32 weights 98.65 %, DenseShift 2/3/4-bit 98.46 / 98.47 / 98.37 %; the integer
+pipeline equals PyTorch in every case. Float activations: float32 weights 98.60 %, 3-bit DenseShift 98.40 %.
+
+On the card, both hidden layers over all 10 000 test images (0 of 10 240 000 sums differ from the CPU in either
+layer, predictions identical to the CPU; times: both layers, median of 3):
+
+| Activations × weights | Build (200 MHz) | Accuracy | Kernel ms | End to end ms | Speedup kernel / e2e |
+|---|---|---|---|---|---|
+| float32 × float32 | f32 PE 32×8 | 98.60 % | 396.9 | 559.2 | 1 / 1 |
+| float32 × dshift3 | f32xds3 PE 32×16 | 98.40 % | 212.7 | 367.7 | 1.87 / 1.52 |
+| uint8 × dshift3 | u8xds3c32 PE 32×32 | 98.47 % | 115.7 | 204.9 | 3.43 / 2.73 |
+| 7-bit × dshift3 | i8xds3c32 PE 32×32 | 98.48 % | 115.7 | 204.9 | 3.43 / 2.73 |
+
+The CIFAR-10 convolutions have run only in PyTorch so far, not on the card.

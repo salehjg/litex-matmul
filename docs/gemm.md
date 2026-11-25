@@ -70,8 +70,10 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   (int64 codes) run given matrices. Training side (PyTorch from the system Python, `/usr/bin/python3`):
   `ml/denseshift/` (layers, CIFAR-10 ResNet-20, MNIST MLP whose hidden layers run on the card).
   Campaigns `configs/dse/ds_*.json`; kernel simulation `misc/gemm_mixed_sim/sim.py`. Best on the card (200 MHz,
-  exact): int8 × dshift3 → int32 PE 32×32 375.5 GOP/s with 40 DSPs (int8 × int8 multiply: the same with 1064);
-  int8 × dshift3 → int16 PE 32×64 750.9 GOP/s; float32 × dshift3 → float32 PE 32×16 189.1 GOP/s.
+  exact), with the speedup against float32 × float32 (PE 32×8, 98.6 GFLOP/s at 200 MHz): int8 × dshift3 → int32
+  PE 32×32 375.5 GOP/s (3.81×, 40 DSPs; int8 × int8 multiply: the same with 1064); int8 × dshift3 → int16 PE 32×64
+  750.9 GOP/s (7.62×); float32 × dshift3 → float32 PE 32×16 189.1 GOP/s (1.92×). `--a-file/--b-file/--c-out` take
+  int64 codes for integer data and float32 values for float A, B and C.
 - **Verification is exact:** integer and fixed-point formats always. float32 bit for bit against a reference that
   accumulates in the kernel's order (`--float-exact`, default in `gemm_dse.py` and `gemm_run.py`; rows carry
   `verify_exact`).

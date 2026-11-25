@@ -165,8 +165,9 @@ codes), so the card's sums are checked bit for bit against float sums in the ker
 \begin{itemize}
   \item PE 32\(\times\)16, tile 512\(\times\)512, 200\,MHz: timing met, 202.5k LUT, 1063 DSP, 427.5 BRAM tiles;
         179.4, 187.6 and \textbf{189.1\,GOP/s} at \(1024^3\), \(4096^3\) and \(8192^3\) (92.3\,\% of 204.8),
-        all exact. The best float32 build (multiply-add, PE 32\(\times\)8, 225\,MHz, 1320 DSP) reached
-        110.9\,GFLOP/s: DenseShift weights give 1.7\(\times\) the throughput with fewer DSPs.
+        all exact. The float32\,\(\times\)\,float32 build with the same clock (PE 32\(\times\)8, 1320 DSP) reaches
+        98.6\,GFLOP/s, its best (225\,MHz, \code{aggressive}) 110.9: DenseShift weights give 1.92\(\times\)
+        (1.71\(\times\)) the throughput with fewer DSPs (\cref{sec:ds:speedup}).
   \item PE 48\(\times\)16 (768 MACs, 1793 DSP) synthesised but needed 303\,086 LUTs of 298\,600: with the
         multiplier gone, the float adders' LUTs set the limit.
   \item PE 40\(\times\)16 (640 MACs, tile 320\(\times\)1024; HLS estimate 1505 DSP, 407k LUT) was in Vivado
@@ -192,6 +193,86 @@ With int32 sums, PE 32\(\times\)32 at 200\,MHz is therefore the practical DenseS
 value is the freed DSPs and smaller logic rather than a larger array. Narrower C buffers than the C bus (for example
 24-bit sums) would be the next step for larger int32-class arrays.
 
+\subsection{Speedup against float32 \texorpdfstring{\(\times\)}{x} float32}
+\label{sec:ds:speedup}
+The reference for every DenseShift result is float32\,\(\times\)\,float32 GEMM on the unchanged kernel: the best
+float build that fits the device, PE 32\(\times\)8 with tile 1024\(\times\)512 and transposed A, at 200\,MHz (the
+clock of all DenseShift builds) and at 225\,MHz with the \code{aggressive} preset (the best float32 result). A float
+MAC costs about five DSP48E1 (three for the multiply, two for the add), so twice the array would need about 2600 of
+the 1920 DSPs. All builds of \cref{tab:ds-speedup} ran in one session (\file{results/ds\_baseline/}, run only, the
+same bring-up with DDR taps tuned under load for each), 1024\(^3\) to 8192\(^3\), every run checked exactly.
+
+\begin{table}[ht]
+\centering\small\setlength{\tabcolsep}{4pt}
+\caption{DenseShift (3-bit weights) against float32\,\(\times\)\,float32, random GEMMs on the card, 200\,MHz unless
+  stated (\file{data/ds\_speedup.csv}). Speedup = throughput ratio at the same size, median of two runs.}
+\label{tab:ds-speedup}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+& & & & \multicolumn{3}{c}{vs.\ float32, 200\,MHz} & vs.\ 225\,MHz \\
+\cmidrule(lr){5-7}\cmidrule(lr){8-8}
+A \(\times\) B \(\to\) C, array & MACs & DSP & GOP/s \(8192^3\) & \(1024^3\) & \(4096^3\) & \(8192^3\) & \(8192^3\) \\
+\midrule
+float32 \(\times\) float32, PE 32\(\times\)8 & 256 & 1320 & 98.59 & 1 & 1 & 1 & 0.89 \\
+\quad the same at 225\,MHz, \code{aggressive} & 256 & 1320 & 110.86 & 1.12 & 1.12 & 1.12 & 1 \\
+\midrule
+float32 \(\times\) 3-bit \(\to\) float32, PE 32\(\times\)16 & 512 & 1063 & 189.10 & 1.87 & 1.91 & \textbf{1.92} & 1.71 \\
+uint8 \(\times\) 3-bit \(\to\) int32, PE 32\(\times\)32 & 1024 & 40 & 375.45 & 3.54 & 3.77 & \textbf{3.81} & 3.39 \\
+int8 \(\times\) 3-bit \(\to\) int32, PE 32\(\times\)32 & 1024 & 40 & 375.45 & 3.54 & 3.77 & \textbf{3.81} & 3.39 \\
+int8 \(\times\) 3-bit \(\to\) int16, PE 32\(\times\)64 & 2048 & 40 & 750.91 & 3.75 & 7.53 & \textbf{7.62} & 6.77 \\
+\midrule
+int8 \(\times\) int8 \(\to\) int32 (multiply), PE 32\(\times\)32 & 1024 & 1064 & 375.45 & 3.54 & 3.77 & 3.81 & 3.39 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The speedup is the array size the DSP budget allows: with float activations the exponent add frees the multiplier's
+three DSPs, so twice the MACs fit (1063 DSPs for 512 MACs); with integer activations no DSP is left in the MAC and
+the array grows until the C buffers (int32 sums) or the LUTs set the limit. The per-cycle efficiency is about the
+same everywhere (92--96\,\% of peak at \(8192^3\)). At \(1024^3\) the PE 32\(\times\)64 build fills only half of its
+2048-wide tile, hence 3.75\(\times\). The int8\,\(\times\)\,int8 row shows that an integer multiply MAC at the same
+array is as fast; DenseShift's gain over it is the 1024 DSPs it does not use (\cref{tab:ds-same}).
+
+\paragraph{The MNIST network.} The same MLP was also trained with float activations (input pixel/255,
+\(h = \max(0, c\,a + b)\), no quantisation): with float weights it is the float32\,\(\times\)\,float32 baseline
+(98.60\,\%), with 3-bit DenseShift weights it runs on the float32\,\(\times\)\,3-bit build (98.40\,\%). The runner
+reads and writes float32 files for this. \Cref{tab:ds-mnist} times both hidden layers over the 10\,000 test images;
+in every run all \(2\times10.24\) million sums equal the CPU's, the float ones bit for bit against float32 sums in
+the kernel's \(k\) order.
+
+\begin{table}[ht]
+\centering\small\setlength{\tabcolsep}{4pt}
+\caption{MNIST MLP hidden layers on the card (\file{data/denseshift\_mnist\_card.csv}), median of three runs.
+  Kernel: both layers; end to end: A and B to the card, kernel, C back. Speedup against float32\,\(\times\)\,float32
+  at 200\,MHz.}
+\label{tab:ds-mnist}
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+Activations \(\times\) weights & Build & Accuracy & Kernel ms & End to end ms & \multicolumn{2}{c}{Speedup} \\
+\cmidrule(lr){6-7}
+& & & & & kernel & e2e \\
+\midrule
+float32 \(\times\) float32 & PE 32\(\times\)8, 200\,MHz & 98.60\,\% & 396.9 & 559.2 & 1 & 1 \\
+float32 \(\times\) float32 & PE 32\(\times\)8, 225\,MHz & 98.60\,\% & 353.1 & 515.1 & 1.12 & 1.09 \\
+float32 \(\times\) 3-bit & PE 32\(\times\)16 & 98.40\,\% & 212.7 & 367.7 & \textbf{1.87} & 1.52 \\
+uint8 \(\times\) 3-bit & PE 32\(\times\)32 & 98.47\,\% & 115.7 & 204.9 & \textbf{3.43} & 2.73 \\
+0..127 \(\times\) 3-bit & PE 32\(\times\)32 (int8) & 98.48\,\% & 115.7 & 204.9 & 3.43 & 2.73 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Per layer, uint8\,\(\times\)\,3-bit is 3.29\(\times\) (layer 1) and 3.55\(\times\) (layer 2) faster in the kernel.
+Layer 2 (\(K = M = 1024\)) matches the \(1024^3\) GEMM; layer 1 also pads \(K\) from 784 to 832 for the integer
+build's 64-element words. End to end the gain is smaller because the transfers shrink less than the compute: C comes
+back as four-byte values in every format (\(2\times41\)\,MB), and only A and B get smaller (one byte per uint8 code,
+half a byte per 3-bit code, against four).
+
+\paragraph{Convolutions.} The DenseShift convolutions of \cref{sec:ds:train} have their float32 baseline in
+accuracy (\cref{tab:ds-cifar}), but no convolution has run on the card in either format. As GEMMs (im2col on the
+host) ResNet-20's layers have only 16--64 output channels, the GEMM's \(M\), while this kernel's tile is at least
+\(P_N P_M \ge 256\) wide (\cref{sec:formats:tiles}), so they would use a few per cent of either array; wider layers
+or a kernel with a narrower tile would be needed for a meaningful speedup.
+
 \subsection{Campaigns}
 \label{sec:ds:campaigns}
 \Cref{tab:ds-campaigns} lists the DenseShift campaigns of 25 November 2026; every build with its timing and resources
@@ -200,7 +281,8 @@ alongside them.
 
 \begin{table}[ht]
 \centering\small
-\caption{DenseShift campaigns, 25 November 2026 (\file{data/campaigns.csv}). Builds: completed Vivado runs (PE
+\caption{DenseShift campaigns, 25 November 2026 (\file{data/campaigns.csv}; \code{ds\_baseline}: a
+  \code{gemm\_run.py} session, \file{results/ds\_baseline/}). Builds: completed Vivado runs (PE
   48\(\times\)16 in \code{ds\_float} stopped at the LUT check before placement); runs: card result rows.}
 \label{tab:ds-campaigns}
 \begin{tabular}{@{}lllrrrl@{}}
@@ -213,8 +295,9 @@ Campaign & Time & Stages & Points & Builds & Runs & Question \\
 \code{ds\_u8} & 04:59--05:31 & all & 1 & 1 & 6 & uint8 activations (\code{explore} rebuild) \\
 \code{ds\_scale} & 05:31--07:53 & all & 3 & 3 & 6 & larger arrays, 250\,MHz \\
 \code{ds\_float2} & from 07:53 & all & 1 & 0 & 0 & float PE 40\(\times\)16 (stopped) \\
+\code{ds\_baseline} & 10:32--10:42 & run & 7 & -- & 42 & against float32\,\(\times\)\,float32 (\cref{sec:ds:speedup}) \\
 \midrule
-\multicolumn{3}{@{}l}{total} & 19 & 8 & 30 & \\
+\multicolumn{3}{@{}l}{total} & 26 & 8 & 72 & \\
 \bottomrule
 \end{tabular}
 \end{table}
