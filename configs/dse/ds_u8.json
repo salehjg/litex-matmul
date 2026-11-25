@@ -1,0 +1,16 @@
+{
+  "campaign": "ds_u8",
+  "comment": "docs/notes3 C2/C4: uint8 x dshift3 -> int32 at PE 32x32 (the MNIST MLP's layers with uint8 activation codes). The default-preset build in ds_same_array missed timing by 6 ps on the PCIe 250 MHz user clock (not the accelerator clock); this is the same point with vivado.preset explore.",
+  "base": "configs/gemm/pe32x8_ta_t1024x512.json",
+  "build_grid": {
+    "@point": [
+      {"kernel.parallelism_n": 32, "kernel.parallelism_m": 32, "kernel.memory_tile_size_n": 512, "kernel.memory_tile_size_m": 1024,
+       "kernel.data_type": "uint", "kernel.data_bits": 8, "kernel.b_type": "pow2", "kernel.b_bits": 3, "kernel.accum_bits": 32,
+       "vivado.preset": "explore"}
+    ]
+  },
+  "runtime_grid": {"triples": [[1024, 1024, 1024], [4096, 4096, 4096], [8192, 8192, 8192]], "repetitions": 2, "warmup": 0, "verify": "sampled"},
+  "stages": ["hls", "build", "run"],
+  "jobs": {"hls": 1},
+  "ddr_load_tune": true
+}
