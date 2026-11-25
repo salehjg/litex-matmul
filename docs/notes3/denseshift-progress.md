@@ -175,3 +175,8 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   reached 110.9 GFLOP/s: 1.7× the throughput with 1063 instead of 1320 DSPs.
 - **CIFAR-10 seeds** (in progress): seed 1 gives float32 91.85, 2-bit 91.43 (seed 0: 90.84), 3-bit 91.47: the seed
   spread is up to 0.6 points, so single-seed differences below that mean little.
+- **CIFAR-10 over three seeds** (200 epochs): float32 91.70 % (91.56–91.85), DenseShift 2-bit 91.06 % (90.84–91.43),
+  3-bit 91.32 % (91.10–91.47), 4-bit 90.72 % (90.63–90.80, 2 seeds so far). 3-bit is 0.4 points below float on
+  average; 4-bit is below 3-bit on every seed, unlike the paper's ImageNet ordering. Queued
+  (`ml/denseshift/run_cifar_more.sh`): seeds 1–2 of the two ablations, and 3-bit and 4-bit with 400 epochs (8 binary
+  variables per weight may need longer training; the paper's Table 10 shows the epoch effect).
