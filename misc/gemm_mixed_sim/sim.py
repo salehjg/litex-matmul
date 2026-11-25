@@ -24,6 +24,11 @@ CASES = [  # name, (A type, A bits), (B type, B bits), C bits, PN, PM, tile_n, t
     ("i8xi8c32 PM32 multiply",  ("int", 8),  ("int", 8),  32, 8, 32, 64, 256, True),
     ("i8xds3c16 PM64 wrap",     ("int", 8),  ("pow2", 3), 16, 4, 64, 64, 1024, True),
     ("i8xds3c32 PM32 notA",     ("int", 8),  ("pow2", 3), 32, 8, 32, 64, 256, False),
+    # float activations x DenseShift -> float sums (exponent add + float add), bit-exact against k-order float sums
+    ("f32xds3 PM16 pass",       ("float", None), ("pow2", 3), None, 8, 16, 64, 128, True),
+    ("f32xds3 PM32 split2",     ("float", None), ("pow2", 3), None, 8, 32, 64, 256, True),
+    ("f32xds2 PM8 gather2",     ("float", None), ("pow2", 2), None, 8, 8, 64, 256, True),
+    ("f32xds4 PM16",            ("float", None), ("pow2", 4), None, 8, 16, 64, 128, True),
 ]
 K = 48
 

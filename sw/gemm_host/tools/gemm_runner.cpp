@@ -146,13 +146,17 @@ Options parse(int argc, char **argv) {
     }
     if (o.mixed) {
         if (!have_b) o.bdt = o.dt;
-        if (!have_c) o.cdt = Dtype::parse("int32");
-        const bool ok = o.dt.kind == Dtype::Kind::Int && o.dt.bits <= 16 &&
-                        (o.bdt.kind == Dtype::Kind::Int || o.bdt.is_pow2()) && o.bdt.bits <= 16 &&
-                        o.cdt.kind == Dtype::Kind::Int && o.cdt.is_signed && (o.cdt.bits == 16 || o.cdt.bits == 32);
+        if (!have_c) o.cdt = Dtype::parse(o.dt.is_float() ? "float32" : "int32");
+        // Float activations x DenseShift -> float32 (exponent add + float add): checked bit for bit in k order.
+        const bool float_ds = o.dt.is_float() && o.bdt.is_pow2() && o.cdt.is_float();
+        if (float_ds) o.float_exact = true;
+        const bool ok = float_ds ||
+                        (o.dt.kind == Dtype::Kind::Int && o.dt.bits <= 16 &&
+                         (o.bdt.kind == Dtype::Kind::Int || o.bdt.is_pow2()) && o.bdt.bits <= 16 &&
+                         o.cdt.kind == Dtype::Kind::Int && o.cdt.is_signed && (o.cdt.bits == 16 || o.cdt.bits == 32));
         if (!ok) {
             std::fprintf(stderr, "error: mixed formats: A int/uint <= 16 bits, B int/uint <= 16 bits or dshift<n>, "
-                                 "C int16/int32 (got %s)\n", o.spec().c_str());
+                                 "C int16/int32; or float32 x dshift<n> -> float32 (got %s)\n", o.spec().c_str());
             std::exit(2);
         }
         if (o.b_identity && o.bdt.is_pow2()) { std::fprintf(stderr, "error: --b-identity: DenseShift has no zero\n"); std::exit(2); }
@@ -339,7 +343,13 @@ int main(int argc, char **argv) {
             auto value = [&]() { return o.have_range ? float(idist(rng)) : dist(rng); };
             af.resize(size_t(o.n) * o.k); bf.resize(size_t(o.k) * o.m); btf.resize(size_t(o.m) * o.k);
             for (auto &x : af) x = value();
-            for (auto &x : bf) x = value();
+            std::vector<int64_t> bcodes;  // mixed float x DenseShift: B as codes on the card, values on the host
+            if (o.mixed) {
+                bcodes.resize(bf.size());
+                for (size_t q = 0; q < bf.size(); q++) { bcodes[q] = o.bdt.wrap(rng()); bf[q] = float(o.bdt.value(bcodes[q])); }
+            } else {
+                for (auto &x : bf) x = value();
+            }
             if (o.b_identity) for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bf[size_t(r) * o.m + col] = r == col;
             if (o.a_identity) for (uint32_t r = 0; r < o.n; r++) for (uint32_t col = 0; col < o.k; col++) af[size_t(r) * o.k + col] = r == col;
             for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) btf[size_t(col) * o.k + r] = bf[size_t(r) * o.m + col];
@@ -350,7 +360,8 @@ int main(int argc, char **argv) {
                     for (uint32_t col = 0; col < o.k; col++) a_send[size_t(col) * o.n + r] = af[size_t(r) * o.k + col];
             }
             std::memcpy(a_dev.data(), o.transposed_a ? a_send.data() : af.data(), bytes_a);
-            std::memcpy(b_dev.data(), bf.data(), bytes_b);
+            if (o.mixed) gemm::pack(o.bdt, bcodes.data(), bcodes.size(), b_dev.data());
+            else std::memcpy(b_dev.data(), bf.data(), bytes_b);
             cf.resize(size_t(o.n) * o.m);
         } else {
             std::uniform_int_distribution<int64_t> dist(o.lo, o.hi);

@@ -21,6 +21,8 @@
 #      pow2 x 2, 3, 4          -> MAC DenseShift: code = sign << (n-1) | exponent, weight (-1)^s 2^e, no zero
 #                                 (Li et al., ICCV 2023); 3-bit codes are stored in 4-bit lanes
 #   C  int x 16, 32 (the accumulator; sums wrap at this width)
+#   A float32 x B pow2 -> C float32: MAC "denseshift_float" = add e to A's exponent field, flip its sign, float add
+#      (paper Sec. 3.1.1: float activations need no multiplier)
 #
 
 import math
@@ -85,7 +87,9 @@ class NumericFormat:
 
     @property
     def ap_type(self):
-        """The element as an ap_[u]int type (kernels/gemm_mixed computes in exact widths)."""
+        """The element as an ap_[u]int type (kernels/gemm_mixed computes in exact widths); float stays float."""
+        if self.family == "float":
+            return "float"
         if self.kind == "int":
             return f"ap_{'' if self.signed else 'u'}int<{self.bits}>"
         if self.kind == "pow2":
@@ -254,7 +258,7 @@ class MixedFormat:
 
     @property
     def kind(self):
-        return "pow2" if self.mac == "denseshift" else "int"
+        return "pow2" if self.mac.startswith("denseshift") else "int"
 
     @property
     def bits(self):
@@ -280,9 +284,11 @@ class MixedFormat:
         return ()  # mult_resource / add_resource are not wired into kernels/gemm_mixed
 
     def dsp_per_mac(self, mult_resource=None, add_resource=None):
-        if self.mac == "denseshift" or max(self.a.bits, self.b.bits) <= 8:
+        if self.mac == "denseshift_float":
+            return 2  # the float add (DSP48E1 fadd)
+        if self.mac == "denseshift":
             return 0
-        return 1
+        return 1  # with a wide sum, HLS maps multiply + add into one DSP48 (ds_hls: 1064 DSP at PE 32x32)
 
     def runner_args(self):
         return ["--dtype", self.a.spec, "--b-dtype", self.b.spec, "--c-dtype", self.c.spec]
@@ -295,8 +301,8 @@ class MixedFormat:
             "acc_dtype": self.c.spec, "acc_bits": self.c.bits,
             "a_dtype": self.a.spec, "b_dtype": self.b.spec, "c_dtype": self.c.spec,
             "quant_scale": None, "quant_zero_point": None,
-            "pow2_exp_bits": self.b.bits - 1 if self.mac == "denseshift" else None,
-            "pow2_dense": True if self.mac == "denseshift" else None,
+            "pow2_exp_bits": self.b.bits - 1 if self.b.kind == "pow2" else None,
+            "pow2_dense": True if self.b.kind == "pow2" else None,
         }
 
 
@@ -308,8 +314,16 @@ def is_mixed_config(data_type, data_bits, b_type, b_bits, accum_bits):
 
 
 def resolve_mixed(data_type, data_bits, frac_bits=None, b_type=None, b_bits=None, accum_bits=None):
+    if data_type == "float" and frac_bits is None:
+        # Float activations x DenseShift weights -> float sums (paper Sec. 3.1.1).
+        if b_type != "pow2":
+            raise NumericError("mixed formats with float A: B must be pow2 (DenseShift)")
+        if accum_bits not in (None, 32):
+            raise NumericError("mixed formats with float A: C is float32 (accum_bits None or 32)")
+        a = resolve("float", data_bits)
+        return MixedFormat(a, resolve_pow2(b_bits), a, "denseshift_float")
     if data_type not in ("int", "uint") or frac_bits is not None:
-        raise NumericError(f"mixed formats (kernels/gemm_mixed): A must be int or uint, not {data_type} ({PLAN3})")
+        raise NumericError(f"mixed formats (kernels/gemm_mixed): A must be int, uint or float, not {data_type} ({PLAN3})")
     if data_bits not in MIXED_A_BITS:
         raise NumericError(f"mixed formats: A bits must be one of {MIXED_A_BITS}")
     a = resolve(data_type, data_bits)
@@ -331,7 +345,7 @@ def resolve_mixed(data_type, data_bits, frac_bits=None, b_type=None, b_bits=None
 
 def parse_mixed_spec(spec):
     """Combined spec 'int8xdshift3-int32' -> MixedFormat."""
-    m = re.fullmatch(r"(u?int\d+)x(u?int\d+|dshift\d+)-(int\d+)", spec or "")
+    m = re.fullmatch(r"(u?int\d+|float32)x(u?int\d+|dshift\d+)-(int\d+|float32)", spec or "")
     if not m:
         raise NumericError(f"bad mixed dtype spec {spec!r}")
     a, b, c = parse_spec(m[1]), m[2], parse_spec(m[3])
@@ -340,4 +354,5 @@ def parse_mixed_spec(spec):
     else:
         nb = parse_spec(b)
         b_type, b_bits = nb.family, nb.bits
-    return resolve_mixed(a.family, a.bits, None, b_type, b_bits, c.bits)
+    return resolve_mixed(a.family, a.bits if a.family != "float" else None, None, b_type, b_bits,
+                         c.bits if c.family != "float" else None)

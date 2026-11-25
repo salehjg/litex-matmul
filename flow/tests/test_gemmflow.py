@@ -275,10 +275,24 @@ class TestMixed(unittest.TestCase):
         c = f.columns()
         self.assertEqual((c["dtype"], c["a_dtype"], c["b_dtype"], c["c_dtype"], c["acc_bits"], c["pow2_exp_bits"],
                           c["pow2_dense"]), ("int8xdshift3-int32", "int8", "dshift3", "int32", 32, 2, True))
-        for args, msg in ((("fixed", 16, 8, "pow2", 3), r"A must be int or uint"), (("int", 8, None, "pow2", 5), r"b_bits"),
+        for args, msg in ((("fixed", 16, 8, "pow2", 3), r"A must be int, uint or float"),
+                          (("float", None, None, "int", 8), r"B must be pow2"), (("float", None, None, "pow2", 3, 16), r"C is float32"), (("int", 8, None, "pow2", 5), r"b_bits"),
                           (("int", 8, None, "pow2", 3, 8), r"accum_bits \(C\)"), (("int", 8, None, "half", 16), r"b_type")):
             with self.subTest(args), self.assertRaisesRegex(NumericError, msg):
                 resolve_mixed(*args)
+
+    def test_float_activations(self):
+        f = resolve_mixed("float", None, None, "pow2", 3)
+        self.assertEqual((f.spec, f.short, f.mac, f.c.spec), ("float32xdshift3-float32", "f32xds3c32", "denseshift_float",
+                                                             "float32"))
+        self.assertEqual(parse_mixed_spec(f.spec), f)
+        cfg = self.ds_cfg(data_type="float", data_bits=None, accum_bits=None, parallelism_m=16)
+        cfg.validate()
+        self.assertEqual(cfg.size_multiples(), (16, 16, 128))
+        h = cfg.render_config_h()
+        for frag in ("using DataA_t = float;", "using DataC_t = float;", "#define MM_MAC_DENSESHIFT_FLOAT",
+                     "kShiftBits = 3;", "kMemoryWidthBytesC = 64;"):
+            self.assertIn(frag, h)
 
     def test_config(self):
         cfg = self.ds_cfg()

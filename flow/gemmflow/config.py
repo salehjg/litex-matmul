@@ -372,7 +372,7 @@ class BuildCfg:
             "MM_CLOCK_INTERNAL":     self.clocks.accel_mhz,
             "MM_GOLDEN_DIR":         "",
             "MM_MAC":                nf.mac.upper(),
-            "MM_SHIFT_BITS":         fb.bits if nf.mac == "denseshift" else 0,
+            "MM_SHIFT_BITS":         fb.bits if fb.kind == "pow2" else 0,
             "MM_KERNEL_WIDTH_M":     k.parallelism_m * fb.container_bytes,
             "MM_DATA_WIDTH_A":       fa.container_bytes,
             "MM_PIPE_DEPTH":         k.fifo_depths.pipe,
