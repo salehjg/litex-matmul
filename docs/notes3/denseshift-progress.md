@@ -199,3 +199,5 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 - **CIFAR-10 with 400 epochs** (seed 0): DenseShift 3-bit 92.05 %, 4-bit 91.64 % (200 epochs: 91.32 / 90.89 mean).
   Both gain ~0.7 points; 4-bit stays below 3-bit, so slower training of its 8 binary variables per weight is not the
   whole reason. float32 with 400 epochs running for a fair comparison.
+- **float32 with 400 epochs: 92.24 %** (seed 0). At 400 epochs: 3-bit −0.19, 4-bit −0.60 points; at 200 epochs
+  (3-seed means): 3-bit −0.38, 2-bit −0.64, 4-bit −0.81. 3-bit DenseShift stays within ~0.4 points of float.
