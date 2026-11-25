@@ -201,3 +201,5 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   whole reason. float32 with 400 epochs running for a fair comparison.
 - **float32 with 400 epochs: 92.24 %** (seed 0). At 400 epochs: 3-bit −0.19, 4-bit −0.60 points; at 200 epochs
   (3-seed means): 3-bit −0.38, 2-bit −0.64, 4-bit −0.81. 3-bit DenseShift stays within ~0.4 points of float.
+- **ds_scale, PE 32×64 int8×ds3→int16 (2048 MACs): timing met (WNS 0.025), LUT 190.3k, FF 255.5k, BRAM 638,
+  DSP 40** (27 min). The multiply MAC would need 2048 DSPs here (device: 1920). Card run after the 250 MHz build.
