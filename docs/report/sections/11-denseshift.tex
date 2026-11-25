@@ -126,13 +126,16 @@ simply grow into them, because the 32-bit C buffers already use most of the BRAM
 \file{ml/denseshift/mlp\_mnist.py} exports the MLP as an integer pipeline: activation codes \(\times\) DenseShift codes
 give exact int32 sums; BatchNorm and the activation scale fold into a per-channel \(a, b\), and the next layer's codes
 are \(\mathrm{clip}(\mathrm{rint}((c\,a + b)/s), 0, q_{\max})\). Evaluated on the CPU this pipeline has the same test
-accuracy as the PyTorch model. On the card, both hidden layers run as GEMMs over all 10\,000 test images (the variant
-with activation codes 0..127, which fits the signed int8 build of \cref{tab:ds-same}):
+accuracy as the PyTorch model. On the card, both hidden layers run as GEMMs over all 10\,000 test images, once with
+uint8 activation codes on a uint8\,\(\times\)\,3-bit build (same array; its default-preset build missed timing by
+6\,ps on the PCIe user clock, the \code{explore} preset closed it) and once with codes 0..127 on the signed int8 build
+of \cref{tab:ds-same}:
 \begin{itemize}
   \item layer 1, \(10048\times832\times1024\) (padded): 52.6\,ms, 325.6\,GOP/s; layer 2,
         \(10048\times1024\times1024\): 63.2\,ms, 333.7\,GOP/s;
-  \item 0 of 10\,240\,000 sums differ from the CPU in either layer; the test accuracy computed from the card's sums is
-        98.48\,\%, and every prediction equals the CPU pipeline's.
+  \item in both variants 0 of 10\,240\,000 sums differ from the CPU in either layer; the test accuracy computed from
+        the card's sums is 98.47\,\% (uint8) and 98.48\,\% (0..127), equal to PyTorch, and every prediction equals
+        the CPU pipeline's.
 \end{itemize}
 
 \subsection{Float activations without a multiplier}

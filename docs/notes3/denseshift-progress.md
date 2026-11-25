@@ -11,9 +11,9 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | B2 | Flow: config fields, numeric formats, kernel dir, hashes, names, columns | ✅ |
 | B3 | Host: codec, mixed reference, runner options, unit tests | ✅ |
 | C1 | `ds_hls` HLS probe | ✅ |
-| C2 | `ds_same_array` builds + card runs + exact screens | ✅ (u8 build: PCIe path −6 ps, rebuild queued) |
+| C2 | `ds_same_array` builds + card runs + exact screens | ✅ (screens queued) |
 | C3 | `ds_scale` | ⬜ |
-| C4 | MNIST MLP end to end on the card | ✅ (7-bit activations on the int8 build) |
+| C4 | MNIST MLP end to end on the card | ✅ (uint8 and 7-bit activation variants) |
 | C5 | Float activations (stretch) | 🟡 building |
 | D | README / report | ⬜ |
 
@@ -180,3 +180,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   average; 4-bit is below 3-bit on every seed, unlike the paper's ImageNet ordering. Queued
   (`ml/denseshift/run_cifar_more.sh`): seeds 1–2 of the two ablations, and 3-bit and 4-bit with 400 epochs (8 binary
   variables per weight may need longer training; the paper's Table 10 shows the epoch effect).
+- **ds_u8:** `u8xds3c32` with the `explore` preset: timing met (WNS 0.014); 8192³ **375.45 GOP/s**, exact (sampled).
+- **MNIST with uint8 activations on the card** (`mlp_mnist.py fpga --run build/ml/mnist/ds3_h1024`, chain step right
+  after ds_u8): layer 1 52.59 ms (325.6 GOP/s), layer 2 63.15 ms (333.7 GOP/s), **0 of 10 240 000 sums differ in each
+  layer, test accuracy 98.47 % = CPU integer pipeline = PyTorch, predictions identical.**
