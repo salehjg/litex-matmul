@@ -311,3 +311,5 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   from README, `docs/gemm.md` and `misc/int32_verify/README.md`. Note: each tuned bring-up's own check is a full
   exact check of 1024³ (every entry, full-range data) before and after tuning, so every DenseShift build that ran
   had one with 0 wrong entries after tuning (`float32 × dshift3` PE 32×16: 50 223 wrong before tuning).
+- **Merged into `main`** (2026-11-25, `git merge --no-ff denseshift`; `main` had not moved since `1ad6b99`, so no
+  conflicts). README and report now say the work was developed on `denseshift`. Not pushed.

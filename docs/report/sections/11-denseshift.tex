@@ -5,7 +5,7 @@ The integer formats of \cref{sec:formats} kept one type for A, B, C and the sum,
 not what a quantised network computes. This section implements DenseShift~\cite{denseshift}, a low-bit
 power-of-two weight format, end to end: training in PyTorch, a kernel with separate operand types and a shift
 instead of a multiplier, builds on the card, and a small network whose layers run on the accelerator and give the
-same predictions as the CPU. The work is on the git branch \code{denseshift}; the dated record is in
+same predictions as the CPU. The work was developed on the git branch \code{denseshift} (merged into \code{main}); the dated record is in
 \file{docs/notes3/}.
 
 \subsection{The method}

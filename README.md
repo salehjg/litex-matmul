@@ -18,8 +18,8 @@ Best kernel throughput, all results verified exactly on the card:
 | int8 | PE 32×32, 225 MHz | 426.6 GOP/s | 40 |
 | int4 | PE 64×64, 180 MHz | 1370.9 GOP/s | 38 |
 
-**DenseShift** ([Li et al., ICCV 2023](https://arxiv.org/abs/2208.09708), branch `denseshift`,
-[notes](docs/notes3/denseshift-progress.md)): power-of-two weights ±2^e without zero, so a MAC is a shift and an add.
+**DenseShift** ([Li et al., ICCV 2023](https://arxiv.org/abs/2208.09708), developed on branch
+`denseshift`, [notes](docs/notes3/denseshift-progress.md)): power-of-two weights ±2^e without zero, so a MAC is a shift and an add.
 Trained in PyTorch (`ml/denseshift/`) and run on the card with a kernel that has separate A/B/C types
 (`kernels/gemm_mixed/`):
 
