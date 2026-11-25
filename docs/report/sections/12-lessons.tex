@@ -49,7 +49,9 @@
         and the C-pipe enables).
   \item \textbf{DenseShift follow-ups} (\cref{sec:ds}): a Vivado comparison of the carry-in MAC form; C buffers
         narrower than the C bus (e.g.\ 24-bit sums) to fit larger int32-sum arrays; a whole CIFAR-10 network on the
-        card (im2col on the host, compact code files); clocks above 200\,MHz for the mixed kernel.
+        card (im2col on the host, compact code files); clocks above 200\,MHz for the mixed kernel; the float
+        PE 40\(\times\)16 build and the full screens of the DenseShift builds, both stopped when the host ran low on
+        memory (\cref{sec:ds:card}); why 4-bit trains worse than 3-bit on CIFAR-10.
   \item \textbf{DDR3 read margin}: the host-side tuning works, but a permanent fix belongs in the PHY (per-bit
         delays, DQS capture) or in a calibration under load; either rebuilds every bitstream.
   \item \textbf{The fixed loss per k step} (\cref{sec:formats:kstep}) is not yet located in the kernel.

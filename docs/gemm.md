@@ -69,7 +69,9 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   `gemm_runner --dtype int8 --b-dtype dshift3 --c-dtype int32` verifies exactly, and `--a-file/--b-file/--c-out`
   (int64 codes) run given matrices. Training side (PyTorch from the system Python, `/usr/bin/python3`):
   `ml/denseshift/` (layers, CIFAR-10 ResNet-20, MNIST MLP whose hidden layers run on the card).
-  Campaigns `configs/dse/ds_*.json`; kernel simulation `misc/gemm_mixed_sim/sim.py`.
+  Campaigns `configs/dse/ds_*.json`; kernel simulation `misc/gemm_mixed_sim/sim.py`. Best on the card (200 MHz,
+  exact): int8 × dshift3 → int32 PE 32×32 375.5 GOP/s with 40 DSPs (int8 × int8 multiply: the same with 1064);
+  int8 × dshift3 → int16 PE 32×64 750.9 GOP/s; float32 × dshift3 → float32 PE 32×16 189.1 GOP/s.
 - **Verification is exact:** integer and fixed-point formats always. float32 bit for bit against a reference that
   accumulates in the kernel's order (`--float-exact`, default in `gemm_dse.py` and `gemm_run.py`; rows carry
   `verify_exact`).
@@ -98,7 +100,7 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   config hash, git sha, sizes, timing, counters; `invocations.jsonl`; `gemm_dse.py --resume` continues an interrupted
   campaign). All git-ignored.
 - **Layout:** `kernels/gemm/` (adapted HLS C++, changes in `ORIGIN.md`), `kernels/gemm_mixed/` (A/B/C types,
-  DenseShift MAC), `ml/denseshift/` (PyTorch), `hw/gemm/` (SoC, DMA↔DDR bridge, kernel
+  DenseShift MAC), `ml/denseshift/` (PyTorch, [README](../ml/denseshift/README.md)), `hw/gemm/` (SoC, DMA↔DDR bridge, kernel
   wrapper, AXI perf counters, tests), `tcl/` (HLS flow, Vivado hooks, JTAG program), `sw/gemm_host/` (C++: DMA,
   kernel control, `gemm_runner`, `ddr_dma_test`), `flow/gemmflow/` (Python package), `scripts/gemm_*.py`,
   `configs/{gemm,dse}/`, `misc/` (debug cases).

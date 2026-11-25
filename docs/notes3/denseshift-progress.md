@@ -6,16 +6,16 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 |---|---|---|
 | 0 | Read paper + official code, plan | ✅ |
 | A1 | PyTorch DenseShift layers + unit checks | ✅ |
-| A2 | CIFAR-10 ResNet-20: float32 vs DenseShift 2/3/4-bit | 🟡 training |
+| A2 | CIFAR-10 ResNet-20: float32 vs DenseShift 2/3/4-bit | ✅ (3 seeds; 400 epochs for float32, 3-bit, 4-bit) |
 | B1 | `kernels/gemm_mixed/` (A/B/C types, shift MAC) + g++ simulation | ✅ |
 | B2 | Flow: config fields, numeric formats, kernel dir, hashes, names, columns | ✅ |
 | B3 | Host: codec, mixed reference, runner options, unit tests | ✅ |
 | C1 | `ds_hls` HLS probe | ✅ |
-| C2 | `ds_same_array` builds + card runs + exact screens | ✅ (screens queued) |
+| C2 | `ds_same_array` builds + card runs + exact screens | ✅ (sampled exact checks; full screens not run, see log) |
 | C3 | `ds_scale` | ✅ |
 | C4 | MNIST MLP end to end on the card | ✅ (uint8 and 7-bit activation variants) |
 | C5 | Float activations (stretch) | ✅ PE 32×16 (PE 40×16 build stopped by the memory guard) |
-| D | README / report | ⬜ |
+| D | README / report | ✅ |
 
 ## Log
 
@@ -215,3 +215,18 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   runs and the full exact screens (2 × 2048³, every entry) of the 7 DenseShift builds that met timing. Not restarted
   (standing rule: memory-reaped tasks are restarted only when the user asks). To redo: `build/ds_chain2.sh` minus its
   wait line, or the screens alone (no Vivado run apart from JTAG programming).
+- **D done** (docs pass after chain 2):
+  - Report: `tab:ds-cifar` now shows the 3-seed means with ranges and the 400-epoch runs; the text says what the
+    seeds changed (2-bit and 4-bit looked equal with seed 0 alone; Eq. 7 vs Eq. 8 within the spread). New paragraph
+    on verification (sampled 4098 entries per card run, MNIST every sum, full screens not run), the PE 40×16 float
+    build as stopped, a DenseShift campaign table (`tab:ds-campaigns`), and an appendix table of every mixed build
+    (`tab:ds-builds`, `data/ds_builds_table.csv`, the two builds without a report listed with their reason).
+    Abstract (3-seed number, PE 32×64) and open points updated. 33 pages, 0 warnings, no overfull boxes.
+  - `docs/report/tools/extract_data.py`: mixed builds go to `ds_builds_table.csv` instead of the integer/fixed-point
+    table. The rerun also adds the six `ds_*` campaigns to `campaigns.csv` and moves a few DMA rate points by ≤ 0.004
+    GB/s (the new runs' transfers are averaged in). `data/denseshift_cifar.csv` from `summarize.py --csv`.
+  - READMEs: `ml/denseshift/README.md` (scripts, commands, results), `misc/gemm_mixed_sim/README.md`,
+    `misc/ds_mac/README.md`; top-level README (4-bit < 3-bit, the int32 array limit, verification state) and
+    `docs/gemm.md` (best builds, README link).
+  - Still open (needs the user's go): full exact screens of the 7 DenseShift builds that met timing, and the PE 40×16
+    float build (`build/ds_chain2.sh`; with fewer Vivado threads to lower its memory peak).

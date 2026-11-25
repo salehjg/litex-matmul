@@ -94,14 +94,16 @@ def builds():
         wns = clock_wns(os.path.join(d, "gateware"))
         c = s["config"]
         k = c["kernel"]
+        mixed = False
         try:  # the full format: mixed builds (kernels/gemm_mixed) are e.g. int8xdshift3-int32
-            dtype = BuildCfg.from_dict(c).numeric().spec
+            bc = BuildCfg.from_dict(c)
+            dtype, mixed = bc.numeric().spec, bc.is_mixed()
         except (ConfigError, NumericError):
             try:
                 dtype = resolve(k["data_type"], k.get("data_bits"), k.get("frac_bits")).spec
             except NumericError:
                 dtype = k["data_type"]
-        out[s["config_hash"][:8]] = dict(dtype=dtype,
+        out[s["config_hash"][:8]] = dict(dtype=dtype, mixed=mixed,
             id=s["config_hash"][:8], build_id=s["build_id"], cfg=c, k=c["kernel"],
             mhz=c["clocks"]["accel_mhz"], preset=c["vivado"]["preset"],
             map="".join(c["memory_map"][m][-1] for m in "abc"),
@@ -379,7 +381,13 @@ def main():
 # Builds of the formats section that need a word in the appendix table.
 FORMAT_NOTES = {"c0ddddde": "DDR read errors (0 after tuning)", "032f4a87": "DDR read errors (0 after tuning)",
                 "a0f95453": "tile rule 1: wrong C then hang", "f3c7b241": "PCIe 250 MHz path",
-                "e61e6845": "default preset"}
+                "e61e6845": "default preset",
+                # DenseShift (docs/notes3)
+                "8a1d78a1": "PCIe 250 MHz path", "59e14e0c": "congestion (BRAM 868.5 of 955)",
+                "612e98d2": "dataflow control"}
+# DenseShift builds that stopped before a summary was written (build dir prefix -> note).
+DS_UNFINISHED = {"f32xds3c32_pe48x16_t384x1024_200mhz_tA-736d2251": "too many LUTs (303.1k of 298.6k)",
+                 "f32xds3c32_pe40x16_t320x1024_200mhz_tA-36011712": "Vivado stopped (host memory)"}
 
 
 def formats(B, runs, runs_any):
@@ -414,17 +422,35 @@ def formats(B, runs, runs_any):
     # Every non-float build, formatted for the appendix table.
     def fm(v, nd):
         return "--" if v is None else f"{v:.{nd}f}"
-    rows = []
-    for h, b in sorted(((h, b) for h, b in B.items() if b["dtype"] != "float32"),
-                       key=lambda kv: (kv[1]["dtype"].lstrip("u"), kv[1]["k"]["parallelism_n"] * kv[1]["k"]["parallelism_m"],
-                                       kv[1]["mhz"], kv[1]["preset"], kv[1]["build_id"])):
-        g = max((r["gflops"] for r in runs_by(runs_any, h)), default=None)
-        rows.append([f"{b['dtype']} {label(b)}", "yes" if b["met"] else "no", fm(b["wns_accel"], 3), fm(b["wns"], 3),
-                     fm(b["lut"] and b["lut"] / 1000, 1), fm(b["bram"], 1), fm(b["dsp"], 0), fm(b["build_min"], 0),
-                     fm(g, 1), fm(pct(g, b["peak"]) if g else None, 1), FORMAT_NOTES.get(h, "")])
-    write("formats_builds_table.csv", ["label", "met", "wns_accel", "wns", "lut_k", "bram", "dsp", "build_min", "gops",
-                                       "pct", "note"], rows,
+    def table_rows(sel):
+        rows = []
+        for h, b in sorted(((h, b) for h, b in B.items() if sel(b)),
+                           key=lambda kv: (kv[1]["dtype"].lstrip("u"),
+                                           kv[1]["k"]["parallelism_n"] * kv[1]["k"]["parallelism_m"],
+                                           kv[1]["mhz"], kv[1]["preset"], kv[1]["build_id"])):
+            g = max((r["gflops"] for r in runs_by(runs_any, h)), default=None)
+            rows.append([f"{b['dtype']} {label(b)}", "yes" if b["met"] else "no", fm(b["wns_accel"], 3),
+                         fm(b["wns"], 3), fm(b["lut"] and b["lut"] / 1000, 1), fm(b["bram"], 1), fm(b["dsp"], 0),
+                         fm(b["build_min"], 0), fm(g, 1), fm(pct(g, b["peak"]) if g else None, 1),
+                         FORMAT_NOTES.get(h, "")])
+        return rows
+    header = ["label", "met", "wns_accel", "wns", "lut_k", "bram", "dsp", "build_min", "gops", "pct", "note"]
+    write("formats_builds_table.csv", header, table_rows(lambda b: b["dtype"] != "float32" and not b["mixed"]),
           "every integer/fixed-point Vivado build: timing (ns), resources, best GOP/s (rows with DDR read errors included)")
+
+    # Mixed-type builds (kernels/gemm_mixed, DenseShift), plus the ones that stopped before their summary.
+    rows = table_rows(lambda b: b["mixed"])
+    for d, note in DS_UNFINISHED.items():
+        try:
+            c = json.load(open(os.path.join(SOC, d, "config.json")))
+        except OSError:
+            continue
+        bc = BuildCfg.from_dict(c)
+        b = dict(k=c["kernel"], mhz=c["clocks"]["accel_mhz"], preset=c["vivado"]["preset"],
+                 map="".join(c["memory_map"][m][-1] for m in "abc"))
+        rows.append([f"{bc.numeric().spec} {label(b)}", "--"] + ["--"] * 8 + [note])
+    write("ds_builds_table.csv", header, rows,
+          "every mixed-type (DenseShift) Vivado build: timing (ns), resources, best GOP/s; unfinished builds last")
 
 
 if __name__ == "__main__":

@@ -36,32 +36,40 @@ convolution layers for any \(n \ge 2\). A self-test checks that only \(\pm2^p\) 
 reached, that the exported hardware codes decode to the trained weights, and that the 3-bit layer equals a
 transcription of the official layer in values \emph{and} gradients. ResNet-20 on CIFAR-10 is a small-scale check of
 the accuracy claim (the paper reports ImageNet), trained as in the official code: SGD 0.1, momentum 0.9, weight decay
-\(10^{-4}\), cosine schedule, 200 epochs (\cref{tab:ds-cifar}).
+\(10^{-4}\), cosine schedule, 200 epochs, three seeds per configuration; float32, 3-bit and 4-bit were also trained
+for 400 epochs (\cref{tab:ds-cifar}; per-run data in \file{data/denseshift\_cifar.csv}).
 
 \begin{table}[ht]
-\centering\small
-\caption{ResNet-20 on CIFAR-10, test accuracy after 200 epochs (seed 0; first convolution and FC layer float).
-  Exported codes decoded into ordinary weights give the same accuracy in every run. Paper, ImageNet ResNet-18: float
-  69.6, 2-bit 68.90, 3-bit 70.62, 4-bit 70.94\,\%.}
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{ResNet-20 on CIFAR-10, test accuracy at the end of training: mean (min--max) of seeds 0--2 at 200 epochs,
+  seed 0 at 400 epochs; first convolution and FC layer float. Weight shares: seed 0, 200 epochs. Exported codes
+  decoded into ordinary weights give the same accuracy in every run. Paper, ImageNet ResNet-18: float 69.6, 2-bit
+  68.90, 3-bit 70.62, 4-bit 70.94\,\%.}
 \label{tab:ds-cifar}
-\begin{tabular}{@{}lrrl@{}}
+\begin{tabular}{@{}lrrrl@{}}
 \toprule
-Weights & Accuracy & vs.\ float & Share of weights at \(|w| = 1, 2, 4, \dots\) \\
+& \multicolumn{2}{c}{200 epochs, 3 seeds} & 400 epochs & \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-4}
+Weights & Accuracy, \% & vs.\ float & Accuracy, \% & Share of weights at \(|w| = 1, 2, 4, \dots\) \\
 \midrule
-float32 & 91.68\,\% & & \\
-DenseShift 2-bit & 90.84\,\% & \(-0.84\) & 0.49 / 0.51 \\
-DenseShift 3-bit & 91.40\,\% & \(-0.28\) & 0.52 / 0.14 / 0.12 / 0.21 \\
-DenseShift 4-bit & 90.80\,\% & \(-0.88\) & 0.33 / 0.12 / 0.11 / 0.10 / 0.10 / 0.09 / 0.07 / 0.07 \\
+float32 & 91.70 (91.56--91.85) & & 92.24 & \\
+DenseShift 2-bit & 91.06 (90.84--91.43) & \(-0.64\) & & 0.49 / 0.51 \\
+DenseShift 3-bit & 91.32 (91.10--91.47) & \(-0.38\) & 92.05 (\(-0.19\)) & 0.52 / 0.14 / 0.12 / 0.21 \\
+DenseShift 4-bit & 90.89 (90.63--91.25) & \(-0.81\) & 91.64 (\(-0.60\)) & 0.33 / 0.12 / 0.11 / 0.10 / 0.10 / 0.09 / 0.07 / 0.07 \\
 \midrule
-3-bit, Eq.~7 gradient & 91.36\,\% & \(-0.32\) & 0.76 / 0.18 / 0.03 / 0.03 \\
-3-bit, Kaiming init & 90.50\,\% & \(-1.18\) & 0.45 / 0.20 / 0.15 / 0.20 \\
+3-bit, Eq.~7 gradient & 91.22 (91.11--91.36) & \(-0.48\) & & 0.76 / 0.18 / 0.03 / 0.03 \\
+3-bit, Kaiming init & 90.23 (89.99--90.50) & \(-1.47\) & & 0.45 / 0.20 / 0.15 / 0.20 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-3-bit DenseShift comes within 0.3 points of float. Without the rescaled gradient most exponents stay at zero (76\,\% of
-the weights at \(\pm1\)), as the paper predicts, although the accuracy is the same here; the low-variance
-initialisation is worth 0.9 points even when training from scratch. A second network, a multi-layer perceptron on
+3-bit DenseShift is 0.4 points below float on average and 0.2 points at 400 epochs. The seed spread is up to
+0.6 points, so a single seed would not have settled any of the smaller differences: with seed 0 alone, 2-bit and
+4-bit looked equal. Unlike the paper's ImageNet results, 4-bit stays below 3-bit, and twice the epochs do not close
+the gap (both gain about 0.7 points), so slower training of its eight binary variables per weight is not the whole
+reason. Without the rescaled gradient (Eq.~7) most exponents stay at zero (76\,\% of the weights at \(\pm1\)), as the
+paper predicts, but the accuracy drops by only 0.1 point, within the seed spread (paper: 0.3--0.7). The low-variance
+initialisation is worth 1.1 points, on every seed, even when training from scratch. A second network, a multi-layer perceptron on
 MNIST with two DenseShift hidden layers (\(784 \to 1024 \to 1024 \to 10\)), BatchNorm and unsigned 8-bit activations
 learned with quantisation-aware training, reaches 98.65\,\% with float weights and 98.46/98.47/98.37\,\% with
 2/3/4-bit DenseShift weights. It is the network that runs on the card (\cref{sec:ds:e2e}).
@@ -101,7 +109,8 @@ speed, as they must (same array, same schedule), and both are exact on the card.
 \begin{table}[ht]
 \centering\small
 \caption{int8 activations and int32 sums, PE 32\(\times\)32, tile 512\(\times\)1024, transposed A, 200\,MHz, both
-  meeting timing. HLS: estimates; Vivado: whole design after implementation; GOP/s at \(8192^3\), verified exactly.}
+  meeting timing. HLS: estimates; Vivado: whole design after implementation; GOP/s at \(8192^3\), checked exactly
+  (4098 sampled entries per run).}
 \label{tab:ds-same}
 \begin{tabular}{@{}lrrrrrrr@{}}
 \toprule
@@ -120,6 +129,13 @@ product was cut to 8 bits, had its multipliers in LUTs). The shift MAC removes a
 would cost 95k more LUTs instead; Vivado's implementation uses 5.9k \emph{fewer} LUTs and 19k fewer flip-flops (per
 PE: 3433 against 4026 LUTs). On this FPGA DenseShift therefore frees the DSPs at no cost in logic. The array cannot
 simply grow into them, because the 32-bit C buffers already use most of the BRAM (\cref{sec:ds:kernel}).
+
+\paragraph{Verification.} Every card run in this section compared 4098 entries per result (the sampled check: random
+entries plus corners) exactly with the host reference, after the DDR read taps were tuned under load (4088 bad words
+before, 0 after, in the first DenseShift bring-up). The MNIST runs (\cref{sec:ds:e2e}) compared every one of the
+\(2\times10.24\) million sums. The full screens that the other formats received (\(2\times2048^3\), every entry) were
+queued for the seven DenseShift builds that met timing but did not run: the job was stopped, together with the float
+PE 40\(\times\)16 build before it, when the host ran low on memory.
 
 \subsection{End to end: an MNIST network on the card}
 \label{sec:ds:e2e}
@@ -153,6 +169,8 @@ codes), so the card's sums are checked bit for bit against float sums in the ker
         110.9\,GFLOP/s: DenseShift weights give 1.7\(\times\) the throughput with fewer DSPs.
   \item PE 48\(\times\)16 (768 MACs, 1793 DSP) synthesised but needed 303\,086 LUTs of 298\,600: with the
         multiplier gone, the float adders' LUTs set the limit.
+  \item PE 40\(\times\)16 (640 MACs, tile 320\(\times\)1024; HLS estimate 1505 DSP, 407k LUT) was in Vivado
+        implementation when the job was stopped for lack of host memory; it has not been built.
 \end{itemize}
 
 \subsection{Larger arrays}
@@ -173,3 +191,30 @@ Without multipliers, the C buffers and the routing set the size. Three builds te
 With int32 sums, PE 32\(\times\)32 at 200\,MHz is therefore the practical DenseShift array on this device; its
 value is the freed DSPs and smaller logic rather than a larger array. Narrower C buffers than the C bus (for example
 24-bit sums) would be the next step for larger int32-class arrays.
+
+\subsection{Campaigns}
+\label{sec:ds:campaigns}
+\Cref{tab:ds-campaigns} lists the DenseShift campaigns of 25 November 2026; every build with its timing and resources
+is in \cref{tab:ds-builds} (appendix). The 21 CIFAR-10 trainings (8--39 minutes each, 5.3 GPU hours in all) ran
+alongside them.
+
+\begin{table}[ht]
+\centering\small
+\caption{DenseShift campaigns, 25 November 2026 (\file{data/campaigns.csv}). Builds: completed Vivado runs (PE
+  48\(\times\)16 in \code{ds\_float} stopped at the LUT check before placement); runs: card result rows.}
+\label{tab:ds-campaigns}
+\begin{tabular}{@{}lllrrrl@{}}
+\toprule
+Campaign & Time & Stages & Points & Builds & Runs & Question \\
+\midrule
+\code{ds\_hls} & 02:02--02:30 & sim, hls & 9 & -- & -- & which mixed formats fit, at what cost? \\
+\code{ds\_same\_array} & 02:38--04:02 & all & 3 & 3 & 12 & shift against multiply at one array \\
+\code{ds\_float} & 04:04--04:59 & all & 2 & 1 & 6 & float activations \\
+\code{ds\_u8} & 04:59--05:31 & all & 1 & 1 & 6 & uint8 activations (\code{explore} rebuild) \\
+\code{ds\_scale} & 05:31--07:53 & all & 3 & 3 & 6 & larger arrays, 250\,MHz \\
+\code{ds\_float2} & from 07:53 & all & 1 & 0 & 0 & float PE 40\(\times\)16 (stopped) \\
+\midrule
+\multicolumn{3}{@{}l}{total} & 19 & 8 & 30 & \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -23,9 +23,10 @@ also found DDR3 read errors under load, fixed by tuning the read delays under lo
 that the upstream kernel assumes but does not check.
 
 A third part implements DenseShift~\cite{denseshift}, a power-of-two weight format without zero: training in PyTorch
-(3-bit weights within 0.3 points of float on CIFAR-10 ResNet-20) and a copy of the kernel with separate activation,
-weight and sum types in which a multiply becomes a shift. At equal throughput (\SI{375.5}{GOP/s}, int8 activations,
-int32 sums) it needs 40 DSPs instead of 1064 and fewer LUTs; with float activations it reaches \SI{189.1}{GOP/s},
-1.7 times the float32 result. An MNIST network's DenseShift layers run on the card and give the same 10.24 million
+(3-bit weights 0.4 points below float on CIFAR-10 ResNet-20, mean of three seeds) and a copy of the kernel with
+separate activation, weight and sum types in which a multiply becomes a shift. At equal throughput
+(\SI{375.5}{GOP/s}, int8 activations, int32 sums) it needs 40 DSPs instead of 1064 and fewer LUTs; with int16 sums a
+2048-MAC array, more MACs than the device has DSPs, reaches \SI{750.9}{GOP/s}; with float activations it reaches
+\SI{189.1}{GOP/s}, 1.7 times the float32 result. An MNIST network's DenseShift layers run on the card and give the same 10.24 million
 sums per layer, and the same predictions, as the CPU.
 \end{abstract}

@@ -33,9 +33,14 @@ Trained in PyTorch (`ml/denseshift/`) and run on the card with a kernel that has
 - Same speed as the multiply MAC with 40 instead of 1064 DSPs and fewer LUTs; float activations give 1.7× the float32
   result (110.9 GFLOP/s), because a DenseShift product is an exponent add.
 - CIFAR-10 ResNet-20 (200 epochs, 3 seeds): 3-bit DenseShift 91.3 % against 91.7 % for float32 weights (400 epochs:
-  92.05 % against 92.24 %).
+  92.05 % against 92.24 %). 4-bit (90.9 %) stays below 3-bit, unlike the paper's ImageNet results
+  ([ml/denseshift](ml/denseshift/README.md)).
 - An MNIST MLP with two 3-bit DenseShift hidden layers runs on the card: all 2 × 10.24 M sums equal the CPU's, and the
   test accuracy is 98.48 %, the same as in PyTorch.
+- With int32 sums, PE 32×32 at 200 MHz is the largest array that closes timing (PE 48×32: routing congestion;
+  250 MHz: the HLS dataflow control).
+- Verification: the card runs above checked 4098 entries each, exactly. The full screens (every entry of 2 × 2048³)
+  and the float PE 40×16 build were stopped when the host ran low on memory and have not been rerun.
 
 **float32 exploration:** the best result after each step, against the peak of that configuration.
 
