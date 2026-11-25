@@ -10,7 +10,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | B1 | `kernels/gemm_mixed/` (A/B/C types, shift MAC) + g++ simulation | ✅ |
 | B2 | Flow: config fields, numeric formats, kernel dir, hashes, names, columns | ✅ |
 | B3 | Host: codec, mixed reference, runner options, unit tests | ✅ |
-| C1 | `ds_hls` HLS probe | ⬜ |
+| C1 | `ds_hls` HLS probe | 🟡 running |
 | C2 | `ds_same_array` builds + card runs + exact screens | ⬜ |
 | C3 | `ds_scale` | ⬜ |
 | C4 | MNIST MLP end to end on the card | 🟡 trained, waiting for a build |
@@ -71,3 +71,13 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   Sums reach |acc| ≤ 255·8·784 ≈ 1.6 M in layer 1: int32 C needed (int16 would wrap). `mlp_mnist.py fpga` runs both
   GEMMs through the build's `gemm_runner` (`--a-file/--b-file/--c-out`), compares every sum with the CPU and
   evaluates the pipeline on the card's sums.
+- **C1 started** (`configs/dse/ds_hls.json`: 9 points, sim + hls). All 9 sim points exact. First HLS point,
+  `i8xds3c32` PE 32×32 t512×1024: 39 DSP (no DSP in the shift MAC), LUT 331k / FF 174k (HLS estimates), 4.374 ns at
+  a 5 ns target, **BRAM18 2002**, over the resource gate (2002 + 150 > 1910). The C buffer is 57 of them per PE
+  (1024 bits × 512, counted in 18-bit slices). Checked against Vivado: in the int8 PE 32×32 build of kernels/gemm each
+  PE's 256-bit × 512 C buffer took 7 RAMB36 + 1 RAMB18, i.e. 36-bit ports: HLS's default `ram_2p` lands in
+  true-dual-port blocks and leaves half of each BRAM36 empty at depth 512. The buffer needs only one write and one
+  read port, so `kernels/gemm_mixed/src/Compute.cpp` now binds it as `ram_s2p` (simple dual port: 72-bit BRAM36 at
+  depth ≤ 512). Campaign restarted with the new tree (and with 2 HLS jobs instead of 3: three runs at 3.5 GB each plus
+  CIFAR training left 2 GB free). Lesson: `pkill -f <pattern>` in a tool shell also kills that shell when the pattern
+  is in its own command line; use `pgrep -f "[g]emm_dse"` or PIDs.

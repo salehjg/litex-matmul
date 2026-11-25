@@ -26,6 +26,11 @@ void ProcessingElement(Stream<ComputePackN_t> &aIn,
   // This is where we spend all our T^2 fast memory
   ComputePackC_t cBuffer[kInnerTilesN * kInnerTilesM][kComputeTileSizeN];
   #pragma HLS ARRAY_PARTITION variable=cBuffer complete dim=2
+  // litex-matmul (kernels/gemm_mixed): the C buffer has one write port (the MAC) and one read port (MAC and
+  // write-back): a simple dual-port RAM, which Vivado can build from 72-bit wide BRAM36 (depth <= 512). The default
+  // ram_2p became true-dual-port blocks with 36-bit ports (int8 PE 32x32 in kernels/gemm: 7.5 BRAM36 per PE for a
+  // 256-bit x 512 buffer), which int32 sums (1024 bits per PE at PM 32) cannot afford.
+  #pragma HLS BIND_STORAGE variable=cBuffer type=ram_s2p impl=bram
 
   // Populate the buffer for the first outer product 
 InitializeABuffer_Inner:

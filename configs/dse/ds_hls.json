@@ -25,5 +25,5 @@
     ]
   },
   "stages": ["sim", "hls"],
-  "jobs": {"hls": 3}
+  "jobs": {"hls": 2}
 }
