@@ -13,7 +13,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | C1 | `ds_hls` HLS probe | ⬜ |
 | C2 | `ds_same_array` builds + card runs + exact screens | ⬜ |
 | C3 | `ds_scale` | ⬜ |
-| C4 | MNIST MLP end to end on the card | ⬜ |
+| C4 | MNIST MLP end to end on the card | 🟡 trained, waiting for a build |
 | C5 | Float activations (stretch) | ⬜ |
 | D | README / report | ⬜ |
 
@@ -63,3 +63,11 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   (values, wrap at int16, packing with clear high lane bits) and a cross-check of the reference against `ap_int`
   arithmetic written as in `Mac.h` (int8/uint8/int4 A, dshift2/3/4, int16/int32 C): 0 failures. The runner builds
   against an existing SoC build; it needs a mixed build on the card for a real run.
+- **C4 model trained.** `ml/denseshift/mlp_mnist.py train --bits 3`: 784 → DenseShift 1024 → BN → ReLU → uint8 →
+  DenseShift 1024 → BN → ReLU → uint8 → FC 10 (float). Inputs are the raw pixel codes, so both GEMMs are
+  uint8 × dshift3 → int32 (the `u8xds3c32` kernel). QAT with running-max activation scales and a straight-through
+  round, SGD 0.1 cosine, 30 epochs, 46 s on the GPU. **Test accuracy 98.47 %, and the integer pipeline (exact GEMMs
+  via float64, BN folded into per-channel a, b, requantization clip(rint((acc·a + b)/s), 0, 255)) also 98.47 %.**
+  Sums reach |acc| ≤ 255·8·784 ≈ 1.6 M in layer 1: int32 C needed (int16 would wrap). `mlp_mnist.py fpga` runs both
+  GEMMs through the build's `gemm_runner` (`--a-file/--b-file/--c-out`), compares every sum with the CPU and
+  evaluates the pipeline on the card's sums.
