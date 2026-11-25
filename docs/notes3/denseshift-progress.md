@@ -9,7 +9,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | A2 | CIFAR-10 ResNet-20: float32 vs DenseShift 2/3/4-bit | 🟡 training |
 | B1 | `kernels/gemm_mixed/` (A/B/C types, shift MAC) + g++ simulation | ✅ |
 | B2 | Flow: config fields, numeric formats, kernel dir, hashes, names, columns | ✅ |
-| B3 | Host: codec, mixed reference, runner options, unit tests | ⬜ |
+| B3 | Host: codec, mixed reference, runner options, unit tests | ✅ |
 | C1 | `ds_hls` HLS probe | ⬜ |
 | C2 | `ds_same_array` builds + card runs + exact screens | ⬜ |
 | C3 | `ds_scale` | ⬜ |
@@ -55,3 +55,11 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   and C words), C rule (PM and C words per word divide one another), mixed `Config.h` values, HLS hash over the tree
   actually used. `hls.py`, `steps.py` (SimStep runs the mixed testbench), `runner.py` (`runner_args()`). 41 flow tests
   pass; the golden build ids are unchanged.
+- **B3 done.** `sw/gemm_host/src/numeric.hpp`: `Kind::Pow2` (`dshift2/3/4`, 3-bit codes in 4-bit lanes, `value()`,
+  `pow2_code()`), packing by storage bits, `ref_entry_mixed()` (sum of value(a)·value(b) wrapped to C), `mixed_spec()`.
+  `gemm_runner`: `--b-dtype` / `--c-dtype` (A int/uint ≤ 16 bits, B int/uint ≤ 16 bits or dshift, C int16/int32;
+  `--value-range` then applies to A only), `--a-file` / `--b-file` (int64 codes) and `--c-out`; JSON rows carry the
+  combined spec (`int8xdshift3-int32`) plus `a_dtype`, `b_dtype`, `c_dtype`. `make test`: new DenseShift cases
+  (values, wrap at int16, packing with clear high lane bits) and a cross-check of the reference against `ap_int`
+  arithmetic written as in `Mac.h` (int8/uint8/int4 A, dshift2/3/4, int16/int32 C): 0 failures. The runner builds
+  against an existing SoC build; it needs a mixed build on the card for a real run.

@@ -16,6 +16,10 @@
 // --a-identity (N == K) sets A = I, so C is B. --float-exact checks float32 bit for bit against a reference that
 // accumulates like the kernel's PEs (fp32, c = c + a*b in k order, round to nearest; the host build has no FMA
 // contraction: -std=c++17 and no -march), so even a flipped low mantissa bit counts as a mismatch.
+// Mixed formats (kernels/gemm_mixed, docs/notes3): --b-dtype SPEC --c-dtype SPEC (B int/uint or dshift<n> DenseShift
+// codes, C int16/int32), e.g. --dtype int8 --b-dtype dshift3 --c-dtype int32: C = sum value(a) * value(b) wrapped to C.
+// --a-file / --b-file read the codes (int64, A row-major N x K, B row-major K x M) instead of random ones; --c-out
+// writes C (int64, N x M) of the last repetition. --value-range then applies to A only.
 // Exit status: 0 = all repetitions verified (or --verify off), 1 = mismatch, 2 = usage, 3 = error.
 #include <algorithm>
 #include <array>
@@ -26,6 +30,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -60,17 +65,26 @@ struct Options {
     std::string dump_inputs;    // --dump-inputs PREFIX: PREFIX.a / PREFIX.b raw arrays (A row-major N x K, B row-major K x M;
                                 // int64 codes, or float32) for offline analysis of mismatches (debugging)
     bool float_exact = false;   // --float-exact: float32 reference in the kernel's order (c = c + a*b, k = 0..K-1, fp32)
+    // Mixed formats (kernels/gemm_mixed): --b-dtype / --c-dtype give B and C their own format (B may be dshift<n>);
+    // otherwise both equal --dtype. --value-range then applies to A only.
+    Dtype bdt, cdt;
+    bool mixed = false;
+    std::string a_file, b_file, c_out;  // int64 codes: A row-major N x K, B row-major K x M; C written N x M
+    std::string spec() const { return mixed ? mixed_spec(dt, bdt, cdt) : dt.spec(); }
 };
 
 [[noreturn]] void usage(const char *argv0) {
     std::fprintf(stderr, "usage: %s --n N --k K --m M [--reps R] [--warmup W] [--seed S] [--verify full|sampled|off]\n"
                          "          [--map a=ch0,b=ch1,c=ch1] [--expect-build-id HEX] [--transposed-a]\n"
-                         "          [--multiples N,K,M] [--dtype SPEC] [--value-range LO,HI] [--dump-bad FILE] [--a-identity] [--b-identity] [--float-exact] [--dump-inputs PREFIX] [--json]\n", argv0);
+                         "          [--multiples N,K,M] [--dtype SPEC] [--b-dtype SPEC --c-dtype SPEC] [--value-range LO,HI] [--dump-bad FILE]\n"
+                         "          [--a-identity] [--b-identity] [--float-exact] [--dump-inputs PREFIX]\n"
+                         "          [--a-file F --b-file F] [--c-out F] [--json]\n", argv0);
     std::exit(2);
 }
 
 Options parse(int argc, char **argv) {
     Options o;
+    bool have_b = false, have_c = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         auto next = [&]() -> std::string { if (i + 1 >= argc) usage(argv[0]); return argv[++i]; };
@@ -99,7 +113,16 @@ Options parse(int argc, char **argv) {
         } else if (a == "--dtype") {
             const std::string spec = next();
             try { o.dt = Dtype::parse(spec); } catch (const std::exception &e) { std::fprintf(stderr, "error: %s\n", e.what()); std::exit(2); }
-        } else if (a == "--value-range") {
+        } else if (a == "--b-dtype" || a == "--c-dtype") {
+            const std::string spec = next();
+            try { (a == "--b-dtype" ? o.bdt : o.cdt) = Dtype::parse(spec); }
+            catch (const std::exception &e) { std::fprintf(stderr, "error: %s\n", e.what()); std::exit(2); }
+            o.mixed = true;
+            (a == "--b-dtype" ? have_b : have_c) = true;
+        } else if (a == "--a-file") o.a_file = next();
+        else if (a == "--b-file") o.b_file = next();
+        else if (a == "--c-out") o.c_out = next();
+        else if (a == "--value-range") {
             long long lo, hi;
             if (std::sscanf(next().c_str(), "%lld,%lld", &lo, &hi) != 2 || lo > hi) usage(argv[0]);
             o.have_range = true; o.lo = lo; o.hi = hi;
@@ -121,12 +144,31 @@ Options parse(int argc, char **argv) {
                      (long long)o.dt.min_code(), (long long)o.dt.max_code());
         std::exit(2);
     }
+    if (o.mixed) {
+        if (!have_b) o.bdt = o.dt;
+        if (!have_c) o.cdt = Dtype::parse("int32");
+        const bool ok = o.dt.kind == Dtype::Kind::Int && o.dt.bits <= 16 &&
+                        (o.bdt.kind == Dtype::Kind::Int || o.bdt.is_pow2()) && o.bdt.bits <= 16 &&
+                        o.cdt.kind == Dtype::Kind::Int && o.cdt.is_signed && (o.cdt.bits == 16 || o.cdt.bits == 32);
+        if (!ok) {
+            std::fprintf(stderr, "error: mixed formats: A int/uint <= 16 bits, B int/uint <= 16 bits or dshift<n>, "
+                                 "C int16/int32 (got %s)\n", o.spec().c_str());
+            std::exit(2);
+        }
+        if (o.b_identity && o.bdt.is_pow2()) { std::fprintf(stderr, "error: --b-identity: DenseShift has no zero\n"); std::exit(2); }
+    } else {
+        o.bdt = o.cdt = o.dt;
+    }
+    if ((!o.a_file.empty() || !o.b_file.empty() || !o.c_out.empty()) && o.dt.is_float()) {
+        std::fprintf(stderr, "error: --a-file / --b-file / --c-out: integer formats only\n");
+        std::exit(2);
+    }
     if (o.b_identity && o.k != o.m) { std::fprintf(stderr, "error: --b-identity needs K == M\n"); std::exit(2); }
     if (o.a_identity && o.n != o.k) { std::fprintf(stderr, "error: --a-identity needs N == K\n"); std::exit(2); }
     const uint32_t epw = o.dt.elems_per_word();
     if (o.mult[0] == 0) o.mult[0] = o.transposed_a ? epw : 1;
     if (o.mult[1] == 0) o.mult[1] = epw;
-    if (o.mult[2] == 0) o.mult[2] = epw;
+    if (o.mult[2] == 0) o.mult[2] = std::max(o.bdt.elems_per_word(), o.cdt.elems_per_word());  // powers of two: lcm
     return o;
 }
 
@@ -217,7 +259,8 @@ Verify verify_codes(const std::vector<int64_t> &a, const std::vector<int64_t> &b
         th.emplace_back([&, t]() {
             for (size_t q = t; q < idx.size(); q += nt) {
                 const uint32_t i = idx[q].first, j = idx[q].second;
-                const int64_t ref = gemm::ref_entry(o.dt, &a[size_t(i) * o.k], &bt[size_t(j) * o.k], o.k);
+                const int64_t ref = o.mixed ? gemm::ref_entry_mixed(o.dt, o.bdt, o.cdt, &a[size_t(i) * o.k], &bt[size_t(j) * o.k], o.k)
+                                            : gemm::ref_entry(o.dt, &a[size_t(i) * o.k], &bt[size_t(j) * o.k], o.k);
                 const int64_t got = c[size_t(i) * o.m + j];
                 part[t].checked++;
                 if (got != ref) {
@@ -250,8 +293,8 @@ int main(int argc, char **argv) {
                          o.expect_build_id);
             return 3;
         }
-        const size_t bytes_a = o.dt.bytes(size_t(o.n) * o.k), bytes_b = o.dt.bytes(size_t(o.k) * o.m),
-                     bytes_c = o.dt.bytes(size_t(o.n) * o.m);
+        const size_t bytes_a = o.dt.bytes(size_t(o.n) * o.k), bytes_b = o.bdt.bytes(size_t(o.k) * o.m),
+                     bytes_c = o.cdt.bytes(size_t(o.n) * o.m);
         auto round64 = [](size_t x) { return (x + 63) & ~size_t(63); };
         // DDR layout (docs/notes1/gemm-hls-progress.md, "DDR memory map"): each matrix at the start of its channel;
         // B at 512 MB if it shares the channel with A, C at 1 GB if it shares it with A or B.
@@ -312,10 +355,23 @@ int main(int argc, char **argv) {
         } else {
             std::uniform_int_distribution<int64_t> dist(o.lo, o.hi);
             auto code = [&]() { return o.have_range ? dist(rng) : dt.wrap(rng()); };
+            auto bcode = [&]() { return (o.have_range && !o.mixed) ? dist(rng) : o.bdt.wrap(rng()); };
             ai.resize(size_t(o.n) * o.k); bti.resize(size_t(o.m) * o.k);
             std::vector<int64_t> bi(size_t(o.k) * o.m);
             for (auto &x : ai) x = code();
-            for (auto &x : bi) x = code();
+            for (auto &x : bi) x = bcode();
+            // --a-file / --b-file: given codes instead of random ones (end-to-end runs, ml/denseshift).
+            auto load = [&](const std::string &path, std::vector<int64_t> &v, const Dtype &d, const char *what) {
+                FILE *f = std::fopen(path.c_str(), "rb");
+                if (!f) throw std::runtime_error(std::string("cannot open ") + path);
+                const size_t got = std::fread(v.data(), sizeof(int64_t), v.size(), f);
+                const bool extra = std::fgetc(f) != EOF;
+                std::fclose(f);
+                if (got != v.size() || extra) throw std::runtime_error(path + ": expected " + std::to_string(v.size()) + " int64 codes for " + what);
+                for (auto &x : v) if (x != d.wrap(uint64_t(x))) throw std::runtime_error(path + ": code out of range for " + d.spec());
+            };
+            if (!o.a_file.empty()) load(o.a_file, ai, dt, "A (N x K)");
+            if (!o.b_file.empty()) load(o.b_file, bi, o.bdt, "B (K x M)");
             if (o.b_identity) for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bi[size_t(r) * o.m + col] = r == col;
             if (o.a_identity) for (uint32_t r = 0; r < o.n; r++) for (uint32_t col = 0; col < o.k; col++) ai[size_t(r) * o.k + col] = r == col;
             for (uint32_t r = 0; r < o.k; r++) for (uint32_t col = 0; col < o.m; col++) bti[size_t(col) * o.k + r] = bi[size_t(r) * o.m + col];
@@ -327,7 +383,7 @@ int main(int argc, char **argv) {
             } else {
                 gemm::pack(dt, ai.data(), ai.size(), a_dev.data());
             }
-            gemm::pack(dt, bi.data(), bi.size(), b_dev.data());
+            gemm::pack(o.bdt, bi.data(), bi.size(), b_dev.data());
             ci.resize(size_t(o.n) * o.m);
         }
 
@@ -357,7 +413,12 @@ int main(int argc, char **argv) {
             const TransferStats tc = ddr.read(o.ch[2], addr[2], cbuf.data(), round64(bytes_c));
             const double e2e = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             if (dt.is_float()) std::memcpy(cf.data(), cbuf.data(), bytes_c);
-            else gemm::unpack(dt, cbuf.data(), ci.size(), ci.data());
+            else gemm::unpack(o.cdt, cbuf.data(), ci.size(), ci.data());
+            if (!o.c_out.empty() && !warm) {
+                FILE *f = std::fopen(o.c_out.c_str(), "wb");
+                if (!f || std::fwrite(ci.data(), sizeof(int64_t), ci.size(), f) != ci.size()) throw std::runtime_error("cannot write " + o.c_out);
+                std::fclose(f);
+            }
 
             Verify v;
             if (o.verify != "off") v = dt.is_float() ? verify(af, btf, cf, o, o.seed + rep) : verify_codes(ai, bti, ci, o, o.seed + rep);
@@ -367,7 +428,7 @@ int main(int argc, char **argv) {
             const double gops = kr.seconds > 0 ? ops / kr.seconds / 1e9 : 0;
             std::printf("%s rep %u: %ux%ux%u %s  kernel %" PRIu64 " cycles @ %.3f MHz = %.3f ms, %.2f %s  "
                         "H2C %.2f GB/s  C2H %.2f GB/s  e2e %.1f ms  verify %s (%zu checked, %zu bad, max %s %.2e)\n",
-                        warm ? "warmup" : "run", rep, o.n, o.k, o.m, dt.spec().c_str(), kr.cycles, kr.accel_hz / 1e6,
+                        warm ? "warmup" : "run", rep, o.n, o.k, o.m, o.spec().c_str(), kr.cycles, kr.accel_hz / 1e6,
                         kr.seconds * 1e3, gops, dt.is_float() ? "GFLOP/s" : "GOP/s",
                         (ta.bytes + tb.bytes) / (ta.seconds + tb.seconds) / 1e9, tc.gbps(), e2e * 1e3,
                         o.verify == "off" ? "off" : ok ? "OK" : "FAIL", v.checked, v.bad,
@@ -377,9 +438,11 @@ int main(int argc, char **argv) {
                             ",\"map\":\"a=ch%u,b=ch%u,c=ch%u\",\"dtype\":\"%s\",\"dtype_kind\":\"%s\",\"dtype_bits\":%u,"
                             "\"dtype_signed\":%s,\"kernel_cycles\":%" PRIu64 ",\"accel_hz\":%.0f,"
                             "\"kernel_s\":%.9f,\"kernel_wall_s\":%.6f,\"gops\":%.4f,",
-                            bid, o.n, o.k, o.m, rep - o.warmup, o.seed, o.ch[0], o.ch[1], o.ch[2], dt.spec().c_str(),
-                            dt.kind_name(), dt.bits, dt.is_signed ? "true" : "false", kr.cycles, kr.accel_hz,
-                            kr.seconds, kr.wall_s, gops);
+                            bid, o.n, o.k, o.m, rep - o.warmup, o.seed, o.ch[0], o.ch[1], o.ch[2], o.spec().c_str(),
+                            (o.mixed && o.bdt.is_pow2()) ? "pow2" : dt.kind_name(), dt.bits,
+                            dt.is_signed ? "true" : "false", kr.cycles, kr.accel_hz, kr.seconds, kr.wall_s, gops);
+                if (o.mixed) std::printf("\"a_dtype\":\"%s\",\"b_dtype\":\"%s\",\"c_dtype\":\"%s\",", dt.spec().c_str(),
+                                         o.bdt.spec().c_str(), o.cdt.spec().c_str());
                 if (dt.is_float()) std::printf("\"gflops\":%.4f,", gops);
                 if (o.have_range) std::printf("\"value_range\":[%lld,%lld],", (long long)o.lo, (long long)o.hi);
                 std::printf("\"h2c_bytes\":%zu,\"h2c_s\":%.6f,\"c2h_bytes\":%zu,\"c2h_s\":%.6f,\"e2e_s\":%.6f,"
