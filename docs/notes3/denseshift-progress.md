@@ -203,3 +203,6 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   (3-seed means): 3-bit −0.38, 2-bit −0.64, 4-bit −0.81. 3-bit DenseShift stays within ~0.4 points of float.
 - **ds_scale, PE 32×64 int8×ds3→int16 (2048 MACs): timing met (WNS 0.025), LUT 190.3k, FF 255.5k, BRAM 638,
   DSP 40** (27 min). The multiply MAC would need 2048 DSPs here (device: 1920). Card run after the 250 MHz build.
+- **ds_scale, PE 32×32 int32 at 250 MHz: timing failed, WNS −0.932 ns** on the accelerator clock. Worst path:
+  `ProcessingElement_4` counter → `ap_sync_reg_ProcessingElement_26_U0_ap_ready` reset, 4.23 ns, 7 levels, 82 %
+  routing: the HLS dataflow control fan-out that already limited the int4 arrays (notes2), not the shift MAC.
