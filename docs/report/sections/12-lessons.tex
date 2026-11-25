@@ -30,6 +30,11 @@
         rules in seconds; they are now validation errors (\cref{sec:formats:tiles}).
   \item \textbf{Narrow formats move the limit.} Without the DSP bottleneck, the C-tile BRAM, the LUTs and the fan-out
         of the HLS dataflow control decide how large and how fast an array can be (\cref{sec:formats:wide}).
+  \item \textbf{HLS resource estimates can point the wrong way.} HLS predicted 95k more LUTs for the shift MAC than
+        for the multiply MAC; Vivado used 6k fewer. Estimates rank options poorly when the alternatives map to
+        different primitives (DSP against LUT); a build decides (\cref{sec:ds:card}).
+  \item \textbf{Look at how memories are mapped.} A RAM type chosen by default (two-port, true-dual-port blocks with
+        36-bit ports) used half of every BRAM36; one storage pragma halved the C buffers (\cref{sec:ds:kernel}).
 \end{enumerate}
 
 \subsection{Open points}
@@ -42,8 +47,9 @@
         another preset when only that path fails.
   \item \textbf{Clock beyond 225\,MHz} (180\,MHz for 64 PEs) needs kernel changes (registering the dataflow control
         and the C-pipe enables).
-  \item \textbf{A wider accumulator} (e.g.\ int8 inputs, int32 sums) and power-of-two weights (DenseShift) need
-        separate A/B/C types in the kernel; the flow's configuration and result columns are prepared for them.
+  \item \textbf{DenseShift follow-ups} (\cref{sec:ds}): a Vivado comparison of the carry-in MAC form; C buffers
+        narrower than the C bus (e.g.\ 24-bit sums) to fit larger int32-sum arrays; a whole CIFAR-10 network on the
+        card (im2col on the host, compact code files); clocks above 200\,MHz for the mixed kernel.
   \item \textbf{DDR3 read margin}: the host-side tuning works, but a permanent fix belongs in the PHY (per-bit
         delays, DQS capture) or in a calibration under load; either rebuilds every bitstream.
   \item \textbf{The fixed loss per k step} (\cref{sec:formats:kstep}) is not yet located in the kernel.
@@ -60,4 +66,6 @@ best configuration, a 32\x8 PE array with transposed A, 1024\x512 tiles and a 22
 \code{aggressive} strategy, computes float32 GEMM at \textbf{\gflops{110.9}}, \SI{96.2}{\percent} of its peak, with
 every result verified and traceable to the bitstream and source that produced it. With the element format as one
 more configuration key, the same kernel source computes int8 GEMM at \SI{426.6}{GOP/s} and int4 at
-\textbf{\SI{1370.9}{GOP/s}}, exactly checked on the card.
+\textbf{\SI{1370.9}{GOP/s}}, exactly checked on the card. A mixed-type copy of the kernel runs DenseShift networks:
+the shift MAC removes the DSPs from int8 GEMM at the same speed, and with float activations it gives 1.7\x\ the
+float32 throughput.

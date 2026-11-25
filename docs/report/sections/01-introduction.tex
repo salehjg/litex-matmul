@@ -34,6 +34,9 @@ hash and the git state, so any number in this report can be traced to the exact 
   \item Integer and fixed-point formats through the same kernel source, with exact verification on the card, up to
         \SI{1370.9}{GOP/s} for int4; and two silent-error causes found on the way, DDR3 read margin under load and
         unchecked tile rules in the kernel (\cref{sec:formats}).
+  \item DenseShift power-of-two weights from training to the card: PyTorch layers, a mixed-type kernel with a shift
+        MAC (40 instead of 1064 DSPs at equal speed; float activations at 1.7\x\ the float32 throughput) and an MNIST
+        network whose layers run on the accelerator with results identical to the CPU (\cref{sec:ds}).
 \end{enumerate}
 
 \paragraph{Results at a glance.} \Cref{tab:headline} lists the configurations that mark the path to the best result.
