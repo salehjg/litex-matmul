@@ -56,6 +56,15 @@ def main():
             print(f"  card {c['build_id']}: {100 * c['card_test_acc']:.2f} % (CPU integer {100 * c['cpu_int_test_acc']:.2f} %), "
                   f"predictions equal: {c['predictions_equal']}, mismatching sums: "
                   f"{sum(l['c_mismatches_vs_cpu'] for l in c['layers'])}")
+    # Over seeds: runs that differ only in the seed (name suffix _s<seed>).
+    groups = {}
+    for r in rows:
+        groups.setdefault(r["run"].rsplit("_s", 1)[0], []).append(r["test_acc"])
+    print()
+    print("| Configuration | Seeds | Mean test acc. | Min | Max |")
+    print("|---|---|---|---|---|")
+    for g, accs in groups.items():
+        print(f"| {g} | {len(accs)} | {sum(accs) / len(accs):.2f} % | {min(accs):.2f} % | {max(accs):.2f} % |")
     if args.csv:
         keys = ["run", "weights", "bits", "grad", "init", "epochs", "test_acc", "best_acc", "decoded_acc", "params", "minutes"]
         with open(args.csv, "w") as f:
