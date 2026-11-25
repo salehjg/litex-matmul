@@ -167,7 +167,11 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 - **C5 `ds_float`** (chain `build/ds_chain.sh`: ds_float → ds_u8 + MNIST uint8 → ds_scale). HLS: PE 32×16 DSP 1064,
   LUT 326.7k, BRAM18 688, 4.209 ns; PE 48×16 DSP 1793, LUT 485.3k, BRAM18 896, 4.374 ns. **Build PE 32×16
   t512×512: timing met (WNS 0.025), LUT 202.5k, FF 319.0k, BRAM 427.5, DSP 1063** (32 min): twice the MACs of the best
-  float32 array (PE 32×8: 1320 DSP, 154.3k LUT) with fewer DSPs. PE 48×16 placed (the LUTs fit despite the HLS
-  estimate).
+  float32 array (PE 32×8: 1320 DSP, 154.3k LUT) with fewer DSPs. **PE 48×16 failed: 303 086 LUTs needed, 298 600 on
+  the device** (DRC UTLZ-1 before placement; an earlier note here that it had placed came from reading the wrong log).
+  PE 40×16 (640 MACs, tile 320×1024, C buffer depth 512) queued as `ds_float2`.
+- **Float activations on the card:** f32×ds3 PE 32×16: 1024³ 179.44, 4096³ 187.59, **8192³ 189.10 GOP/s (92.3 % of
+  204.8), verified bit for bit** against k-order float sums. The best float32 build (multiply-add, PE 32×8, 225 MHz)
+  reached 110.9 GFLOP/s: 1.7× the throughput with 1063 instead of 1320 DSPs.
 - **CIFAR-10 seeds** (in progress): seed 1 gives float32 91.85, 2-bit 91.43 (seed 0: 90.84), 3-bit 91.47: the seed
   spread is up to 0.6 points, so single-seed differences below that mean little.
