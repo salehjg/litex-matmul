@@ -125,3 +125,17 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   split / gather, whole and partial tiles all exact. It goes into `kernels/gemm_mixed/` after the running builds (a
   tree change would make them rerun HLS). (First try: every entry wrong because the testbench decoded B only under
   `MM_MAC_DENSESHIFT`; the MAC itself was right.)
+- **A2 seed 0 done** (`build/ml/cifar/`, 200 epochs, ResNet-20, first conv and FC float):
+  | Weights | Test acc. | vs float32 | Exponent share (|w| = 1, 2, 4, …) |
+  |---|---|---|---|
+  | float32 | 91.68 % | | |
+  | DenseShift 2-bit | 90.84 % | −0.84 | 0.49 / 0.51 |
+  | DenseShift 3-bit | 91.40 % | −0.28 | 0.52 / 0.14 / 0.12 / 0.21 |
+  | DenseShift 4-bit | 90.80 % | −0.88 | 0.33 / 0.12 / 0.11 / 0.10 / 0.10 / 0.09 / 0.07 / 0.07 |
+  | 3-bit, Eq. 7 (no rescale) | 91.36 % | −0.32 | 0.76 / 0.18 / 0.03 / 0.03 |
+  | 3-bit, Kaiming init | 90.50 % | −1.18 | 0.45 / 0.20 / 0.15 / 0.20 |
+  The decoded copies score exactly the same in every run. Paper (ImageNet ResNet-18): float 69.6, 2-bit 68.90, 3-bit
+  70.62, 4-bit 70.94; Eq. 8 +0.3/+0.7. Here 4-bit < 3-bit and Eq. 7 ≈ Eq. 8 with one seed each: seeds 1 and 2 of
+  float32 and 2/3/4-bit are running (`ml/denseshift/run_cifar_seeds.sh`) before drawing conclusions. Eq. 7 piles the
+  exponents up at 0 (76 % of weights at ±1), as Eq. 8 is meant to prevent; low-variance init beats Kaiming by 0.9
+  points even when training from scratch.
