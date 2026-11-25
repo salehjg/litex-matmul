@@ -139,3 +139,11 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
   float32 and 2/3/4-bit are running (`ml/denseshift/run_cifar_seeds.sh`) before drawing conclusions. Eq. 7 piles the
   exponents up at 0 (76 % of weights at ±1), as Eq. 8 is meant to prevent; low-variance init beats Kaiming by 0.9
   points even when training from scratch.
+- **Second build, i8×ds3→i32 PE 32×32: timing met (WNS 0.015), LUT 161.6k, FF 240.2k, BRAM 636.5, DSP 40**
+  (kernel LUT 132.9k, FF 211.1k, RAMB36 507 + RAMB18 37; 24 min). Against the multiply build at the same array:
+  **−1024 DSP, −5.9k LUT, −19.3k FF**, BRAM equal. Per PE (synthesis): 3433 LUT / 4174 FF / 0 DSP against
+  4026 / 4742 / 32. So in Vivado the shift MAC is cheaper than the multiply MAC in every resource; the HLS estimates
+  (+131k LUT for DenseShift) pointed the wrong way. Consequence: with int32 sums, the C buffers (BRAM, 14.5 RAMB36 per
+  PE at PM 32) limit the array for both MACs (~PE 56×32 fits the BRAM; the multiply MAC also fits the DSPs there),
+  so DenseShift's gain on this FPGA is freed DSPs and fewer LUT/FF, not a larger int32 array. With int16 sums the
+  multiply MAC is DSP-bound (≤ ~1880 MACs) while DenseShift PE 32×64 (2048 MACs) fits BRAM: the C3 candidate.
