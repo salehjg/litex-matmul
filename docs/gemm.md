@@ -61,6 +61,15 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   `fixed` | `ufixed` with `data_bits` (8/16/32/64; 2/4 packed) and `frac_bits` (fixed point), no kernel change; the
   kernel accumulates in the element type (integer results wrap). Rows carry `dtype`, `dtype_kind`, `dtype_bits`, … and
   `gops`; `gemm_runner --dtype int8` etc. verifies exactly. Campaigns `configs/dse/dtype_*.json`, `int*_scale.json`.
+- **Mixed formats and DenseShift** ([`docs/notes3/`](notes3/denseshift-plan.md)): `kernel.b_type` / `b_bits` give B its
+  own format and `accum_bits` a wider C; such configs use `kernels/gemm_mixed/` (separate A/B/C types, its own
+  `ORIGIN.md`), all others stay on `kernels/gemm/`. A: `int`/`uint` 2–16 bits or `float`; B: `int`/`uint` (multiply
+  MAC) or `pow2` 2/3/4 bits = DenseShift codes `sign << (n−1) | e`, weight ±2^e, no zero (shift MAC, no multiplier);
+  C: int16/int32 (float32 for float A, where the MAC adds e to A's exponent). Specs look like `int8xdshift3-int32`;
+  `gemm_runner --dtype int8 --b-dtype dshift3 --c-dtype int32` verifies exactly, and `--a-file/--b-file/--c-out`
+  (int64 codes) run given matrices. Training side (PyTorch from the system Python, `/usr/bin/python3`):
+  `ml/denseshift/` (layers, CIFAR-10 ResNet-20, MNIST MLP whose hidden layers run on the card).
+  Campaigns `configs/dse/ds_*.json`; kernel simulation `misc/gemm_mixed_sim/sim.py`.
 - **Verification is exact:** integer and fixed-point formats always. float32 bit for bit against a reference that
   accumulates in the kernel's order (`--float-exact`, default in `gemm_dse.py` and `gemm_run.py`; rows carry
   `verify_exact`).
@@ -88,7 +97,8 @@ misc/crash_debug/arm_crash_capture.sh                       # once per boot (see
   logs; `gemm_build.py <config> --report-only` rewrites the summary), `results/<campaign>/` (JSONL + CSV with build id,
   config hash, git sha, sizes, timing, counters; `invocations.jsonl`; `gemm_dse.py --resume` continues an interrupted
   campaign). All git-ignored.
-- **Layout:** `kernels/gemm/` (adapted HLS C++, changes in `ORIGIN.md`), `hw/gemm/` (SoC, DMA↔DDR bridge, kernel
+- **Layout:** `kernels/gemm/` (adapted HLS C++, changes in `ORIGIN.md`), `kernels/gemm_mixed/` (A/B/C types,
+  DenseShift MAC), `ml/denseshift/` (PyTorch), `hw/gemm/` (SoC, DMA↔DDR bridge, kernel
   wrapper, AXI perf counters, tests), `tcl/` (HLS flow, Vivado hooks, JTAG program), `sw/gemm_host/` (C++: DMA,
   kernel control, `gemm_runner`, `ddr_dma_test`), `flow/gemmflow/` (Python package), `scripts/gemm_*.py`,
   `configs/{gemm,dse}/`, `misc/` (debug cases).
