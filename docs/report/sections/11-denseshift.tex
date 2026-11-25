@@ -154,3 +154,22 @@ codes), so the card's sums are checked bit for bit against float sums in the ker
   \item PE 48\(\times\)16 (768 MACs, 1793 DSP) synthesised but needed 303\,086 LUTs of 298\,600: with the
         multiplier gone, the float adders' LUTs set the limit.
 \end{itemize}
+
+\subsection{Larger arrays}
+\label{sec:ds:scale}
+Without multipliers, the C buffers and the routing set the size. Three builds tested the limits (int8 activations,
+3-bit weights, 200\,MHz unless stated):
+\begin{itemize}
+  \item \textbf{PE 32\(\times\)64 with int16 sums} (2048 MACs; the multiply MAC would need 2048 DSPs, more than the
+        device's 1920): timing met, 190.3k LUT, 638 BRAM tiles, 40 DSP; \textbf{750.9\,GOP/s} at \(8192^3\)
+        (91.7\,\%), exact. Sums wrap at 16 bits, so this suits layers whose sums fit, or a host that splits \(K\).
+  \item \textbf{PE 48\(\times\)32 with int32 sums} (tile 384\(\times\)2048): 91\,\% of the BRAM tiles and
+        76\,\% of the LUTs; the spread-out placement failed timing by 2.5\,ns (a PE's A register to its shift lanes,
+        95\,\% routing), and the SoC and PCIe clocks failed too.
+  \item \textbf{PE 32\(\times\)32 at 250\,MHz}: failed by 0.93\,ns in the HLS dataflow control
+        (\code{ap\_sync}/\code{ap\_ready} fan-out), the limit already met by the large int4 arrays
+        (\cref{sec:formats:wide}), not in the MAC.
+\end{itemize}
+With int32 sums, PE 32\(\times\)32 at 200\,MHz is therefore the practical DenseShift array on this device; its
+value is the freed DSPs and smaller logic rather than a larger array. Narrower C buffers than the C bus (for example
+24-bit sums) would be the next step for larger int32-class arrays.

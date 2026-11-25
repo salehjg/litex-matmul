@@ -12,7 +12,7 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 | B3 | Host: codec, mixed reference, runner options, unit tests | ✅ |
 | C1 | `ds_hls` HLS probe | ✅ |
 | C2 | `ds_same_array` builds + card runs + exact screens | ✅ (screens queued) |
-| C3 | `ds_scale` | 🟡 building |
+| C3 | `ds_scale` | ✅ |
 | C4 | MNIST MLP end to end on the card | ✅ (uint8 and 7-bit activation variants) |
 | C5 | Float activations (stretch) | 🟡 building |
 | D | README / report | ⬜ |
@@ -206,3 +206,6 @@ Plan: [denseshift-plan.md](denseshift-plan.md). Branch `denseshift` from `1ad6b9
 - **ds_scale, PE 32×32 int32 at 250 MHz: timing failed, WNS −0.932 ns** on the accelerator clock. Worst path:
   `ProcessingElement_4` counter → `ap_sync_reg_ProcessingElement_26_U0_ap_ready` reset, 4.23 ns, 7 levels, 82 %
   routing: the HLS dataflow control fan-out that already limited the int4 arrays (notes2), not the shift MAC.
+- **C3 done.** PE 32×64 int8×ds3→int16 on the card: 1024³ 358.93 (M = 1024 fills half of the 2048-wide tile),
+  4096³ 739.64, **8192³ 750.91 GOP/s (91.7 % of 819.2), exact** (sums wrap at 16 bits and are checked so). 40 DSPs.
+  With int32 sums the largest array that closes stays PE 32×32 (PE 48×32: congestion; 250 MHz: dataflow control).
